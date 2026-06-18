@@ -1,0 +1,63 @@
+/**
+ * Baseline design tokens for the platform (the "Amber & Grain" defaults).
+ *
+ * Values are space-separated RGB channels so Tailwind opacity modifiers work:
+ *   bg-primary       -> rgb(var(--ag-primary) / 1)
+ *   bg-primary/40    -> rgb(var(--ag-primary) / 0.4)
+ *
+ * These are only DEFAULTS. TenantThemeProvider overrides any of these variables
+ * at runtime with the active tenant's brand colors — no per-tenant CSS files.
+ */
+:root {
+  --ag-font-sans: "Plus Jakarta Sans", sans-serif;
+  --ag-font-serif: "Literata", serif;
+
+  --ag-primary: 140 80 0;
+  --ag-on-primary: 255 255 255;
+  --ag-primary-container: 232 148 58;
+  --ag-on-primary-container: 92 50 0;
+  --ag-primary-fixed: 255 220 191;
+  --ag-primary-fixed-dim: 255 184 115;
+  --ag-on-primary-fixed: 45 22 0;
+  --ag-on-primary-fixed-variant: 106 59 0;
+  --ag-inverse-primary: 255 184 115;
+
+  --ag-secondary: 117 91 0;
+  --ag-on-secondary: 255 255 255;
+  --ag-secondary-container: 253 207 73;
+  --ag-on-secondary-container: 113 88 0;
+  --ag-secondary-fixed: 255 224 143;
+  --ag-secondary-fixed-dim: 238 193 60;
+  --ag-on-secondary-fixed: 36 26 0;
+  --ag-on-secondary-fixed-variant: 88 68 0;
+
+  --ag-tertiary: 95 94 91;
+  --ag-on-tertiary: 255 255 255;
+  --ag-tertiary-fixed: 229 226 222;
+
+  --ag-background: 252 249 248;
+  --ag-on-background: 28 27 27;
+
+  --ag-surface: 252 249 248;
+  --ag-surface-dim: 220 217 217;
+  --ag-surface-bright: 252 249 248;
+  --ag-surface-variant: 229 226 225;
+  --ag-surface-tint: 140 80 0;
+  --ag-surface-container-lowest: 255 255 255;
+  --ag-surface-container-low: 246 243 242;
+  --ag-surface-container: 240 237 237;
+  --ag-surface-container-high: 234 231 231;
+  --ag-surface-container-highest: 229 226 225;
+  --ag-on-surface: 28 27 27;
+  --ag-on-surface-variant: 83 68 55;
+  --ag-inverse-surface: 49 48 48;
+  --ag-inverse-on-surface: 243 240 239;
+
+  --ag-outline: 134 116 101;
+  --ag-outline-variant: 217 195 177;
+
+  --ag-error: 186 26 26;
+  --ag-on-error: 255 255 255;
+  --ag-error-container: 255 218 214;
+  --ag-on-error-container: 147 0 10;
+}

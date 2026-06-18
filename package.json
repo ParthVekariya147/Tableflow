@@ -1,0 +1,26 @@
+{
+  "name": "amber-grain",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-tenant restaurant ordering platform. One codebase, many branded tenants.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "db:generate": "pnpm --filter @amber/api prisma:generate",
+    "db:migrate": "pnpm --filter @amber/api prisma:migrate",
+    "db:seed": "pnpm --filter @amber/api prisma:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}

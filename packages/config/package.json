@@ -1,0 +1,34 @@
+{
+  "name": "@amber/config",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json",
+    "./tsconfig/react-app.json": "./tsconfig/react-app.json",
+    "./tsconfig/nest.json": "./tsconfig/nest.json",
+    "./eslint/base": "./eslint/base.mjs",
+    "./eslint/react": "./eslint/react.mjs",
+    "./tailwind/preset": "./tailwind/preset.cjs",
+    "./tailwind/tokens": "./tailwind/tokens.cjs"
+  },
+  "files": ["tsconfig", "eslint", "tailwind"],
+  "peerDependencies": {
+    "eslint": "^9.0.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.5.0"
+  },
+  "peerDependenciesMeta": {
+    "eslint": { "optional": true },
+    "tailwindcss": { "optional": true }
+  },
+  "dependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "typescript-eslint": "^8.18.2"
+  }
+}

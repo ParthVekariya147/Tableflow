@@ -1,0 +1,128 @@
+// Multi-tenant data model. Tenant is the root; every other row carries a
+// tenantId so the API can scope all access to one restaurant. This is the
+// "rows in a tenants table" model from the architecture diagram.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  currency  String   @default("USD")
+  taxRate   Float    @default(0)
+  active    Boolean  @default(true)
+  // ThemeConfig (colors/typography/logo/mode) as JSON — see @amber/domain.
+  theme     Json
+  createdAt DateTime @default(now())
+
+  tables     Table[]
+  categories MenuCategory[]
+  menuItems  MenuItem[]
+  orders     Order[]
+}
+
+model Table {
+  id       String  @id @default(cuid())
+  tenantId String
+  label    String
+  qrToken  String  @unique
+  seats    Int?
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders   Order[]
+
+  @@index([tenantId])
+}
+
+model MenuCategory {
+  id        String @id @default(cuid())
+  tenantId  String
+  name      String
+  sortOrder Int    @default(0)
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model MenuItem {
+  id          String  @id @default(cuid())
+  tenantId    String
+  name        String
+  description String  @default("")
+  price       Int // minor units (cents)
+  category    String
+  badge       String?
+  imageUrl    String?
+  available   Boolean @default(true)
+  sortOrder   Int     @default(0)
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, category])
+}
+
+enum OrderStatus {
+  open
+  billed
+  paid
+  closed
+}
+
+enum RoundType {
+  instant
+  bundled
+}
+
+enum ItemStatus {
+  placed
+  preparing
+  served
+  cancelled
+}
+
+model Order {
+  id        String      @id @default(cuid())
+  tenantId  String
+  tableId   String
+  status    OrderStatus @default(open)
+  createdAt DateTime    @default(now())
+  closedAt  DateTime?
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  table     Table       @relation(fields: [tableId], references: [id])
+  rounds    Round[]
+
+  @@index([tenantId])
+  @@index([tableId])
+}
+
+model Round {
+  id        String      @id @default(cuid())
+  orderId   String
+  type      RoundType
+  createdAt DateTime    @default(now())
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items     OrderItem[]
+
+  @@index([orderId])
+}
+
+model OrderItem {
+  id         String     @id @default(cuid())
+  roundId    String
+  menuItemId String
+  name       String
+  unitPrice  Int // snapshot, minor units
+  qty        Int
+  status     ItemStatus @default(placed)
+  notes      String?
+  round      Round      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@index([roundId])
+}

@@ -34,7 +34,7 @@
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  background-color: #e8943a;
+  background-color: rgb(var(--ag-primary-container));
   opacity: 0.4;
   animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

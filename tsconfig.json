@@ -1,0 +1,9 @@
+{
+  "//": "Root tsconfig for editor convenience. Each package/app has its own tsconfig extending @amber/config/tsconfig/*.",
+  "extends": "./packages/config/tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "files": [],
+  "include": []
+}

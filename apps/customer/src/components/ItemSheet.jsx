@@ -23,16 +23,18 @@ export default function ItemSheet() {
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — above the bottom nav (z-50) so the modal fully covers it */}
       <div
-        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+        className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
         onClick={() => { setSheetItem(null); setQty(1); }}
       />
       {/* Sheet */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 slide-up md:max-w-md md:left-1/2 md:-translate-x-1/2">
-        <div className="bg-surface rounded-t-3xl overflow-hidden shadow-2xl">
+      <div className="fixed bottom-0 left-0 right-0 z-[60] slide-up md:max-w-md md:left-1/2 md:-translate-x-1/2">
+        <div className="bg-surface rounded-t-3xl overflow-hidden shadow-2xl max-h-[92vh] flex flex-col">
           {/* Image */}
-          <div className="h-52 overflow-hidden relative">
+          <div className="h-72 overflow-hidden relative flex-shrink-0">
+            {/* Drag handle */}
+            <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-10 w-10 h-1.5 rounded-full bg-white/70" />
             <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
             <button
               onClick={() => { setSheetItem(null); setQty(1); }}
@@ -48,7 +50,7 @@ export default function ItemSheet() {
           </div>
 
           {/* Content */}
-          <div className="p-5">
+          <div className="p-5 overflow-y-auto">
             <div className="flex justify-between items-start mb-1">
               <h2 className="text-[22px] font-bold text-on-surface font-serif flex-1 pr-4">{item.name}</h2>
               <span className="text-[22px] font-bold text-primary">${item.price.toFixed(2)}</span>
@@ -75,8 +77,8 @@ export default function ItemSheet() {
               </div>
             </div>
 
-            {/* Action buttons */}
-            <div className="flex gap-3 pb-6">
+            {/* Action buttons — extra bottom padding clears the phone's home indicator */}
+            <div className="flex gap-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
               <button
                 onClick={handleBringIt}
                 className="flex-1 bg-primary text-on-primary font-bold py-3.5 rounded-full flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md"

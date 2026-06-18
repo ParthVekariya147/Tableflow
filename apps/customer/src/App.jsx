@@ -24,7 +24,7 @@ export default function App() {
             <Route path="/order"   element={<MyOrderScreen />} />
             <Route path="/status"  element={<StatusScreen />} />
             <Route path="/bill"    element={<BillScreen />} />
-          </Routes>term
+          </Routes>
           <BottomNav />
         </div>
       </MemoryRouter>
