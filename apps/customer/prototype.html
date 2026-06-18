@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+  <title>Amber & Grain — Table 7</title>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,600;7..72,700&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet"/>
+
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-highest": "#e5e2e1",
+            "surface-container":         "#f0eded",
+            "primary-fixed":             "#ffdcbf",
+            "on-secondary-container":    "#715800",
+            "surface-container-high":    "#eae7e7",
+            "secondary-container":       "#fdcf49",
+            "surface-container-low":     "#f6f3f2",
+            "surface":                   "#fcf9f8",
+            "surface-container-lowest":  "#ffffff",
+            "secondary":                 "#755b00",
+            "on-tertiary-container":     "#3d3d3a",
+            "error":                     "#ba1a1a",
+            "on-primary-container":      "#5c3200",
+            "background":                "#fcf9f8",
+            "on-surface-variant":        "#534437",
+            "on-error":                  "#ffffff",
+            "outline":                   "#867465",
+            "on-background":             "#1c1b1b",
+            "on-primary":                "#ffffff",
+            "outline-variant":           "#d9c3b1",
+            "surface-bright":            "#fcf9f8",
+            "primary-container":         "#e8943a",
+            "on-surface":                "#1c1b1b",
+            "tertiary":                  "#5f5e5b",
+            "primary":                   "#8c5000",
+            "surface-dim":               "#dcd9d9",
+            "surface-variant":           "#e5e2e1",
+          },
+          fontFamily: {
+            sans: ["Plus Jakarta Sans", "sans-serif"],
+            serif: ["Literata", "serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.25rem",
+            lg: "0.5rem",
+            xl: "0.75rem",
+            "2xl": "1rem",
+            full: "9999px",
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #fcf9f8; color: #1c1b1b; -webkit-font-smoothing: antialiased; }
+    h1,h2,h3,.font-serif { font-family: 'Literata', serif; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    .dashed-divider {
+      background-image: linear-gradient(to right, currentColor 50%, transparent 50%);
+      background-size: 8px 1px; background-repeat: repeat-x;
+      height: 1px; opacity: 0.2;
+    }
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.9); opacity: 0.6; }
+      50%  { transform: scale(1.2); opacity: 0;   }
+      100% { transform: scale(0.9); opacity: 0;   }
+    }
+    .pulse-ring {
+      position: absolute; inset: 0; border-radius: 9999px;
+      background-color: #e8943a; opacity: 0.4;
+      animation: pulse-ring 2s cubic-bezier(0.4,0,0.6,1) infinite;
+    }
+    @keyframes slide-up {
+      from { transform: translateY(100%); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    .slide-up { animation: slide-up 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+    @keyframes slide-in-right {
+      from { transform: translateX(100%); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+    .slide-in-right { animation: slide-in-right 0.28s cubic-bezier(0.34,1.2,0.64,1) forwards; }
+
+    @keyframes pop-in {
+      0%   { transform: scale(0.85); opacity: 0; }
+      70%  { transform: scale(1.05); }
+      100% { transform: scale(1);    opacity: 1; }
+    }
+    .pop-in { animation: pop-in 0.22s ease forwards; }
+
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0);   }
+    }
+    .fade-in { animation: fade-in 0.25s ease forwards; }
+
+    .toast {
+      position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+      background: #1c1b1b; color: #fcf9f8; border-radius: 100px;
+      padding: 10px 20px; font-size: 13px; font-weight: 600;
+      white-space: nowrap; z-index: 200; pointer-events: none;
+      animation: slide-up 0.3s ease forwards;
+    }
+    .ms { font-family: 'Material Symbols Outlined'; font-weight: 400; font-style: normal; font-size: 20px; line-height: 1; letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; word-wrap: normal; direction: ltr; font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24; }
+    .ms-fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    .ms-sm { font-size: 16px; }
+    .ms-lg { font-size: 24px; }
+
+    .screen { position: absolute; inset: 0; background: #fcf9f8; overflow-y: auto; overflow-x: hidden; }
+    .screen-stack { position: relative; width: 100%; min-height: 100vh; overflow: hidden; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const { createRoot } = ReactDOM;
+
+// ─── MOCK DATA ───────────────────────────────────────────────────────────────
+const RESTAURANT = { name: "Amber & Grain", table: 7, address: "124 Morning Dew Lane", hours: "Open 7am – 3pm" };
+
+const MENU = {
+  "Drinks": [
+    { id:"d1", name:"The Morning Ritual Pour", desc:"Signature house blend, slow-poured over ice with vanilla & oat milk", price:6.50, img:"https://lh3.googleusercontent.com/aida-public/AB6AXuDlpovTiSMjy4ZREtS4RrSxmhPBITr9LIIMervJ6Q-bD7RU-Uss-5MW_XfHiObEA_6_pT9evBwYAIJbz8LW6mvYiEUcAy-GJY1_uR_sV_rWoZ65s3NAOm6OwBi8be2HIn9EbFKd_u80fNZSY1py-UXksY3IJjm-gg9CnMYFvV4415J6rsLnjSZlbjdshTOYA15ZO4qRWCTYUbIGNM2sVrgn6V752xU2N2jcVrf-UTwIwPjA1YIo-Boa4g6tk_UraRvFSxHFKGzo4FI", tag:"Signature" },
+    { id:"d2", name:"Classic Cortado",          desc:"Two parts espresso, two parts steamed milk. Nothing more, nothing less", price:4.50, img:"https://lh3.googleusercontent.com/aida-public/AB6AXuA5lK_H6jmtsIswFMnoM8frI59-l8V1rxY1j2gLvjXeVGH476Lj0Kq3MJ3EAqXFn9y6mH9doIKssfBz2h4UKTjmMNUZyGTxjwdkYIJiaLqRLqVD9F-TkJGTzkGvA74C-nQe9h4qGOAUAdQl47ZbAKXo2Ma0ZOyTDHLfYDaUhwygCW_0pQE-bTwo6HNUgEKnqBAJSXkk9emV0V0V89NASb6BELFHW2c-r1S9QxmYA-F_xl25n7TnZSDKemQeBTfdD675HAQYko56T1A" },
+    { id:"d3", name:"Masala Chai",              desc:"House-made spice blend with oat milk, lightly sweetened", price:6.00,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuCp8YLLw1DHUF25RsuYbcdPkuJzfJnEInqP-F2Fje30t15sYSxosievU51xZZlNx5UoPo0cuRQPKUnRpMOqXfBT_8hOUMqgQ-YPkKSdEIxiBCzZ3BtQ-GVWq9cONPkP63QF0PV325J1C4OExjDk7pqucul7lHGH74LoMP6GLjToGOhTfuAKPav8yA3hw6Xpz3CHudJuisEPK1uvTs4PJq4CTKWGoNdHeVsMWY8SZWcsIL6Omzf2O-CdtfXLevM7VCuQMwYIwYZjHCk" },
+    { id:"d4", name:"Still Water",              desc:"Chilled still water",                                                   price:0,    img:"https://lh3.googleusercontent.com/aida-public/AB6AXuDJavOR4wTwQc2RsrFtvoD4oFU391qypA3HIq3etwzGWfsbSGHzDay7WGLhaFl4MWIkMIh07KimrLlB45Xnkj3MLoxl6_IKeYgsaFmIZnGnZWrNy76rPkqFoSo88tZCTJHfqhyE0F31PQ8Glgh7Q7WAoCCp0S5vWFetvC1xMjIl8xD6B0eBMQ5G11CmH0tssxIe6I7E81VEL0ZaBX70efp7ZzBT6x3I2UTKOHmO6Of_D1Q8FGv8clRux9EcAHDZBaHpqGDqxyADKlo", free:true },
+    { id:"d5", name:"Sparkling Water",          desc:"Chilled sparkling water",                                               price:4.00,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuCb854B2z1jRxzunOrx04qDgJBTiojgkpRlPaiPBQATWPhwOE29SAreY1OKdlatJgMvRr3c_0FGfgOHuIXUDxcmIj7xsWW2vGF5zYVl0-ZH9zW2qndueIHkphtAj4Xwnn55KGBnRv6o5F040ZRWfwh187Y2TKZiLL0q5sUIm9qhhcpfpC3YUmhFqLC_v3ZT0vgDailx5A_8XuNNqWAtq0xtrzr9_p0qR0G3g14ETeofyHobWX9w184IQpup7LxCwcYh8nT-LEPJUNc" },
+    { id:"d6", name:"Lemon Mint Water",         desc:"Fresh lemon, garden mint, cold filtered water",                         price:2.00,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuA5UTz62opXtYxb_NMAa2Mnod6O47jy3V9SaoKf3QIaSn8APJYS6xnqjzdU7lQdiq87vRGdNJ1oT34nWb5GI8btk1jYcrP9pzr7G3_Hazr4PnxQGNsc1uJ_X-62HNgg7IFuoHYQ-ThTyqb4xl34gmAocx4aLssvaqgpjRK85LG-zfUSJHBiZ1irHMQCcH-Vux1wVx2L093oW5RerMsCFkYBvUlZi1ZxYA7nbc521S9XhZuRHTuWvVpKJOYZW2kl6QFCpL-qHgHXl08" },
+  ],
+  "Food": [
+    { id:"f1", name:"Smashed Avocado Toast", desc:"Sourdough, heirloom tomato, dukkah, poached egg optional", price:12.00, img:"https://lh3.googleusercontent.com/aida-public/AB6AXuAGD11al_th_hYgOWCCywus684ZqeCYjsWnXQGt7axYTldRITcmiU2WODkvLDGtrbVZ9zEFha7U_UCKnBbA8uulheTHnabGI-_3FKIaecg57ImHokSR46LEI4JM5_HT3KaVO39vCOhXLDqIrpVeN96DfeWl9rzZUSoz8TeREX2hPuFv204vEy5csmNiMK8nmalfGJW30sh8s9MQs_vD8vind8_I2C8XES0IRn4PL36iY6nza46cCaD6SL_1sa5B1vCjxZLA5IxQUi8" },
+    { id:"f2", name:"Almond Croissant",      desc:"Twice-baked, frangipane filled, dusted with icing sugar",                price:5.50,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuBwmC9unwfsk2EN4bZWaVlFm7LvyT-7hSPcnudzdWmf8YkXDjbh13tePA4opxVNrJGYZsnqqHjWYitJEv_C6LUhHL9H_kcQn2-Ohc8ZOmN8Gvn41ou6Fw11S5MyP9UZ-jZvpuk1ZYHwfxPoXlu9zvjuHyKjCPzSI6_L_e7Gu6izr30NtTQfS-Kp_NlHzMBgPXS74bgtEyzVLzqufUYgAEz1k7G4RQULDUkIXaR7s3tVTz94EWiUoxX_-wKGpL9sNq77Y0pge7ocZQ0" },
+    { id:"f3", name:"Bread Basket",          desc:"House-baked sourdough, cultured butter, sea salt",                        price:8.00,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuBwmC9unwfsk2EN4bZWaVlFm7LvyT-7hSPcnudzdWmf8YkXDjbh13tePA4opxVNrJGYZsnqqHjWYitJEv_C6LUhHL9H_kcQn2-Ohc8ZOmN8Gvn41ou6Fw11S5MyP9UZ-jZvpuk1ZYHwfxPoXlu9zvjuHyKjCPzSI6_L_e7Gu6izr30NtTQfS-Kp_NlHzMBgPXS74bgtEyzVLzqufUYgAEz1k7G4RQULDUkIXaR7s3tVTz94EWiUoxX_-wKGpL9sNq77Y0pge7ocZQ0" },
+    { id:"f4", name:"Loaded Nachos",         desc:"House tortilla chips, jalapeños, sour cream, guacamole",                  price:12.00, img:"https://lh3.googleusercontent.com/aida-public/AB6AXuASGtO1wOlaG46NwqeInNW5TTcSnoJAOR8JV6I5_4Cc4THHgFoLBkLDa00sQoYZ_jKRUAMzpMkmhGJW4ROqn3ihwjxHCDxeexw3a0wKvaGBO_J-tLGTYkB84ZB8uh8RAQd9BFcnNN5QNMMF0T7jt3ZRqYirmlU_lA0XC-rmWjRSZAsab0QJ8AAW1SX3o4i12tQbSaTVHU_mKk3zHiGBT5qXe97dnVBw35cA7RNklvtdjnk82bGCm7383__nKzMvaMuTdqpVvWOJojc" },
+  ],
+  "Specials": [
+    { id:"s1", name:"Pour Over — Ethiopia",  desc:"Bright, fruity single origin. Filter-grade grind, 12 min brew",           price:7.00,  img:"https://lh3.googleusercontent.com/aida-public/AB6AXuDlpovTiSMjy4ZREtS4RrSxmhPBITr9LIIMervJ6Q-bD7RU-Uss-5MW_XfHiObEA_6_pT9evBwYAIJbz8LW6mvYiEUcAy-GJY1_uR_sV_rWoZ65s3NAOm6OwBi8be2HIn9EbFKd_u80fNZSY1py-UXksY3IJjm-gg9CnMYFvV4415J6rsLnjSZlbjdshTOYA15ZO4qRWCTYUbIGNM2sVrgn6V752xU2N2jcVrf-UTwIwPjA1YIo-Boa4g6tk_UraRvFSxHFKGzo4FI", tag:"Today" },
+    { id:"s2", name:"Mushroom on Toast",     desc:"Wild mushrooms, truffle oil, parmesan, sourdough",                        price:14.00, img:"https://lh3.googleusercontent.com/aida-public/AB6AXuAGD11al_th_hYgOWCCywus684ZqeCYjsWnXQGt7axYTldRITcmiU2WODkvLDGtrbVZ9zEFha7U_UCKnBbA8uulheTHnabGI-_3FKIaecg57ImHokSR46LEI4JM5_HT3KaVO39vCOhXLDqIrpVeN96DfeWl9rzZUSoz8TeREX2hPuFv204vEy5csmNiMK8nmalfGJW30sh8s9MQs_vD8vind8_I2C8XES0IRn4PL36iY6nza46cCaD6SL_1sa5B1vCjxZLA5IxQUi8", tag:"Today" },
+  ]
+};
+
+const ALL_ITEMS = Object.values(MENU).flat();
+const CATEGORIES = ["All", ...Object.keys(MENU)];
+
+let orderIdCounter = 1000;
+const genId = () => (++orderIdCounter).toString();
+
+// ─── GLOBAL STATE (lifted up) ─────────────────────────────────────────────────
+// myOrder = items held but NOT yet sent (basket)
+// sentRounds = [{id, items, sentAt, status}] — sent to kitchen
+// toast helpers
+// screen stack navigation
+
+const App = () => {
+  const [screen, setScreen]         = useState("splash");   // splash|welcome|menu|myorder|status|receipt
+  const [prevScreen, setPrevScreen] = useState(null);
+  const [category, setCategory]     = useState("All");
+
+  // My Order (basket — not yet sent)
+  const [myOrder, setMyOrder]       = useState([]);  // [{item, qty, note}]
+
+  // Sent rounds (committed to kitchen)
+  const [rounds, setRounds]         = useState([]);  // [{id, label, items, sentAt, status}]
+
+  // Toast
+  const [toast, setToast]           = useState(null);
+  const toastTimer                  = useRef(null);
+
+  // Bill requested
+  const [billRequested, setBillRequested] = useState(false);
+
+  const showToast = useCallback((msg) => {
+    clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const navigate = (to, from) => {
+    setPrevScreen(from || screen);
+    setScreen(to);
+    window.scrollTo(0,0);
+  };
+
+  // ── Ordering logic ──────────────────────────────────────────────────────────
+
+  const myOrderCount = myOrder.reduce((s,l) => s + l.qty, 0);
+  const myOrderTotal = myOrder.reduce((s,l) => s + l.qty * l.item.price, 0);
+
+  const addToMyOrder = (item) => {
+    setMyOrder(prev => {
+      const existing = prev.find(l => l.item.id === item.id);
+      if (existing) return prev.map(l => l.item.id === item.id ? {...l, qty: l.qty+1} : l);
+      return [...prev, { item, qty:1, note:"" }];
+    });
+    showToast(`Added to My Order`);
+  };
+
+  const updateQty = (itemId, delta) => {
+    setMyOrder(prev => {
+      const updated = prev.map(l => l.item.id === itemId ? {...l, qty: Math.max(0, l.qty+delta)} : l);
+      return updated.filter(l => l.qty > 0);
+    });
+  };
+
+  const updateNote = (itemId, note) => {
+    setMyOrder(prev => prev.map(l => l.item.id === itemId ? {...l, note} : l));
+  };
+
+  const removeFromMyOrder = (itemId) => {
+    setMyOrder(prev => prev.filter(l => l.item.id !== itemId));
+  };
+
+  // "Bring it" — send a single item immediately to kitchen
+  const bringIt = (item) => {
+    const round = {
+      id: genId(),
+      label: `Sent ${new Date().toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'})}`,
+      items: [{ item, qty:1, note:"" }],
+      sentAt: new Date(),
+      status: "Placed"
+    };
+    setRounds(prev => [...prev, round]);
+    showToast(`${item.name} sent to kitchen ✓`);
+    // Start auto-advancing after short delay (simulate kitchen)
+    startStatusSim(round.id);
+  };
+
+  // "Bring these" — send everything in My Order
+  const bringThese = () => {
+    if (myOrder.length === 0) return;
+    const round = {
+      id: genId(),
+      label: `Round ${rounds.length + 1} · ${new Date().toLocaleTimeString('en-AU', {hour:'2-digit', minute:'2-digit'})}`,
+      items: [...myOrder],
+      sentAt: new Date(),
+      status: "Placed"
+    };
+    setRounds(prev => [...prev, round]);
+    setMyOrder([]);
+    showToast(`Your order is on its way ✓`);
+    startStatusSim(round.id);
+    navigate("status");
+  };
+
+  // Simulate kitchen status progression
+  const startStatusSim = (roundId) => {
+    setTimeout(() => {
+      setRounds(prev => prev.map(r => r.id === roundId ? {...r, status:"Preparing"} : r));
+    }, 6000);
+    setTimeout(() => {
+      setRounds(prev => prev.map(r => r.id === roundId ? {...r, status:"Served"} : r));
+    }, 14000);
+  };
+
+  const sessionTotal = rounds.reduce((s, r) => s + r.items.reduce((rs,l) => rs + l.qty * l.item.price, 0), 0);
+  const activeRounds = rounds.filter(r => r.status !== "Served");
+  const pendingCount = rounds.reduce((s,r) => r.status !== "Served" ? s + r.items.reduce((rs,l) => rs+l.qty,0) : s, 0);
+
+  const props = {
+    navigate, category, setCategory,
+    myOrder, myOrderCount, myOrderTotal,
+    addToMyOrder, updateQty, updateNote, removeFromMyOrder,
+    bringIt, bringThese,
+    rounds, sessionTotal, activeRounds, pendingCount,
+    billRequested, setBillRequested,
+    showToast
+  };
+
+  return (
+    <div className="relative w-full min-h-screen max-w-md mx-auto overflow-hidden" style={{boxShadow:"0 0 60px rgba(0,0,0,0.06)"}}>
+      {screen === "splash"   && <SplashScreen   {...props} key="splash" />}
+      {screen === "welcome"  && <WelcomeScreen  {...props} key="welcome" />}
+      {screen === "menu"     && <MenuScreen     {...props} key="menu" />}
+      {screen === "myorder"  && <MyOrderScreen  {...props} key="myorder" />}
+      {screen === "status"   && <StatusScreen   {...props} key="status" />}
+      {screen === "receipt"  && <ReceiptScreen  {...props} key="receipt" />}
+
+      {/* Bottom nav — shown on all except splash */}
+      {screen !== "splash" && <BottomNav screen={screen} navigate={navigate} myOrderCount={myOrderCount} pendingCount={pendingCount} />}
+
+      {/* Toast */}
+      {toast && <div className="toast" key={toast}>{toast}</div>}
+    </div>
+  );
+};
+
+// ─── BOTTOM NAV ──────────────────────────────────────────────────────────────
+const BottomNav = ({ screen, navigate, myOrderCount, pendingCount }) => {
+  const tabs = [
+    { id:"menu",    label:"Menu",      icon:"restaurant_menu" },
+    { id:"myorder", label:"My Order",  icon:"shopping_bag",   badge: myOrderCount },
+    { id:"status",  label:"Status",    icon:"auto_timer",     badge: pendingCount },
+    { id:"receipt", label:"Bill",      icon:"receipt_long" },
+  ];
+  return (
+    <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md z-50 bg-surface/90 backdrop-blur-xl shadow-[0px_-1px_0px_rgba(0,0,0,0.06)] rounded-t-3xl">
+      <div className="flex justify-around items-center px-4 py-3">
+        {tabs.map(tab => {
+          const active = screen === tab.id;
+          return (
+            <button key={tab.id} onClick={() => navigate(tab.id)} className={`flex flex-col items-center gap-0.5 relative transition-all duration-200 ${active ? "text-primary" : "text-on-surface-variant"}`}>
+              <div className="relative">
+                <span className={`ms ${active ? "ms-fill" : ""}`} style={{fontSize:24}}>{tab.icon}</span>
+                {tab.badge > 0 && (
+                  <span className="absolute -top-1 -right-1.5 bg-primary text-on-primary text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center pop-in">{tab.badge}</span>
+                )}
+              </div>
+              <span className={`text-[11px] font-semibold leading-none ${active ? "" : "font-medium"}`}>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+};
+
+// ─── SHARED TOPBAR ───────────────────────────────────────────────────────────
+const TopBar = ({ title, showBack, onBack, right }) => (
+  <header className="sticky top-0 z-40 bg-surface/85 backdrop-blur-md border-b border-outline-variant/30">
+    <div className="flex items-center justify-between px-5 h-14">
+      <button onClick={onBack} className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-container transition-colors">
+        <span className="ms" style={{fontSize:22}}>{showBack ? "arrow_back" : "local_cafe"}</span>
+      </button>
+      <h1 className="font-serif text-[18px] font-semibold text-primary">{title}</h1>
+      {right || <div className="w-9 h-9" />}
+    </div>
+  </header>
+);
+
+// ─── SPLASH SCREEN ───────────────────────────────────────────────────────────
+const SplashScreen = ({ navigate }) => {
+  const [reserved, setReserved] = useState(false);
+
+  const handleReserve = () => {
+    setReserved(true);
+    setTimeout(() => navigate("welcome"), 1200);
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-between px-6 py-10 relative overflow-hidden bg-[#FDFAF6]">
+      {/* bg orbs */}
+      <div className="absolute -top-20 -left-20 w-64 h-64 rounded-full bg-primary-fixed opacity-20 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 -right-20 w-64 h-64 rounded-full bg-secondary-container opacity-15 blur-3xl pointer-events-none" />
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 z-10 w-full max-w-xs text-center">
+        {/* Logo */}
+        <div className="w-24 h-24 rounded-full overflow-hidden ring-4 ring-white shadow-lg">
+          <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuDNhcHj3Wp4Zq6hNyv5_poqVR_JPYtwDJ2Fe9yVvEFOo_524a0wPfQlnHX-x69P65V2ut3wT8cBAvFfM0gPc44yErQXVFQiJnpIZCXn5X7pIIByPo7gA4AdAJ7-fbDZmVRm1UB5i8QcKYq2snE6CKP1wJ7mAZGRuHQ_NtKLn3rrpxUa4W7wM2Z7s-C8e2xdKG0HB3Sfq_7G4YH8Yt_3oqhKgRoJO-_Jd3pSrQyJ9FlC6oj_vkflsPZlh4om_DKFOYgifhWoDgj8pBM" alt="Amber & Grain" className="w-full h-full object-cover" />
+        </div>
+
+        <div>
+          <h1 className="font-serif text-4xl font-bold text-on-surface mb-1">Amber & Grain</h1>
+          <p className="text-on-surface-variant text-sm">{RESTAURANT.address} · {RESTAURANT.hours}</p>
+        </div>
+
+        {/* Table chip */}
+        <div className="bg-primary-container text-on-primary-container font-bold px-5 py-2 rounded-full flex items-center gap-2 shadow-sm">
+          <span className="ms ms-fill ms-sm">table_restaurant</span>
+          <span>Table {RESTAURANT.table}</span>
+        </div>
+
+        {/* Status */}
+        <div className="flex items-center gap-2 text-on-surface-variant text-sm min-h-[24px]">
+          {!reserved ? (
+            <><div className="w-2 h-2 rounded-full bg-primary animate-pulse" /><span>Ready to reserve your table</span></>
+          ) : (
+            <div className="fade-in flex items-center gap-2 text-primary font-semibold">
+              <span className="ms ms-fill ms-sm">check_circle</span>
+              <span>Table reserved!</span>
+            </div>
+          )}
+        </div>
+
+        {/* CTA */}
+        <button
+          onClick={handleReserve}
+          disabled={reserved}
+          className="w-full bg-primary text-on-primary font-semibold py-4 rounded-full shadow-md active:scale-[0.97] transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+        >
+          {reserved ? "Taking you in…" : "Reserve this table"}
+          <span className="ms ms-sm">{reserved ? "hourglass_empty" : "arrow_forward"}</span>
+        </button>
+      </div>
+
+      <p className="text-xs text-on-surface-variant/50 z-10">Scan · Order · Enjoy. No app needed.</p>
+    </div>
+  );
+};
+
+// ─── WELCOME SCREEN ───────────────────────────────────────────────────────────
+const WelcomeScreen = ({ navigate, bringIt, showToast }) => {
+  const quickItems = [
+    MENU["Drinks"][3], // Still water
+    MENU["Drinks"][4], // Sparkling
+    MENU["Drinks"][5], // Lemon mint
+    MENU["Drinks"][2], // Masala chai
+    MENU["Food"][2],   // Bread basket
+    MENU["Food"][0],   // Avo toast
+  ];
+
+  return (
+    <div className="min-h-screen pb-24 fade-in">
+      <TopBar title="Amber & Grain" onBack={() => navigate("splash")} />
+
+      <div className="px-5 pt-6 pb-4">
+        <div className="inline-flex items-center bg-primary-container text-on-primary-container px-3 py-1 rounded-full mb-3">
+          <span className="ms ms-fill ms-sm mr-1">table_restaurant</span>
+          <span className="text-sm font-bold">Table {RESTAURANT.table}</span>
+        </div>
+        <h2 className="font-serif text-3xl font-bold text-on-surface mb-1">Welcome in</h2>
+        <p className="text-on-surface-variant">Can we start you off with something?</p>
+      </div>
+
+      {/* Quick-start scroll */}
+      <div className="pl-5 mb-6">
+        <h3 className="text-base font-semibold text-on-surface mb-3">While you settle in</h3>
+        <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-2 pr-5">
+          {quickItems.map(item => (
+            <QuickCard key={item.id} item={item} bringIt={bringIt} navigate={navigate} />
+          ))}
+        </div>
+      </div>
+
+      {/* Featured */}
+      <div className="px-5 mb-6">
+        <h3 className="text-base font-semibold text-on-surface mb-3">Today's special</h3>
+        <div
+          onClick={() => navigate("menu")}
+          className="relative rounded-2xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform shadow-sm"
+          style={{height:180}}
+        >
+          <img src={MENU["Specials"][0].img} alt={MENU["Specials"][0].name} className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 p-4 text-white">
+            <span className="text-xs font-bold uppercase tracking-widest opacity-80 mb-1 block">Specials</span>
+            <div className="flex justify-between items-end">
+              <h3 className="font-serif text-lg font-bold leading-tight">{MENU["Specials"][0].name}</h3>
+              <span className="font-bold text-lg">${MENU["Specials"][0].price.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-5 text-center">
+        <button onClick={() => navigate("menu")} className="text-primary font-semibold text-sm inline-flex items-center gap-1">
+          See the full menu <span className="ms ms-sm">arrow_forward</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const QuickCard = ({ item, bringIt, navigate }) => {
+  const [sent, setSent] = useState(false);
+  const handle = (e) => {
+    e.stopPropagation();
+    setSent(true);
+    bringIt(item);
+    setTimeout(() => setSent(false), 2500);
+  };
+  return (
+    <div className="flex-shrink-0 w-36 bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm">
+      <div className="h-20 overflow-hidden">
+        <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+      </div>
+      <div className="p-2.5">
+        <p className="text-xs font-semibold text-on-surface leading-tight mb-1.5 line-clamp-1">{item.name}</p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-primary">{item.free ? "Free" : `$${item.price.toFixed(2)}`}</span>
+          <button
+            onClick={handle}
+            className={`text-[11px] font-bold px-2.5 py-1 rounded-full transition-all active:scale-95 ${sent ? "bg-green-100 text-green-700" : "bg-primary-container text-on-primary-container"}`}
+          >
+            {sent ? "Sent!" : "Bring it"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── MENU SCREEN ─────────────────────────────────────────────────────────────
+const MenuScreen = ({ navigate, category, setCategory, myOrder, addToMyOrder, bringIt, myOrderCount, myOrderTotal }) => {
+  const items = category === "All" ? ALL_ITEMS : (MENU[category] || []);
+  const [featuredItem] = useState(MENU["Specials"][0]);
+
+  return (
+    <div className="min-h-screen pb-28 fade-in">
+      <TopBar
+        title="Amber & Grain"
+        onBack={() => navigate("welcome")}
+        right={
+          myOrderCount > 0 ? (
+            <button onClick={() => navigate("myorder")} className="relative flex items-center gap-1 bg-primary text-on-primary text-xs font-bold px-3 py-1.5 rounded-full active:scale-95 transition-transform">
+              <span className="ms ms-sm">shopping_bag</span>
+              {myOrderCount}
+            </button>
+          ) : <div className="w-9" />
+        }
+      />
+
+      {/* Category tabs */}
+      <div className="sticky top-14 z-30 bg-surface/95 backdrop-blur-md py-3 border-b border-outline-variant/20">
+        <div className="flex gap-2 overflow-x-auto hide-scrollbar px-5">
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setCategory(cat)}
+              className={`flex-none px-4 py-1.5 rounded-full text-sm font-semibold transition-all whitespace-nowrap ${
+                category === cat
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "bg-surface-container text-on-surface-variant hover:bg-surface-container-high"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <main className="px-5 pt-4">
+        {/* Featured hero (only show in "All") */}
+        {category === "All" && (
+          <MenuHero item={featuredItem} addToMyOrder={addToMyOrder} bringIt={bringIt} myOrder={myOrder} />
+        )}
+
+        {/* Grid of items */}
+        <div className="grid grid-cols-1 gap-3 mt-3">
+          {items.filter(i => category !== "All" || i.id !== featuredItem.id).map(item => (
+            <MenuItemRow key={item.id} item={item} addToMyOrder={addToMyOrder} bringIt={bringIt} myOrder={myOrder} />
+          ))}
+        </div>
+      </main>
+
+      {/* My Order float bar */}
+      {myOrderCount > 0 && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-[calc(100%-40px)] max-w-sm z-40 slide-up">
+          <button
+            onClick={() => navigate("myorder")}
+            className="w-full bg-primary text-on-primary font-bold py-3.5 rounded-full shadow-lg active:scale-[0.97] transition-transform flex items-center justify-between px-5"
+          >
+            <span className="bg-white/20 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">{myOrderCount}</span>
+            <span>View My Order</span>
+            <span className="font-semibold">${myOrderTotal.toFixed(2)}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MenuHero = ({ item, addToMyOrder, bringIt, myOrder }) => {
+  const inOrder = myOrder.find(l => l.item.id === item.id);
+  return (
+    <div className="rounded-2xl overflow-hidden shadow-sm mb-1">
+      <div className="relative h-48">
+        <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/10 to-transparent" />
+        {item.tag && (
+          <span className="absolute top-3 left-3 bg-secondary-container text-on-secondary-container text-xs font-bold px-3 py-1 rounded-full">{item.tag}</span>
+        )}
+        <div className="absolute bottom-0 left-0 right-0 p-4">
+          <div className="flex items-end justify-between">
+            <div className="flex-1 mr-3">
+              <h2 className="font-serif text-xl font-bold text-white leading-tight mb-0.5">{item.name}</h2>
+              <p className="text-white/75 text-xs line-clamp-1">{item.desc}</p>
+            </div>
+            <span className="text-white font-bold text-lg">${item.price.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+      <div className="bg-surface-container-lowest px-4 py-3 flex gap-2">
+        <button onClick={() => bringIt(item)} className="flex-1 bg-primary text-on-primary font-bold py-2.5 rounded-full text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+          <span className="ms ms-sm">bolt</span>Bring it
+        </button>
+        <button onClick={() => addToMyOrder(item)} className="flex-1 border border-outline-variant text-on-surface font-semibold py-2.5 rounded-full text-sm active:scale-95 transition-transform flex items-center justify-center gap-1.5">
+          <span className="ms ms-sm">add</span>{inOrder ? `In order (${inOrder.qty})` : "My Order"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const MenuItemRow = ({ item, addToMyOrder, bringIt, myOrder }) => {
+  const inOrder = myOrder.find(l => l.item.id === item.id);
+  const [justBrought, setJustBrought] = useState(false);
+
+  const handleBringIt = () => {
+    setJustBrought(true);
+    bringIt(item);
+    setTimeout(() => setJustBrought(false), 2200);
+  };
+
+  return (
+    <article className="bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden flex gap-0 active:scale-[0.99] transition-transform">
+      <div className="w-24 h-24 flex-shrink-0 overflow-hidden">
+        <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+      </div>
+      <div className="flex-1 p-3 flex flex-col justify-between min-w-0">
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="font-semibold text-sm text-on-surface leading-tight">{item.name}</h3>
+            {item.tag && <span className="flex-shrink-0 text-[10px] font-bold bg-secondary-container/40 text-on-secondary-container px-2 py-0.5 rounded-full">{item.tag}</span>}
+            {item.free && <span className="flex-shrink-0 text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Free</span>}
+          </div>
+          <p className="text-xs text-on-surface-variant mt-0.5 line-clamp-1">{item.desc}</p>
+        </div>
+        <div className="flex items-center justify-between mt-2">
+          <span className="font-bold text-primary text-sm">{item.free ? "Free" : `$${item.price.toFixed(2)}`}</span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleBringIt}
+              className={`text-[11px] font-bold px-3 py-1.5 rounded-full transition-all active:scale-95 ${justBrought ? "bg-green-100 text-green-700" : "bg-primary-container text-on-primary-container"}`}
+            >
+              {justBrought ? "Sent ✓" : "Bring it"}
+            </button>
+            <button
+              onClick={() => addToMyOrder(item)}
+              className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-95 transition-transform relative"
+            >
+              <span className="ms" style={{fontSize:18}}>add</span>
+              {inOrder && (
+                <span className="absolute -top-1 -right-1 bg-primary text-on-primary text-[9px] font-bold w-3.5 h-3.5 rounded-full flex items-center justify-center">{inOrder.qty}</span>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+};
+
+// ─── MY ORDER SCREEN ─────────────────────────────────────────────────────────
+const MyOrderScreen = ({ navigate, myOrder, myOrderCount, myOrderTotal, updateQty, updateNote, removeFromMyOrder, bringThese, rounds }) => {
+  const [noteOpen, setNoteOpen] = useState({});
+  const empty = myOrder.length === 0;
+
+  const servedRounds = rounds.filter(r => r.status === "Served");
+  const priorTotal   = servedRounds.reduce((s,r) => s + r.items.reduce((rs,l) => rs + l.qty * l.item.price, 0), 0);
+
+  return (
+    <div className="min-h-screen pb-28 fade-in">
+      <TopBar title="My Order" showBack onBack={() => navigate("menu")} />
+
+      {empty ? (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center">
+            <span className="ms ms-lg text-on-surface-variant">shopping_bag</span>
+          </div>
+          <div>
+            <h3 className="font-serif text-xl font-semibold text-on-surface mb-1">Nothing here yet</h3>
+            <p className="text-sm text-on-surface-variant">Browse the menu and tap the <strong>+</strong> to add items here, or use <strong>Bring it</strong> to send something straight to the kitchen.</p>
+          </div>
+          <button onClick={() => navigate("menu")} className="bg-primary text-on-primary font-semibold px-6 py-3 rounded-full active:scale-95 transition-transform">
+            Browse menu
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="px-5 pt-4 pb-2">
+            <p className="text-sm text-on-surface-variant">Not sent yet — review and send when you're ready</p>
+          </div>
+
+          <div className="px-5 flex flex-col gap-3">
+            {myOrder.map(line => (
+              <div key={line.item.id} className="bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden">
+                <div className="flex gap-3 p-4">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                    <img src={line.item.img} alt={line.item.name} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start mb-1">
+                      <h3 className="font-semibold text-sm text-on-surface leading-tight">{line.item.name}</h3>
+                      <span className="font-bold text-sm text-on-surface ml-2">${(line.item.price * line.qty).toFixed(2)}</span>
+                    </div>
+                    <p className="text-xs text-on-surface-variant line-clamp-1">{line.item.desc}</p>
+                    <div className="flex items-center justify-between mt-2">
+                      {/* Qty stepper */}
+                      <div className="flex items-center bg-surface-container rounded-full">
+                        <button onClick={() => updateQty(line.item.id, -1)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-container-high transition-colors">
+                          <span className="ms" style={{fontSize:16}}>remove</span>
+                        </button>
+                        <span className="px-2.5 font-bold text-sm">{line.qty}</span>
+                        <button onClick={() => updateQty(line.item.id, +1)} className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-surface-container-high transition-colors">
+                          <span className="ms" style={{fontSize:16}}>add</span>
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setNoteOpen(p => ({...p, [line.item.id]: !p[line.item.id]}))} className="text-xs text-on-surface-variant flex items-center gap-0.5">
+                          <span className="ms" style={{fontSize:14}}>edit_note</span>
+                          {line.note ? "Edit note" : "Add note"}
+                        </button>
+                        <button onClick={() => removeFromMyOrder(line.item.id)} className="text-xs text-error flex items-center gap-0.5">
+                          <span className="ms" style={{fontSize:14}}>delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {noteOpen[line.item.id] && (
+                  <div className="px-4 pb-4 fade-in">
+                    <textarea
+                      value={line.note}
+                      onChange={e => updateNote(line.item.id, e.target.value)}
+                      placeholder="Any notes for the kitchen? e.g. no onions, extra hot…"
+                      className="w-full border border-outline-variant/50 rounded-xl px-3 py-2.5 text-sm text-on-surface bg-surface resize-none outline-none focus:border-primary/50 transition-colors"
+                      rows={2}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Prior sessions note */}
+            {priorTotal > 0 && (
+              <div className="bg-surface-container rounded-xl px-4 py-3">
+                <p className="text-xs text-on-surface-variant">Earlier this visit: <span className="font-semibold text-on-surface">${priorTotal.toFixed(2)}</span> already sent to kitchen</p>
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="bg-surface-container-lowest rounded-2xl shadow-sm px-4 pt-3 pb-4">
+              <div className="flex justify-between text-sm text-on-surface-variant mb-1">
+                <span>This order</span><span>${myOrderTotal.toFixed(2)}</span>
+              </div>
+              <div className="dashed-divider my-2 text-on-surface" />
+              <div className="flex justify-between font-bold">
+                <span className="text-on-surface">Total to send</span>
+                <span className="text-primary text-lg">${myOrderTotal.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Bring these sticky button */}
+          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-[calc(100%-40px)] max-w-sm z-40">
+            <button
+              onClick={bringThese}
+              className="w-full bg-primary text-on-primary font-bold py-4 rounded-full shadow-lg active:scale-[0.97] transition-transform flex items-center justify-center gap-2"
+            >
+              <span className="ms ms-sm">rocket_launch</span>
+              Bring these · ${myOrderTotal.toFixed(2)}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// ─── STATUS SCREEN ────────────────────────────────────────────────────────────
+const STATUS_STEPS  = ["Placed", "Preparing", "Served"];
+const STATUS_ICONS  = { Placed:"check_circle", Preparing:"local_fire_department", Served:"room_service" };
+const STATUS_LABELS = { Placed:"Order placed, waiting for kitchen", Preparing:"Kitchen is preparing your order", Served:"Your order has been served" };
+
+const StatusScreen = ({ navigate, rounds, sessionTotal, pendingCount, billRequested, setBillRequested }) => {
+  const empty = rounds.length === 0;
+
+  return (
+    <div className="min-h-screen pb-28 fade-in">
+      <TopBar
+        title={`Orders · Table ${RESTAURANT.table}`}
+        onBack={() => navigate("menu")}
+        right={
+          <div className="flex items-center gap-1.5 bg-surface-container px-2.5 py-1 rounded-full">
+            <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            <span className="text-[11px] font-semibold text-on-surface-variant">Live</span>
+          </div>
+        }
+      />
+
+      {empty ? (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center">
+            <span className="ms ms-lg text-on-surface-variant">auto_timer</span>
+          </div>
+          <div>
+            <h3 className="font-serif text-xl font-semibold text-on-surface mb-1">No orders yet</h3>
+            <p className="text-sm text-on-surface-variant">Once you order something, you'll see its status here in real time.</p>
+          </div>
+          <button onClick={() => navigate("menu")} className="bg-primary text-on-primary font-semibold px-6 py-3 rounded-full active:scale-95 transition-transform">
+            Go to menu
+          </button>
+        </div>
+      ) : (
+        <div className="px-5 pt-4 flex flex-col gap-5">
+          {[...rounds].reverse().map((round, idx) => (
+            <RoundCard key={round.id} round={round} isLatest={idx === 0} />
+          ))}
+
+          {/* Session bill summary */}
+          <div className="bg-surface-container-lowest rounded-2xl shadow-sm px-4 py-4 mt-2">
+            <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant mb-3">Running bill</p>
+            {rounds.map(r => (
+              <div key={r.id} className="mb-2">
+                <p className="text-xs text-on-surface-variant mb-1">{r.label}</p>
+                {r.items.map((l,i) => (
+                  <div key={i} className="flex justify-between text-sm mb-0.5">
+                    <span>{l.qty}× {l.item.name}</span>
+                    <span>${(l.qty * l.item.price).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="dashed-divider my-3 text-on-surface" />
+            <div className="flex justify-between font-bold text-lg">
+              <span>Total</span>
+              <span className="text-primary">${sessionTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button onClick={() => navigate("menu")} className="flex-1 border border-outline-variant text-on-surface font-semibold py-3 rounded-full active:scale-95 transition-transform text-sm flex items-center justify-center gap-1.5">
+              <span className="ms ms-sm">add</span>Order more
+            </button>
+            {!billRequested ? (
+              <button
+                onClick={() => { setBillRequested(true); navigate("receipt"); }}
+                className="flex-1 bg-primary text-on-primary font-bold py-3 rounded-full active:scale-95 transition-transform text-sm flex items-center justify-center gap-1.5"
+              >
+                <span className="ms ms-sm">receipt_long</span>Request bill
+              </button>
+            ) : (
+              <div className="flex-1 bg-surface-container text-on-surface-variant font-semibold py-3 rounded-full text-sm flex items-center justify-center gap-1.5">
+                <span className="ms ms-fill ms-sm text-primary">check_circle</span>Bill requested
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RoundCard = ({ round, isLatest }) => {
+  const stepIdx = STATUS_STEPS.indexOf(round.status);
+
+  return (
+    <div className={`bg-surface-container-lowest rounded-2xl shadow-sm overflow-hidden ${isLatest ? "" : "opacity-80"}`}>
+      <div className="flex items-center justify-between px-4 pt-3 pb-2 border-b border-surface-container">
+        <span className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">{round.label}</span>
+        <StatusPill status={round.status} />
+      </div>
+
+      {/* Items */}
+      <div className="px-4 py-3 border-b border-surface-container space-y-1.5">
+        {round.items.map((line, i) => (
+          <div key={i} className="flex justify-between text-sm">
+            <span className="text-on-surface">{line.qty}× {line.item.name}{line.note && <span className="text-on-surface-variant italic text-xs ml-1">({line.note})</span>}</span>
+            <span className="font-semibold">${(line.qty * line.item.price).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Status tracker */}
+      <div className="px-4 py-3">
+        <div className="flex items-center gap-0">
+          {STATUS_STEPS.map((step, i) => {
+            const done    = i < stepIdx;
+            const current = i === stepIdx;
+            const future  = i > stepIdx;
+            return (
+              <React.Fragment key={step}>
+                <div className={`flex flex-col items-center gap-1 flex-none`}>
+                  <div className={`w-9 h-9 rounded-full flex items-center justify-center relative ${done ? "bg-primary" : current ? "bg-primary-container" : "bg-surface-container"}`}>
+                    {current && <div className="pulse-ring" />}
+                    <span className={`ms ms-sm relative z-10 ${done ? "ms-fill text-on-primary" : current ? "text-on-primary-container" : "text-on-surface-variant"}`} style={{fontVariationSettings: done ? "'FILL' 1" : "'FILL' 0"}}>
+                      {STATUS_ICONS[step]}
+                    </span>
+                  </div>
+                  <span className={`text-[10px] font-semibold ${done || current ? "text-primary" : "text-on-surface-variant opacity-50"}`}>{step}</span>
+                </div>
+                {i < STATUS_STEPS.length - 1 && (
+                  <div className={`flex-1 h-0.5 mb-4 mx-1 transition-all duration-700 ${done ? "bg-primary" : "bg-surface-container-highest"}`} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StatusPill = ({ status }) => {
+  const styles = {
+    Placed:    "bg-surface-container text-on-surface-variant",
+    Preparing: "bg-primary-container text-on-primary-container",
+    Served:    "bg-green-100 text-green-700",
+  };
+  return (
+    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${styles[status]}`}>
+      {status === "Preparing" && <div className="w-1.5 h-1.5 rounded-full bg-primary-container border border-primary animate-pulse" />}
+      {status}
+    </span>
+  );
+};
+
+// ─── RECEIPT SCREEN ───────────────────────────────────────────────────────────
+const ReceiptScreen = ({ navigate, rounds, sessionTotal }) => {
+  const now = new Date().toLocaleDateString("en-AU", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+
+  return (
+    <div className="min-h-screen pb-28 fade-in">
+      <TopBar title="Your Bill" showBack onBack={() => navigate("status")} />
+
+      <div className="px-5 pt-6">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="w-14 h-14 rounded-full bg-primary-container mx-auto flex items-center justify-center mb-3">
+            <span className="ms ms-fill ms-lg text-on-primary-container">receipt_long</span>
+          </div>
+          <h2 className="font-serif text-2xl font-bold text-on-surface">Table {RESTAURANT.table}</h2>
+          <p className="text-sm text-on-surface-variant">{now}</p>
+        </div>
+
+        {/* Receipt card */}
+        <div className="bg-surface-container-lowest rounded-2xl shadow-sm px-5 py-5 mb-5">
+          <div className="flex justify-between items-center mb-4 pb-3 border-b border-surface-container">
+            <div>
+              <p className="font-serif text-base font-semibold text-on-surface">Amber & Grain</p>
+              <p className="text-xs text-on-surface-variant">{RESTAURANT.address}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-on-surface-variant">Order #</p>
+              <p className="font-semibold text-sm text-on-surface">{1000 + rounds.length}</p>
+            </div>
+          </div>
+
+          {rounds.map((round, ri) => (
+            <div key={round.id} className="mb-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">{round.label}</p>
+              {round.items.map((line, i) => (
+                <div key={i} className="flex items-baseline justify-between py-0.5 gap-2">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-on-surface">{line.qty}× {line.item.name}</span>
+                    {line.note && <span className="text-xs text-on-surface-variant block italic">{line.note}</span>}
+                  </div>
+                  <span className="text-sm font-semibold">${(line.qty * line.item.price).toFixed(2)}</span>
+                </div>
+              ))}
+              {ri < rounds.length - 1 && <div className="dashed-divider mt-3 text-on-surface" />}
+            </div>
+          ))}
+
+          <div className="border-t border-surface-container pt-3 mt-2 space-y-1.5">
+            <div className="flex justify-between text-sm text-on-surface-variant">
+              <span>Subtotal</span><span>${sessionTotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-sm text-on-surface-variant">
+              <span>GST (10%)</span><span>${(sessionTotal * 0.1).toFixed(2)}</span>
+            </div>
+            <div className="dashed-divider my-2 text-on-surface" />
+            <div className="flex justify-between font-bold text-xl">
+              <span className="font-serif text-on-surface">Total</span>
+              <span className="text-primary">${(sessionTotal * 1.1).toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Thank you */}
+        <div className="text-center mb-6">
+          <p className="font-serif text-lg text-on-surface mb-1">Thank you for visiting ✦</p>
+          <p className="text-sm text-on-surface-variant">Your server will be with you shortly. You can also pay at the counter.</p>
+        </div>
+
+        {/* CTA */}
+        <div className="space-y-3">
+          <button className="w-full bg-primary text-on-primary font-bold py-4 rounded-full active:scale-[0.97] transition-transform flex items-center justify-center gap-2">
+            <span className="ms ms-sm">payments</span>Request bill at table
+          </button>
+          <button className="w-full border border-outline-variant text-on-surface font-semibold py-3.5 rounded-full active:scale-[0.97] transition-transform text-sm">
+            Split the bill
+          </button>
+        </div>
+
+        <p className="text-center text-xs text-on-surface-variant mt-5 pb-2">Please retain this for your records</p>
+      </div>
+    </div>
+  );
+};
+
+// ─── MOUNT ────────────────────────────────────────────────────────────────────
+const root = createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>

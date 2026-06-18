@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Amber & Grain - Coffee & Kitchen</title>
+    
+    <!-- Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/history@5/umd/history.development.js"></script>
+    <script src="https://unpkg.com/react-router@6.3.0/umd/react-router.development.js"></script>
+    <script src="https://unpkg.com/react-router-dom@6.3.0/umd/react-router-dom.development.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+
+    <!-- Fonts and Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&family=Literata:opsz,wght@7..72,500;7..72,600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-container-highest": "#e5e2e1",
+                        "surface-container": "#f0eded",
+                        "on-primary-fixed-variant": "#6a3b00",
+                        "on-tertiary-fixed-variant": "#474744",
+                        "primary-fixed": "#ffdcbf",
+                        "on-secondary-container": "#715800",
+                        "surface-container-high": "#eae7e7",
+                        "on-secondary": "#ffffff",
+                        "tertiary-container": "#a9a7a4",
+                        "on-primary-fixed": "#2d1600",
+                        "secondary-container": "#fdcf49",
+                        "primary-fixed-dim": "#ffb873",
+                        "surface-container-low": "#f6f3f2",
+                        "surface-tint": "#8c5000",
+                        "surface": "#fcf9f8",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary": "#755b00",
+                        "secondary-fixed-dim": "#eec13c",
+                        "on-secondary-fixed-variant": "#584400",
+                        "surface-variant": "#e5e2e1",
+                        "tertiary-fixed-dim": "#c8c6c2",
+                        "error": "#ba1a1a",
+                        "on-primary-container": "#5c3200",
+                        "background": "#fcf9f8",
+                        "inverse-primary": "#ffb873",
+                        "on-secondary-fixed": "#241a00",
+                        "on-tertiary": "#ffffff",
+                        "on-surface-variant": "#534437",
+                        "on-error": "#ffffff",
+                        "outline": "#867465",
+                        "on-tertiary-fixed": "#1c1c1a",
+                        "on-error-container": "#93000a",
+                        "on-background": "#1c1b1b",
+                        "on-primary": "#ffffff",
+                        "inverse-on-surface": "#f3f0ef",
+                        "secondary-fixed": "#ffe08f",
+                        "outline-variant": "#d9c3b1",
+                        "on-tertiary-container": "#3d3d3a",
+                        "tertiary-fixed": "#e5e2de",
+                        "surface-bright": "#fcf9f8",
+                        "inverse-surface": "#313030",
+                        "error-container": "#ffdad6",
+                        "primary-container": "#e8943a",
+                        "on-surface": "#1c1b1b",
+                        "tertiary": "#5f5e5b",
+                        "primary": "#8c5000",
+                        "surface-dim": "#dcd9d9"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "stack-sm": "4px",
+                        "gutter": "16px",
+                        "stack-lg": "24px",
+                        "container-padding-mobile": "20px",
+                        "base": "8px",
+                        "stack-md": "12px",
+                        "container-padding-desktop": "40px"
+                    },
+                    fontFamily: {
+                        "label-sm": ["Plus Jakarta Sans"],
+                        "headline-md": ["Literata"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "body-lg": ["Plus Jakarta Sans"],
+                        "display-lg": ["Literata"],
+                        "display-lg-mobile": ["Literata"]
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @layer base {
+            body { @apply bg-background text-on-background font-['Plus_Jakarta_Sans'] antialiased; }
+            h1, h2, h3, .font-literata { font-family: 'Literata', serif; }
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .dashed-divider {
+            background-image: linear-gradient(to right, currentColor 50%, transparent 50%);
+            background-size: 8px 1px;
+            background-repeat: repeat-x;
+            height: 1px;
+            opacity: 0.2;
+        }
+        .pulse-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 9999px;
+            background-color: #e8943a;
+            opacity: 0.4;
+            animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.1); opacity: 0; }
+            100% { transform: scale(0.9); opacity: 0; }
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { createRoot } = ReactDOM;
+        const { MemoryRouter, Routes, Route, Link, useNavigate, useLocation } = ReactRouterDOM;
+
+        // --- Common Components ---
+
+        const BottomNav = () => {
+            const location = useLocation();
+            const navigate = useNavigate();
+            
+            const tabs = [
+                { id: 'menu', path: '/menu', label: 'Menu', icon: 'restaurant_menu' },
+                { id: 'order', path: '/order', label: 'My Order', icon: 'shopping_bag' },
+                { id: 'status', path: '/status', label: 'Status', icon: 'auto_timer' },
+                { id: 'bill', path: '/bill', label: 'Bill', icon: 'receipt_long' }
+            ];
+
+            // Don't show nav on splash screen
+            if (location.pathname === '/') return null;
+
+            return (
+                <nav class="fixed bottom-0 w-full z-50 rounded-t-[24px] backdrop-blur-xl bg-surface/90 shadow-[0px_-4px_20px_rgba(26,26,26,0.04)] md:max-w-md md:left-1/2 md:-translate-x-1/2">
+                    <div class="flex justify-around items-center px-container-padding-mobile py-stack-md w-full">
+                        {tabs.map(tab => {
+                            const isActive = location.pathname === tab.path;
+                            return (
+                                <button 
+                                    key={tab.id}
+                                    onClick={() => navigate(tab.path)}
+                                    class={`flex flex-col items-center justify-center transition-all duration-200 ${isActive ? 'text-primary font-semibold' : 'text-on-surface-variant'}`}
+                                >
+                                    <span class="material-symbols-outlined mb-1" style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}>
+                                        {tab.icon}
+                                    </span>
+                                    <span class="text-[12px] font-medium leading-none">{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </nav>
+            );
+        };
+
+        const TopAppBar = ({ title = "Morning Ritual", showBack = false }) => {
+            const navigate = useNavigate();
+            return (
+                <header class="w-full sticky top-0 z-50 bg-surface/80 backdrop-blur-md">
+                    <div class="flex justify-between items-center px-container-padding-mobile py-base max-w-[1200px] mx-auto">
+                        <button 
+                            onClick={() => showBack ? navigate(-1) : navigate('/welcome')} 
+                            class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-low transition-colors active:scale-95"
+                        >
+                            <span class="material-symbols-outlined text-on-surface-variant">
+                                {showBack ? 'arrow_back' : 'local_cafe'}
+                            </span>
+                        </button>
+                        <h1 class="text-[24px] font-semibold text-primary">{title}</h1>
+                        <button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-container-low transition-colors active:scale-95">
+                            <span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+                        </button>
+                    </div>
+                </header>
+            );
+        };
+
+        // --- Screens ---
+
+        const SplashScreen = () => {
+            const navigate = useNavigate();
+            return (
+                <div class="bg-[#FDFAF6] min-h-screen flex flex-col items-center justify-between text-on-surface px-container-padding-mobile py-container-padding-mobile relative overflow-hidden">
+                    <main class="flex-1 flex flex-col items-center justify-center w-full max-w-sm mx-auto space-y-stack-lg z-10 relative">
+                        <div class="flex flex-col items-center justify-center space-y-stack-md text-center mt-stack-lg">
+                            <div class="w-24 h-24 rounded-full overflow-hidden shadow-[0px_4px_20px_rgba(26,26,26,0.04)] mb-stack-sm ring-4 ring-white">
+                                <img alt="Amber & Grain Logo" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDNhcHj3Wp4Zq6hNyv5_poqVR_JPYtwDJ2Fe9yVvEFOo_524a0wPfQlnHX-x69P65V2ut3wT8cBAvFfM0gPc44yErQXVFQiJnpIZCXn5X7pIIByPo7gA4AdAJ7-fbDZmVRm1UB5i8QcKYq2snE6CKP1wJ7mAZGRuHQ_NtKLn3rrpxUa4W7wM2Z7s-C8e2xdKG0HB3Sfq_7G4YH8Yt_3oqhKgRoJO-_Jd3pSrQyJ9FlC6oj_vkflsPZlh4om_DKFOYgifhWoDgj8pBM"/>
+                            </div>
+                            <h1 class="text-[32px] md:text-[40px] font-bold">Amber & Grain</h1>
+                        </div>
+                        <div class="bg-primary-container text-on-primary-container font-semibold px-6 py-2 rounded-full shadow-[0px_4px_20px_rgba(26,26,26,0.04)] flex items-center space-x-2">
+                            <span class="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>table_restaurant</span>
+                            <span>Table 7</span>
+                        </div>
+                        <div class="text-center px-4">
+                            <p class="text-[18px] text-on-surface-variant">Scan successful — ready when you are.</p>
+                        </div>
+                        <div class="w-full pt-stack-lg">
+                            <button 
+                                onClick={() => navigate('/welcome')}
+                                class="w-full bg-primary text-on-primary font-semibold py-4 rounded-full shadow-[0px_4px_20px_rgba(26,26,26,0.08)] active:scale-[0.98] transition-transform flex items-center justify-center space-x-2"
+                            >
+                                <span>Reserve this table</span>
+                                <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+                            </button>
+                        </div>
+                    </main>
+                    <footer class="w-full text-center pb-stack-md text-on-surface-variant/60 text-[12px] relative z-10">
+                        <p>124 Morning Dew Lane • Open 7am - 3pm</p>
+                    </footer>
+                    <div class="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center opacity-30">
+                        <div class="w-[80vw] h-[80vw] bg-surface-container-highest rounded-full blur-3xl absolute -top-[10%] -left-[10%]"></div>
+                        <div class="w-[60vw] h-[60vw] bg-secondary-container rounded-full blur-3xl absolute bottom-[10%] -right-[10%] opacity-20"></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const WelcomeScreen = () => {
+            const navigate = useNavigate();
+            const drinks = [
+                { id: 1, name: "Still Water", price: 0, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuDJavOR4wTwQc2RsrFtvoD4oFU391qypA3HIq3etwzGWfsbSGHzDay7WGLhaFl4MWIkMIh07KimrLlB45Xnkj3MLoxl6_IKeYgsaFmIZnGnZWrNy76rPkqFoSo88tZCTJHfqhyE0F31PQ8Glgh7Q7WAoCCp0S5vWFetvC1xMjIl8xD6B0eBMQ5G11CmH0tssxIe6I7E81VEL0ZaBX70efp7ZzBT6x3I2UTKOHmO6Of_D1Q8FGv8clRux9EcAHDZBaHpqGDqxyADKlo" },
+                { id: 2, name: "Sparkling Water", price: 4, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCb854B2z1jRxzunOrx04qDgJBTiojgkpRlPaiPBQATWPhwOE29SAreY1OKdlatJgMvRr3c_0FGfgOHuIXUDxcmIj7xsWW2vGF5zYVl0-ZH9zW2qndueIHkphtAj4Xwnn55KGBnRv6o5F040ZRWfwh187Y2TKZiLL0q5sUIm9qhhcpfpC3YUmhFqLC_v3ZT0vgDailx5A_8XuNNqWAtq0xtrzr9_p0qR0G3g14ETeofyHobWX9w184IQpup7LxCwcYh8nT-LEPJUNc" },
+                { id: 3, name: "Lemon Water", price: 2, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuA5UTz62opXtYxb_NMAa2Mnod6O47jy3V9SaoKf3QIaSn8APJYS6xnqjzdU7lQdiq87vRGdNJ1oT34nWb5GI8btk1jYcrP9pzr7G3_Hazr4PnxQGNsc1uJ_X-62HNgg7IFuoHYQ-ThTyqb4xl34gmAocx4aLssvaqgpjRK85LG-zfUSJHBiZ1irHMQCcH-Vux1wVx2L093oW5RerMsCFkYBvUlZi1ZxYA7nbc521S9XhZuRHTuWvVpKJOYZW2kl6QFCpL-qHgHXl08" },
+                { id: 4, name: "Masala Chai", price: 6, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuCp8YLLw1DHUF25RsuYbcdPkuJzfJnEInqP-F2Fje30t15sYSxosievU51xZZlNx5UoPo0cuRQPKUnRpMOqXfBT_8hOUMqgQ-YPkKSdEIxiBCzZ3BtQ-GVWq9cONPkP63QF0PV325J1C4OExjDk7pqucul7lHGH74LoMP6GLjToGOhTfuAKPav8yA3hw6Xpz3CHudJuisEPK1uvTs4PJq4CTKWGoNdHeVsMWY8SZWcsIL6Omzf2O-CdtfXLevM7VCuQMwYIwYZjHCk" }
+            ];
+
+            const bites = [
+                { id: 5, name: "Bread Basket", price: 8, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuBwmC9unwfsk2EN4bZWaVlFm7LvyT-7hSPcnudzdWmf8YkXDjbh13tePA4opxVNrJGYZsnqqHjWYitJEv_C6LUhHL9H_kcQn2-Ohc8ZOmN8Gvn41ou6Fw11S5MyP9UZ-jZvpuk1ZYHwfxPoXlu9zvjuHyKjCPzSI6_L_e7Gu6izr30NtTQfS-Kp_NlHzMBgPXS74bgtEyzVLzqufUYgAEz1k7G4RQULDUkIXaR7s3tVTz94EWiUoxX_-wKGpL9sNq77Y0pge7ocZQ0" },
+                { id: 6, name: "Nachos", price: 12, img: "https://lh3.googleusercontent.com/aida-public/AB6AXuASGtO1wOlaG46NwqeInNW5TTcSnoJAOR8JV6I5_4Cc4THHgFoLBkLDa00sQoYZ_jKRUAMzpMkmhGJW4ROqn3ihwjxHCDxeexw3a0wKvaGBO_J-tLGTZkB84ZB8uh8RAQd9BFcnNN5QNMMF0T7jt3ZRqYirmlU_lA0XC-rmWjRSZAsab0QJ8AAW1SX3o4i12tQbSaTVHU_mKk3zHiGBT5qXe97dnVBw35cA7RNklvtdjnk82bGCm7383__nKzMvaMuTdqpVvWOJojc" }
+            ];
+
+            return (
+                <div class="bg-background min-h-screen pb-32">
+                    <header class="px-container-padding-mobile pt-12 pb-stack-lg max-w-[1200px] mx-auto text-center md:text-left">
+                        <div class="inline-flex items-center justify-center bg-primary-container text-on-primary-container px-4 py-1 rounded-full mb-stack-md">
+                            <span class="font-bold text-[14px]">Table 7</span>
+                        </div>
+                        <h1 class="text-[32px] md:text-[40px] text-on-surface mb-stack-sm">Welcome to Amber & Grain</h1>
+                        <p class="text-[18px] text-on-surface-variant max-w-lg mx-auto md:mx-0">Can we start you off with something while you settle in?</p>
+                    </header>
+                    <main class="max-w-[1200px] mx-auto">
+                        {[ 
+                           { title: "Something to drink?", items: drinks },
+                           { title: "Quick bites while you browse?", items: bites }
+                        ].map((section, idx) => (
+                            <section key={idx} class="mb-stack-lg pl-container-padding-mobile">
+                                <h2 class="text-[24px] text-on-surface mb-gutter font-semibold">{section.title}</h2>
+                                <div class="flex overflow-x-auto hide-scrollbar gap-gutter pb-4 pr-container-padding-mobile">
+                                    {section.items.map(item => (
+                                        <div key={item.id} class="min-w-[140px] md:min-w-[180px] bg-surface-container-lowest rounded-[12px] shadow-[0px_4px_20px_rgba(26,26,26,0.04)] overflow-hidden flex-shrink-0">
+                                            <div class="h-24 bg-cover bg-center" style={{ backgroundImage: `url('${item.img}')` }}></div>
+                                            <div class="p-3 flex flex-col justify-between h-24">
+                                                <h3 class="text-[16px] font-medium text-on-surface truncate">{item.name}</h3>
+                                                <div class="flex justify-between items-center mt-auto">
+                                                    <span class="text-[14px] font-bold text-primary">${item.price}</span>
+                                                    <button onClick={() => navigate('/menu')} class="bg-primary-container text-on-primary px-3 py-1 rounded-full text-[12px] font-bold active:scale-95">Bring it</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        ))}
+                        <div class="text-center mt-stack-lg px-container-padding-mobile">
+                            <button onClick={() => navigate('/menu')} class="text-primary/70 font-semibold inline-flex items-center gap-2 hover:text-primary">
+                                Skip, take me to the full menu <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+                            </button>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const MenuScreen = () => {
+            const navigate = useNavigate();
+            const categories = ["All", "Food", "Drinks", "Desserts", "Specials"];
+            
+            return (
+                <div class="min-h-screen pb-[100px]">
+                    <TopAppBar />
+                    <div class="sticky top-[56px] z-40 bg-surface/95 backdrop-blur-md py-4">
+                        <div class="flex overflow-x-auto hide-scrollbar px-container-padding-mobile gap-3">
+                            {categories.map((cat, i) => (
+                                <button key={i} class={`flex-none px-5 py-2 rounded-full font-semibold text-[14px] whitespace-nowrap transition-all ${i === 0 ? 'bg-primary-container text-on-primary-container' : 'bg-surface-container text-on-surface-variant'}`}>
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <main class="max-w-[1200px] mx-auto px-container-padding-mobile py-stack-lg">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <article onClick={() => navigate('/order')} class="col-span-1 md:col-span-2 bg-surface-container-lowest rounded-2xl shadow-[0px_4px_20px_rgba(26,26,26,0.04)] overflow-hidden flex flex-col md:flex-row group cursor-pointer active:scale-[0.99] transition-all">
+                                <div class="md:w-1/2 h-48 md:h-auto overflow-hidden">
+                                    <img class="w-full h-full object-cover transition-transform group-hover:scale-105" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDlpovTiSMjy4ZREtS4RrSxmhPBITr9LIIMervJ6Q-bD7RU-Uss-5MW_XfHiObEA_6_pT9evBwYAIJbz8LW6mvYiEUcAy-GJY1_uR_sV_rWoZ65s3NAOm6OwBi8be2HIn9EbFKd_u80fNZSY1py-UXksY3IJjm-gg9CnMYFvV4415J6rsLnjSZlbjdshTOYA15ZO4qRWCTYUbIGNM2sVrgn6V752xU2N2jcVrf-UTwIwPjA1YIo-Boa4g6tk_UraRvFSxHFKGzo4FI" alt="Latte" />
+                                </div>
+                                <div class="md:w-1/2 p-6 flex flex-col justify-between">
+                                    <div>
+                                        <span class="bg-secondary-container/30 text-on-secondary-container text-[12px] px-3 py-1 rounded-full mb-4 inline-block font-semibold">Signature</span>
+                                        <h2 class="text-[24px] font-bold mb-2">The Morning Ritual Pour</h2>
+                                        <p class="text-on-surface-variant line-clamp-2">Our signature house blend, slow-poured over ice with vanilla and oat milk.</p>
+                                    </div>
+                                    <div class="flex justify-between items-center mt-4">
+                                        <span class="text-[20px] font-bold text-primary">$6.50</span>
+                                        <div class="flex gap-2">
+                                            <button class="bg-primary-container text-on-primary px-4 py-2 rounded-full text-[12px] font-bold">Bring it</button>
+                                            <div class="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center"><span class="material-symbols-outlined">add</span></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+                            
+                            {[
+                                { name: "Smashed Avocado Toast", price: "12.00", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuAGD11al_th_hYgOWCCywus684ZqeCYjsWnXQGt7axYTldRITcmiU2WODkvLDGtrbVZ9zEFha7U_UCKnBbA8uulheTHnabGI-_3FKIaecg57ImHokSR46LEI4JM5_HT3KaVO39vCOhXLDqIrpVeN96DfeWl9rzZUSoz8TeREX2hPuFv204vEy5csmNiMK8nmalfGJW30sh8s9MQs_vD8vind8_I2C8XES0IRn4PL36iY6nza46cCaD6SL_1sa5B1vCjxZLA5IxQUi8" },
+                                { name: "Classic Cortado", price: "4.50", img: "https://lh3.googleusercontent.com/aida-public/AB6AXuA5lK_H6jmtsIswFMnoM8frI59-l8V1rxY1j2gLvjXeVGH476Lj0Kq3MJ3EAqXFn9y6mH9doIKssfBz2h4UKTjmMNUZyGTxjwdkYIJiaLqRLqVD9F-TkJGTzkGvA74C-nQe9h4qGOAUAdQl47ZbAKXo2Ma0ZOyTDHLfYDaUhwygCW_0pQE-bTwo6HNUgEKnqBAJSXkk9emV0V0V89NASb6BELFHW2c-r1S9QxmYA-F_xl25n7TnZSDKemQeBTfdD675HAQYko56T1A" }
+                            ].map((item, i) => (
+                                <article key={i} class="bg-surface-container-lowest rounded-2xl shadow-[0px_4px_20px_rgba(26,26,26,0.04)] overflow-hidden flex flex-col group cursor-pointer active:scale-[0.98]">
+                                    <div class="h-48 overflow-hidden">
+                                        <img class="w-full h-full object-cover transition-transform group-hover:scale-105" src={item.img} alt={item.name} />
+                                    </div>
+                                    <div class="p-5 flex flex-col flex-grow">
+                                        <h3 class="text-[18px] font-bold mb-1">{item.name}</h3>
+                                        <p class="text-on-surface-variant text-[14px] line-clamp-2 mb-4">Artisanal quality prepared fresh for your table.</p>
+                                        <div class="flex justify-between items-center mt-auto">
+                                            <span class="text-primary font-bold">${item.price}</span>
+                                            <button class="bg-primary-container text-on-primary px-3 py-1 rounded-full text-[12px] font-bold">Add</button>
+                                        </div>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const OrderScreen = () => {
+            const navigate = useNavigate();
+            return (
+                <div class="bg-background min-h-screen pb-[100px] flex flex-col">
+                    <TopAppBar />
+                    <main class="flex-grow px-container-padding-mobile pt-stack-lg max-w-[600px] w-full mx-auto">
+                        <section class="flex flex-col gap-stack-sm text-center md:text-left mb-8">
+                            <h2 class="text-[32px] font-bold">My Order</h2>
+                            <p class="text-on-surface-variant">Not sent yet — add what you want, then send it all at once</p>
+                        </section>
+                        <div class="flex flex-col gap-4">
+                            {[
+                                { name: "Pour Over (Ethiopia)", price: "5.50", desc: "Hot, For here", qty: 1 },
+                                { name: "Almond Croissant", price: "4.50", desc: "Warmed", qty: 2 }
+                            ].map((item, i) => (
+                                <div key={i} class="bg-surface-container-lowest rounded-xl p-4 shadow-[0px_4px_20px_rgba(26,26,26,0.04)]">
+                                    <div class="flex justify-between items-start mb-4">
+                                        <div>
+                                            <h3 class="font-bold">{item.name}</h3>
+                                            <p class="text-[14px] text-on-surface-variant">{item.desc}</p>
+                                        </div>
+                                        <span class="font-bold">${item.price}</span>
+                                    </div>
+                                    <div class="flex justify-between items-center pt-2 border-t border-surface-variant/20">
+                                        <button class="text-on-surface-variant text-[12px] flex items-center gap-1"><span class="material-symbols-outlined text-[18px]">edit</span> Edit</button>
+                                        <div class="flex items-center bg-surface-container-low rounded-full px-2">
+                                            <button class="p-1"><span class="material-symbols-outlined text-[18px]">remove</span></button>
+                                            <span class="px-3 font-bold">{item.qty}</span>
+                                            <button class="p-1"><span class="material-symbols-outlined text-[18px]">add</span></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            <button class="w-full bg-transparent border-2 border-dashed border-outline-variant rounded-xl p-4 flex items-center justify-center gap-2 text-on-surface-variant hover:text-primary transition-colors">
+                                <span class="material-symbols-outlined">edit_note</span>
+                                <span class="font-semibold">Add a note for the barista</span>
+                            </button>
+                        </div>
+                        <section class="mt-auto pt-12">
+                            <div class="flex flex-col gap-2 border-t border-surface-container-highest pt-4 mb-6">
+                                <div class="flex justify-between text-on-surface-variant"><span>Subtotal</span><span>$14.50</span></div>
+                                <div class="flex justify-between text-primary font-bold text-[20px]"><span>Total</span><span>$14.50</span></div>
+                            </div>
+                            <button onClick={() => navigate('/status')} class="w-full bg-primary text-on-primary font-bold py-4 rounded-full flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform">
+                                Bring these <span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+                            </button>
+                        </section>
+                    </main>
+                </div>
+            );
+        };
+
+        const StatusScreen = () => {
+            return (
+                <div class="bg-background min-h-screen flex flex-col pb-32">
+                    <header class="w-full sticky top-0 z-50 bg-surface/80 backdrop-blur-md">
+                        <div class="flex justify-between items-center px-container-padding-mobile py-base max-w-[1200px] mx-auto">
+                            <h1 class="text-[20px] font-bold text-primary">Your Orders · Table 7</h1>
+                            <button class="p-2"><span class="material-symbols-outlined">refresh</span></button>
+                        </div>
+                    </header>
+                    <main class="flex-1 px-container-padding-mobile py-stack-lg max-w-[800px] mx-auto w-full">
+                        <div class="mb-stack-lg flex items-center justify-between mb-8">
+                            <h2 class="text-[24px] font-bold">Order Status</h2>
+                            <div class="flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded-full">
+                                <div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+                                <span class="text-[12px] font-medium">Live Updates</span>
+                            </div>
+                        </div>
+                        
+                        <section class="mb-8 relative">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center border-2 border-background font-bold text-[14px]">2</div>
+                                <h3 class="text-[14px] text-on-surface-variant uppercase tracking-widest font-bold">Round 2 · 10:42 AM</h3>
+                            </div>
+                            <div class="space-y-4">
+                                {[ 
+                                    { name: "Loaded Nachos", desc: "Extra jalapeños, add guac", icon: "local_fire_department" },
+                                    { name: "Iced Oat Latte", desc: "Less ice", icon: "local_cafe" }
+                                ].map((item, i) => (
+                                    <article key={i} class="bg-surface-container-lowest rounded-xl p-4 shadow-[0px_4px_20px_rgba(26,26,26,0.04)]">
+                                        <div class="flex justify-between items-start mb-4 pb-2 border-b border-surface-container">
+                                            <div>
+                                                <h4 class="font-bold">{item.name}</h4>
+                                                <p class="text-[14px] text-on-surface-variant">{item.desc}</p>
+                                            </div>
+                                            <span class="bg-surface-container px-2 py-1 rounded text-[12px] font-bold">Qty 1</span>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <div class="flex-1 py-2 rounded-lg bg-surface-container text-primary flex flex-col items-center gap-1">
+                                                <span class="material-symbols-outlined text-[20px]">check_circle</span>
+                                                <span class="text-[10px] font-bold">Placed</span>
+                                            </div>
+                                            <div class="flex-1 py-2 rounded-lg bg-primary-container text-on-primary-container flex flex-col items-center gap-1 relative overflow-hidden">
+                                                <div class="pulse-ring"></div>
+                                                <span class="material-symbols-outlined text-[20px] relative z-10">{item.icon}</span>
+                                                <span class="text-[10px] font-bold relative z-10">Preparing</span>
+                                            </div>
+                                            <div class="flex-1 py-2 rounded-lg border border-outline-variant text-outline opacity-40 flex flex-col items-center gap-1">
+                                                <span class="material-symbols-outlined text-[20px]">room_service</span>
+                                                <span class="text-[10px] font-bold">Served</span>
+                                            </div>
+                                        </div>
+                                    </article>
+                                ))}
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            );
+        };
+
+        const BillScreen = () => {
+            return (
+                <div class="bg-background min-h-screen flex flex-col pb-32">
+                    <TopAppBar title="Morning Ritual" />
+                    <main class="max-w-md mx-auto w-full px-container-padding-mobile py-stack-lg">
+                        <div class="text-center mb-8">
+                            <h2 class="text-[24px] font-bold">Your Bill · Table 7</h2>
+                            <p class="text-on-surface-variant text-[14px]">Order #8492</p>
+                        </div>
+                        <div class="bg-surface-container-lowest rounded-xl p-6 shadow-[0px_4px_20px_rgba(26,26,26,0.04)] mb-8">
+                            <div class="mb-4">
+                                <p class="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold mb-3">Round 1 · 09:15 AM</p>
+                                <div class="flex justify-between mb-2">
+                                    <div><p>2x Flat White</p><p class="text-[12px] text-on-surface-variant">Oat Milk</p></div>
+                                    <p>$11.00</p>
+                                </div>
+                                <div class="flex justify-between">
+                                    <p>1x Avocado Toast</p>
+                                    <p>$14.50</p>
+                                </div>
+                            </div>
+                            <div class="dashed-divider my-4 text-on-surface"></div>
+                            <div class="mb-4">
+                                <p class="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold mb-3">Round 2 · 10:05 AM</p>
+                                <div class="flex justify-between">
+                                    <p>1x Filter Coffee</p><p>$5.50</p>
+                                </div>
+                            </div>
+                            <div class="dashed-divider my-4 border-t-2 text-on-surface"></div>
+                            <div class="space-y-2">
+                                <div class="flex justify-between text-on-surface-variant"><span>Subtotal</span><span>$37.00</span></div>
+                                <div class="flex justify-between text-on-surface-variant"><span>GST (10%)</span><span>$3.70</span></div>
+                                <div class="flex justify-between text-primary font-bold text-[24px] pt-2"><span>Total</span><span>$40.70</span></div>
+                            </div>
+                        </div>
+                        <div class="space-y-4">
+                            <button class="w-full bg-primary text-on-primary rounded-full py-4 font-bold active:scale-95 transition-transform">Request Bill</button>
+                            <button class="w-full border border-primary text-primary rounded-full py-4 font-bold active:scale-95 transition-transform">Split Bill</button>
+                        </div>
+                        <p class="text-center text-[12px] text-on-surface-variant mt-8">Please proceed to counter if you prefer to pay there.</p>
+                    </main>
+                </div>
+            );
+        };
+
+        const App = () => {
+            return (
+                <MemoryRouter>
+                    <div class="min-h-screen bg-background">
+                        <Routes>
+                            <Route path="/" element={<SplashScreen />} />
+                            <Route path="/welcome" element={<WelcomeScreen />} />
+                            <Route path="/menu" element={<MenuScreen />} />
+                            <Route path="/order" element={<OrderScreen />} />
+                            <Route path="/status" element={<StatusScreen />} />
+                            <Route path="/bill" element={<BillScreen />} />
+                        </Routes>
+                        <BottomNav />
+                    </div>
+                </MemoryRouter>
+            );
+        };
+
+        const container = document.getElementById('root');
+        const root = createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
