@@ -16,8 +16,11 @@ export function toDomainOrder(row: OrderWithRounds): Order {
     tenantId: row.tenantId,
     tableId: row.tableId,
     status: row.status,
+    customerName: row.customerName ?? undefined,
+    customerPhone: row.customerPhone ?? undefined,
     createdAt: row.createdAt.toISOString(),
     closedAt: row.closedAt?.toISOString(),
+    billRequestedAt: row.billRequestedAt?.toISOString(),
     rounds: row.rounds.map((r) => ({
       id: r.id,
       type: r.type,

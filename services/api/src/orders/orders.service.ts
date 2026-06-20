@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import type { Order } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { toDomainOrder } from "./orders.mapper.js";
-import type { AddRoundDto } from "./orders.dto.js";
+import type { AddRoundDto, CreateOrderDto } from "./orders.dto.js";
 
 const ROUND_INCLUDE = { rounds: { include: { items: true } } } as const;
 
@@ -21,14 +21,20 @@ export class OrdersService {
   }
 
   /** Open a new dine-in session for one of the tenant's tables. */
-  async createForTable(tenantId: string, tableId: string): Promise<Order> {
+  async createForTable(tenantId: string, dto: CreateOrderDto): Promise<Order> {
     const table = await this.prisma.table.findFirst({
-      where: { id: tableId, tenantId },
+      where: { id: dto.tableId, tenantId },
     });
-    if (!table) throw new NotFoundException(`Table not found: ${tableId}`);
+    if (!table) throw new NotFoundException(`Table not found: ${dto.tableId}`);
 
     const row = await this.prisma.order.create({
-      data: { tenantId, tableId, status: "open" },
+      data: {
+        tenantId,
+        tableId: dto.tableId,
+        status: "open",
+        customerName: dto.customerName,
+        customerPhone: dto.customerPhone,
+      },
       include: ROUND_INCLUDE,
     });
     return toDomainOrder(row);
@@ -43,10 +49,12 @@ export class OrdersService {
     await this.assertOrder(tenantId, orderId);
     await this.prisma.round.create({
       data: {
+        tenantId,
         orderId,
         type: dto.type,
         items: {
           create: dto.items.map((i) => ({
+            tenantId,
             menuItemId: i.menuItemId,
             name: i.name,
             unitPrice: i.unitPrice,
@@ -64,7 +72,7 @@ export class OrdersService {
     await this.assertOrder(tenantId, orderId);
     await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: "billed" },
+      data: { status: "billed", billRequestedAt: new Date() },
     });
     return this.get(tenantId, orderId);
   }

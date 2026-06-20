@@ -27,7 +27,7 @@ export class OrdersController {
     @Body() body: unknown,
   ): Promise<Order> {
     const dto: CreateOrderDto = createOrderSchema.parse(body);
-    return this.orders.createForTable(tenant.id, dto.tableId);
+    return this.orders.createForTable(tenant.id, dto);
   }
 
   @Post(":id/rounds")

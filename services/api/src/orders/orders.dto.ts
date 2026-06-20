@@ -4,6 +4,8 @@ import { roundTypeSchema } from "@amber/domain";
 /** POST /orders */
 export const createOrderSchema = z.object({
   tableId: z.string().min(1),
+  customerName: z.string().trim().min(1).optional(),
+  customerPhone: z.string().trim().min(1).optional(),
 });
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 

@@ -15,7 +15,8 @@ export class MenuService {
       }),
       this.prisma.menuItem.findMany({
         where: { tenantId },
-        orderBy: [{ category: "asc" }, { sortOrder: "asc" }],
+        orderBy: [{ categoryId: "asc" }, { sortOrder: "asc" }],
+        include: { category: true },
       }),
     ]);
 
@@ -32,7 +33,7 @@ export class MenuService {
         name: i.name,
         description: i.description,
         price: i.price,
-        category: i.category,
+        category: i.category.name,
         badge: i.badge ?? undefined,
         imageUrl: i.imageUrl ?? undefined,
         available: i.available,

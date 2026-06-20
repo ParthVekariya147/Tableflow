@@ -1,6 +1,16 @@
 // Multi-tenant data model. Tenant is the root; every other row carries a
 // tenantId so the API can scope all access to one restaurant. This is the
 // "rows in a tenants table" model from the architecture diagram.
+//
+// Conventions
+//  - Money is integer minor units (cents), matching @amber/domain.
+//  - Every non-tenant operational row carries `tenantId` for scoping. This now
+//    holds for EVERY table (incl. Round, OrderItem, modifiers) so a single
+//    Postgres RLS policy can be applied uniformly and the scoped Prisma client
+//    injects tenantId everywhere with no special cases.
+//  - Identity (User) is platform-level; a User joins one or more tenants via
+//    Membership (the join carries the per-restaurant role). Platform staff are
+//    Users with `isSuperAdmin = true` and no membership.
 
 generator client {
   provider = "prisma-client-js"
@@ -21,52 +31,219 @@ model Tenant {
   // ThemeConfig (colors/typography/logo/mode) as JSON — see @amber/domain.
   theme     Json
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tables     Table[]
-  categories MenuCategory[]
-  menuItems  MenuItem[]
-  orders     Order[]
+  memberships     Membership[]
+  rooms           Room[]
+  tables          Table[]
+  categories      MenuCategory[]
+  menuItems       MenuItem[]
+  modifierGroups  ModifierGroup[]
+  modifierOptions ModifierOption[]
+  orders          Order[]
+  rounds          Round[]
+  orderItems      OrderItem[]
+  orderItemMods   OrderItemModifier[]
+  payments        Payment[]
+  reviews         Review[]
+  menuPlacements  MenuPlacement[]
 }
 
-model Table {
-  id       String  @id @default(cuid())
-  tenantId String
-  label    String
-  qrToken  String  @unique
-  seats    Int?
-  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders   Order[]
+// ── Identity & access ──────────────────────────────────────────────────────
 
+/** Per-tenant role on a Membership. Platform super-admins use User.isSuperAdmin. */
+enum Role {
+  owner
+  manager
+  server
+  kitchen
+}
+
+/**
+ * A platform-level person. The same human can manage/work at several tenants
+ * (each via a Membership). Auth (login) resolves a User; the active tenant +
+ * role come from the matching Membership.
+ */
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  /** Platform operator (super-admin app). Has no tenant memberships. */
+  isSuperAdmin Boolean  @default(false)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships   Membership[]
+  ordersServed  Order[]      @relation("OrderServer")
+  paymentsTaken Payment[]    @relation("PaymentTakenBy")
+}
+
+/** Join of a User to a Tenant, carrying that user's role at that restaurant. */
+model Membership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      Role
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// ── Floor layout ───────────────────────────────────────────────────────────
+
+/** A named area on the floor (e.g. "Main Dining Room", "Patio") grouping tables. */
+model Room {
+  id        String  @id @default(cuid())
+  tenantId  String
+  name      String
+  sortOrder Int     @default(0)
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tables    Table[]
+
+  @@unique([tenantId, name])
   @@index([tenantId])
 }
 
+model Table {
+  id        String   @id @default(cuid())
+  tenantId  String
+  roomId    String?
+  label     String
+  qrToken   String   @unique
+  seats     Int?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  room      Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  orders    Order[]
+
+  @@index([tenantId])
+  @@index([roomId])
+}
+
+// ── Menu ───────────────────────────────────────────────────────────────────
+
 model MenuCategory {
-  id        String @id @default(cuid())
+  id        String     @id @default(cuid())
   tenantId  String
   name      String
-  sortOrder Int    @default(0)
-  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sortOrder Int        @default(0)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items     MenuItem[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
 }
 
 model MenuItem {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   tenantId    String
+  categoryId  String
   name        String
-  description String  @default("")
+  description String   @default("")
   price       Int // minor units (cents)
-  category    String
   badge       String?
   imageUrl    String?
-  available   Boolean @default(true)
-  sortOrder   Int     @default(0)
-  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /** Material Symbols icon name used as a photo stand-in when imageUrl is unset. */
+  icon        String?
+  /** Tailwind gradient classes for the stand-in card backdrop. */
+  swatch      String?
+  available   Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category       MenuCategory    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  modifierGroups ModifierGroup[]
+  orderItems     OrderItem[]
+  placements     MenuPlacement[]
 
   @@index([tenantId])
-  @@index([tenantId, category])
+  @@index([tenantId, categoryId])
 }
+
+// ── Item modifiers / options ───────────────────────────────────────────────
+// Optional feature. If v1 doesn't need item options, delete these three models
+// plus MenuItem.modifierGroups and OrderItem.modifiers — nothing else uses them.
+
+/** single = pick one (Size, Spice level). multiple = pick any (Add-ons). */
+enum ModifierSelection {
+  single
+  multiple
+}
+
+/** A choice group attached to a menu item, e.g. "Size", "Add-ons", "Spice level". */
+model ModifierGroup {
+  id         String            @id @default(cuid())
+  tenantId   String
+  menuItemId String
+  name       String
+  selection  ModifierSelection @default(single)
+  required   Boolean           @default(false)
+  minSelect  Int               @default(0)
+  maxSelect  Int? // null = unlimited (for `multiple`)
+  sortOrder  Int               @default(0)
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  options    ModifierOption[]
+
+  @@index([tenantId])
+  @@index([menuItemId])
+}
+
+/** A selectable option within a group, e.g. "Large" (+150c), "Extra cheese". */
+model ModifierOption {
+  id            String              @id @default(cuid())
+  tenantId      String
+  groupId       String
+  name          String
+  priceDelta    Int                 @default(0) // cents; may be 0 or negative
+  available     Boolean             @default(true)
+  sortOrder     Int                 @default(0)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group         ModifierGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  orderItemMods OrderItemModifier[]
+
+  @@index([tenantId])
+  @@index([groupId])
+}
+
+// ── Menu placements (curated highlights) ─────────────────────────────────────
+// A small, dedicated table for the customer app's curated spots so they're a
+// fast lookup instead of scanning/flagging the whole menu:
+//  - featured: the Menu screen's hero card(s)
+//  - welcome:  the Welcome screen upsell carousels, grouped by `section`
+//              (e.g. "drinks", "bites")
+
+enum PlacementKind {
+  featured
+  welcome
+}
+
+model MenuPlacement {
+  id         String        @id @default(cuid())
+  tenantId   String
+  menuItemId String
+  kind       PlacementKind
+  /** For `welcome`: the carousel/section label (e.g. "drinks", "bites"). Null for `featured`. */
+  section    String?
+  sortOrder  Int           @default(0)
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menuItem   MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, menuItemId, kind])
+  @@index([tenantId, kind])
+}
+
+// ── Orders, rounds, items ──────────────────────────────────────────────────
 
 enum OrderStatus {
   open
@@ -80,9 +257,11 @@ enum RoundType {
   bundled
 }
 
+/** Kitchen lifecycle for a single line item. `ready` = plated, not yet delivered. */
 enum ItemStatus {
   placed
   preparing
+  ready
   served
   cancelled
 }
@@ -91,38 +270,134 @@ model Order {
   id        String      @id @default(cuid())
   tenantId  String
   tableId   String
+  /** Server who opened/owns the session (analytics, accountability). */
+  serverId  String?
+  /** Guest contact captured for the session — used on the bill/receipt. */
+  customerName  String?
+  customerPhone String?
   status    OrderStatus @default(open)
   createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   closedAt  DateTime?
+  /** Set when the guest taps "Request Bill" — powers staff "Awaiting Bill" + table `bill` status. */
+  billRequestedAt DateTime?
   tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   table     Table       @relation(fields: [tableId], references: [id])
+  server    User?       @relation("OrderServer", fields: [serverId], references: [id], onDelete: SetNull)
   rounds    Round[]
+  payment   Payment?
+  review    Review?
 
   @@index([tenantId])
+  @@index([tenantId, status]) // live-table / active-session lookups
   @@index([tableId])
+  @@index([serverId])
 }
 
 model Round {
   id        String      @id @default(cuid())
+  tenantId  String
   orderId   String
   type      RoundType
   createdAt DateTime    @default(now())
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items     OrderItem[]
 
+  @@index([tenantId])
   @@index([orderId])
 }
 
 model OrderItem {
-  id         String     @id @default(cuid())
+  id         String              @id @default(cuid())
+  tenantId   String
   roundId    String
-  menuItemId String
+  menuItemId String? // null if the source menu item was later deleted (snapshot below preserves display)
   name       String
   unitPrice  Int // snapshot, minor units
   qty        Int
-  status     ItemStatus @default(placed)
+  status     ItemStatus          @default(placed)
   notes      String?
-  round      Round      @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  // Stage timestamps for KDS timers + analytics, set as `status` advances.
+  preparingAt DateTime?
+  readyAt     DateTime?
+  servedAt    DateTime?
+  cancelledAt DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  round      Round               @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  // Keep history even if the menu item is later deleted (snapshot fields cover display).
+  menuItem   MenuItem?           @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  modifiers  OrderItemModifier[]
 
+  @@index([tenantId])
   @@index([roundId])
+  @@index([menuItemId])
+}
+
+/** A chosen option on an order line. Name + priceDelta are snapshotted at order time. */
+model OrderItemModifier {
+  id          String          @id @default(cuid())
+  tenantId    String
+  orderItemId String
+  optionId    String? // null if option later deleted; snapshot below preserves display
+  name        String // snapshot
+  priceDelta  Int // snapshot, cents
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  option      ModifierOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([orderItemId])
+}
+
+// ── Payment ────────────────────────────────────────────────────────────────
+
+enum PaymentMethod {
+  cash
+  card
+}
+
+/**
+ * One payment settles one order (single-payment model). Amounts are snapshotted
+ * in cents at checkout so later menu/tax changes don't rewrite history.
+ */
+model Payment {
+  id        String        @id @default(cuid())
+  tenantId  String
+  orderId   String        @unique
+  method    PaymentMethod
+  subtotal  Int // cents
+  tax       Int // cents
+  tip       Int           @default(0) // cents
+  total     Int // cents (subtotal + tax + tip)
+  /** Cash handed over (null for card). Change due = tendered - total, derived. */
+  tendered  Int?
+  takenById String?
+  createdAt DateTime      @default(now())
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  takenBy   User?         @relation("PaymentTakenBy", fields: [takenById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt]) // analytics: revenue for a tenant over a date range
+}
+
+// ── Guest feedback ───────────────────────────────────────────────────────────
+
+/** A guest's post-visit rating for one order (the customer confirmation screen). */
+model Review {
+  id        String   @id @default(cuid())
+  tenantId  String
+  orderId   String   @unique
+  stars     Int // 1–5
+  comment   String?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+}
+generator erd {
+  provider = "prisma-erd-generator"
 }
