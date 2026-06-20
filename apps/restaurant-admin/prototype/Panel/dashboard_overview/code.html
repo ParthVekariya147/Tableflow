@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Dashboard - Amber &amp; Grain</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&amp;family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed": "#25190e",
+                        "outline": "#857466",
+                        "primary": "#6a3c00",
+                        "surface-bright": "#fff8f5",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#2d1600",
+                        "on-background": "#211a15",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#6a3b00",
+                        "inverse-surface": "#372f29",
+                        "on-secondary-container": "#705f51",
+                        "surface-container-high": "#f4e6dc",
+                        "secondary-fixed-dim": "#d8c3b1",
+                        "primary-fixed": "#ffdcbf",
+                        "secondary": "#6c5b4d",
+                        "tertiary-fixed": "#cbe6ff",
+                        "on-tertiary-fixed": "#001e30",
+                        "surface-container": "#f9ebe2",
+                        "primary-container": "#8c5000",
+                        "on-tertiary-container": "#b7ddff",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#f2dcca",
+                        "surface-container-low": "#fff1e8",
+                        "error-container": "#ffdad6",
+                        "on-surface-variant": "#524438",
+                        "surface-container-highest": "#eee0d6",
+                        "error": "#ba1a1a",
+                        "secondary-fixed": "#f5decd",
+                        "on-error-container": "#93000a",
+                        "on-surface": "#211a15",
+                        "background": "#fff8f5",
+                        "surface-dim": "#e5d8ce",
+                        "surface-container-lowest": "#ffffff",
+                        "surface": "#fff8f5",
+                        "outline-variant": "#d7c3b3",
+                        "surface-tint": "#8c5000",
+                        "tertiary-fixed-dim": "#8fcdff",
+                        "on-tertiary-fixed-variant": "#004b71",
+                        "inverse-primary": "#ffb873",
+                        "tertiary": "#004b71",
+                        "inverse-on-surface": "#fceee4",
+                        "on-secondary-fixed-variant": "#534437",
+                        "primary-fixed-dim": "#ffb873",
+                        "on-primary-container": "#ffd0a6",
+                        "on-error": "#ffffff",
+                        "tertiary-container": "#006495",
+                        "surface-variant": "#eee0d6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px",
+                        "card": "16px"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "container-max": "1440px",
+                        "xs": "8px",
+                        "lg": "24px",
+                        "xxl": "48px",
+                        "base": "4px",
+                        "sm": "12px",
+                        "gutter": "24px",
+                        "xl": "32px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Literata"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "display-lg": ["Literata"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "headline-md": ["Literata"],
+                        "body-lg": ["Plus Jakarta Sans"],
+                        "title-lg": ["Plus Jakarta Sans"],
+                        "data-mono": ["Plus Jakarta Sans"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
+                        "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "title-lg": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "data-mono": ["14px", { "lineHeight": "20px", "fontWeight": "500" }]
+                    },
+                    "boxShadow": {
+                        "card": "0px 4px 20px rgba(83, 68, 55, 0.06)"
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md antialiased min-h-screen">
+<!-- Shared Component: SideNavBar -->
+<nav class="fixed left-0 top-0 h-full w-[280px] flex flex-col py-lg px-md bg-surface-container-lowest border-r border-outline-variant shadow-md z-50">
+<!-- Header / Brand -->
+<div class="mb-xxl px-sm flex flex-col gap-xs">
+<h1 class="font-display-lg text-display-lg text-primary truncate" title="Amber &amp; Grain">Amber &amp; Grain</h1>
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-widest">Main Kitchen</span>
+</div>
+<!-- Main Navigation Tabs -->
+<ul class="flex flex-col gap-xs flex-grow">
+<!-- Active Tab: Dashboard -->
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-primary font-bold border-r-4 border-primary bg-primary-container/10 scale-[0.98] transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+</li>
+<!-- Inactive Tabs -->
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">restaurant_menu</span>
+<span class="font-label-md text-label-md">Menu Management</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">table_restaurant</span>
+<span class="font-label-md text-label-md">Tables</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-label-md text-label-md">Sales Analytics</span>
+</a>
+</li>
+</ul>
+<!-- Footer / CTA -->
+<div class="mt-auto border-t border-surface-variant pt-md flex flex-col gap-sm">
+<ul class="flex flex-col gap-xs mb-sm">
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-sm px-md py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-label-md text-label-md">Support</span>
+</a>
+</li>
+</ul>
+<button class="w-full py-sm px-md rounded-full bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-container transition-colors duration-200 flex items-center justify-center gap-xs">
+<span class="material-symbols-outlined text-[18px]">logout</span>
+                Logout
+            </button>
+</div>
+</nav>
+<!-- Shared Component: TopAppBar -->
+<header class="fixed top-0 right-0 w-[calc(100%-280px)] z-40 flex justify-between items-center h-20 px-xl ml-[280px] bg-surface border-b border-outline-variant">
+<!-- Search & Navigation links -->
+<div class="flex items-center gap-xl">
+<!-- Search Icon Placeholder (search_bar: on_left logic) -->
+<button class="p-sm rounded-full text-on-surface-variant hover:bg-primary-container/10 transition-colors">
+<span class="material-symbols-outlined">search</span>
+</button>
+<nav class="flex items-center gap-lg">
+<!-- Active Link: Live Status -->
+<a class="font-label-md text-label-md text-primary font-semibold opacity-80 transition-opacity duration-200 relative after:content-[''] after:absolute after:bottom-[-8px] after:left-0 after:w-full after:h-[2px] after:bg-primary" href="#">Live Status</a>
+<!-- Inactive Link -->
+<a class="font-label-md text-label-md text-on-surface-variant hover:bg-primary-container/10 px-sm py-xs rounded-lg transition-colors duration-200" href="#">Global Orders</a>
+</nav>
+</div>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-md">
+<div class="flex items-center gap-xs">
+<button class="p-sm rounded-full text-on-surface-variant hover:bg-primary-container/10 transition-colors relative" title="Notifications">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1 right-2 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="p-sm rounded-full text-on-surface-variant hover:bg-primary-container/10 transition-colors" title="sync">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<button class="p-sm rounded-full text-on-surface-variant hover:bg-primary-container/10 transition-colors" title="person">
+<span class="material-symbols-outlined">person</span>
+</button>
+</div>
+<div class="h-8 w-px bg-outline-variant mx-sm"></div>
+<div class="flex items-center gap-sm cursor-pointer hover:opacity-80 transition-opacity">
+<div class="text-right flex flex-col justify-center">
+<span class="font-label-md text-label-md text-on-surface block leading-tight">Manager On Duty</span>
+<span class="font-body-md text-[11px] text-on-surface-variant leading-tight">Active Shift</span>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-variant border border-outline-variant overflow-hidden flex items-center justify-center">
+<img alt="Manager Avatar" class="w-full h-full object-cover" data-alt="A professional headshot of a restaurant manager in a softly lit, modern culinary environment. Warm ambient lighting, highly detailed." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCwq9WqbFcPuHSIS04qGQM8IiOK0rB254HHtQrRxv-Ia1KU17QqOfezNJr_e7KuceLmKBW9wNL8nKqdl3Vw1MYQ30jAibO6QXUB0yNF-Qwh2QJ3rGG-0i3ci-vH7pn815sq50m51TEG0QqWyuZX-D-unEPTfwj2tR9OSlnLKpvuddddL_pelzzyUmCOUONwKxUhLzhYSf86JZIcdHxwJQeOA5FJwzE4iRnt05eD7rgUaKr2mX5efQSpzuKa2eT97aPufi0YF2V4Puk"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-[280px] mt-20 p-xl min-h-[calc(100vh-80px)]">
+<div class="max-w-container-max mx-auto grid grid-cols-12 gap-lg">
+<!-- Welcome Header (Optional context setter) -->
+<div class="col-span-12 mb-sm flex justify-between items-end">
+<div>
+<h2 class="font-headline-lg text-headline-lg text-on-background">Overview</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-base">Real-time service metrics for Main Kitchen</p>
+</div>
+<div class="font-data-mono text-data-mono text-on-surface-variant flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                    Live Updates Active
+                </div>
+</div>
+<!-- Stats Header (3 Cards spanning 12 cols) -->
+<div class="col-span-12 grid grid-cols-3 gap-lg mb-sm">
+<!-- Stat Card 1 -->
+<div class="bg-surface-container-lowest rounded-card shadow-card p-lg flex flex-col justify-between border border-surface-variant relative overflow-hidden group">
+<div class="absolute right-0 top-0 p-lg opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-[64px] text-primary">payments</span>
+</div>
+<div class="relative z-10">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider block mb-base">Today's Revenue</span>
+<div class="flex items-baseline gap-sm">
+<h3 class="font-display-lg text-display-lg text-on-surface">$1,240.50</h3>
+<span class="font-body-md text-body-md text-primary font-medium flex items-center"><span class="material-symbols-outlined text-[16px]">trending_up</span> 4.2%</span>
+</div>
+</div>
+</div>
+<!-- Stat Card 2 -->
+<div class="bg-surface-container-lowest rounded-card shadow-card p-lg flex flex-col justify-between border border-surface-variant relative overflow-hidden group">
+<div class="absolute right-0 top-0 p-lg opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-[64px] text-primary">deck</span>
+</div>
+<div class="relative z-10">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider block mb-base">Active Tables</span>
+<div class="flex items-baseline gap-sm">
+<h3 class="font-display-lg text-display-lg text-on-surface">12<span class="text-on-surface-variant text-[32px]">/20</span></h3>
+<span class="font-label-md text-label-md px-sm py-xs rounded-full bg-secondary-container text-on-secondary-container">60% Capacity</span>
+</div>
+</div>
+</div>
+<!-- Stat Card 3 -->
+<div class="bg-surface-container-lowest rounded-card shadow-card p-lg flex flex-col justify-between border border-surface-variant relative overflow-hidden group">
+<div class="absolute right-0 top-0 p-lg opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-[64px] text-primary">receipt_long</span>
+</div>
+<div class="relative z-10">
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider block mb-base">Orders in Progress</span>
+<div class="flex items-baseline gap-sm">
+<h3 class="font-display-lg text-display-lg text-on-surface">8</h3>
+<span class="font-body-md text-body-md text-on-surface-variant">Active Tickets</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Alerts Strip (Full width) -->
+<div class="col-span-12 flex gap-md">
+<div class="flex-1 bg-[#fff0f0] border border-[#ffcfcf] rounded-card p-md flex items-center gap-md shadow-sm">
+<div class="w-10 h-10 rounded-full bg-error text-on-error flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-error uppercase tracking-wider">Critical Inventory Alert</span>
+<span class="font-body-md text-body-md text-on-surface font-medium">2 Items 86'd (Oat Latte, Avocado Toast)</span>
+</div>
+</div>
+<div class="flex-1 bg-[#fff8e1] border border-[#ffe082] rounded-card p-md flex items-center gap-md shadow-sm">
+<div class="w-10 h-10 rounded-full bg-[#ffb300] text-[#4e342e] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined">schedule</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-[#f57f17] uppercase tracking-wider">Service Delay</span>
+<span class="font-body-md text-body-md text-on-surface font-medium">Table 4: Waiting on Bill (10m+)</span>
+</div>
+<button class="ml-auto px-md py-sm rounded-full border border-[#ffe082] text-[#f57f17] font-label-md text-label-md hover:bg-[#ffe082]/20 transition-colors">Resolve</button>
+</div>
+</div>
+<!-- Lower Section: Quick Links & Activity Grid -->
+<!-- Quick Links (Bento Grid - 4 cols) -->
+<div class="col-span-4 flex flex-col gap-lg">
+<h3 class="font-headline-md text-headline-md text-on-surface border-b border-surface-variant pb-xs">Quick Actions</h3>
+<div class="grid grid-cols-1 gap-md">
+<button class="bg-surface-container-lowest rounded-card p-lg border border-outline-variant shadow-card flex items-center gap-md hover:border-primary hover:bg-surface-container-low transition-all text-left group">
+<div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[28px]">restaurant_menu</span>
+</div>
+<div class="flex flex-col">
+<span class="font-title-lg text-title-lg text-on-surface">Update Menu</span>
+<span class="font-body-md text-body-md text-on-surface-variant">Manage 86 lists &amp; specials</span>
+</div>
+</button>
+<button class="bg-surface-container-lowest rounded-card p-lg border border-outline-variant shadow-card flex items-center gap-md hover:border-primary hover:bg-surface-container-low transition-all text-left group">
+<div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[28px]">table_restaurant</span>
+</div>
+<div class="flex flex-col">
+<span class="font-title-lg text-title-lg text-on-surface">Check Tables</span>
+<span class="font-body-md text-body-md text-on-surface-variant">Floor plan &amp; seating</span>
+</div>
+</button>
+<button class="bg-surface-container-lowest rounded-card p-lg border border-outline-variant shadow-card flex items-center gap-md hover:border-primary hover:bg-surface-container-low transition-all text-left group">
+<div class="w-12 h-12 rounded-full bg-surface flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[28px]">analytics</span>
+</div>
+<div class="flex flex-col">
+<span class="font-title-lg text-title-lg text-on-surface">View Reports</span>
+<span class="font-body-md text-body-md text-on-surface-variant">End of shift summaries</span>
+</div>
+</button>
+</div>
+</div>
+<!-- Recent Activity List (8 cols) -->
+<div class="col-span-8 flex flex-col gap-lg">
+<div class="flex justify-between items-end border-b border-surface-variant pb-xs">
+<h3 class="font-headline-md text-headline-md text-on-surface">Live Feed</h3>
+<button class="font-label-md text-label-md text-primary hover:underline">View All Activity</button>
+</div>
+<div class="bg-surface-container-lowest rounded-card border border-outline-variant shadow-card overflow-hidden">
+<ul class="flex flex-col">
+<!-- Activity Item 1 -->
+<li class="flex items-center justify-between p-lg border-b border-surface-variant hover:bg-surface/50 transition-colors">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-full bg-primary-container/10 text-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">person_add</span>
+</div>
+<div class="flex flex-col">
+<span class="font-body-lg text-body-lg text-on-surface font-medium">Table 7 seated</span>
+<span class="font-body-md text-body-md text-on-surface-variant">Party of 4 • Server: Sarah M.</span>
+</div>
+</div>
+<span class="font-data-mono text-data-mono text-on-surface-variant">2m ago</span>
+</li>
+<!-- Activity Item 2 -->
+<li class="flex items-center justify-between p-lg border-b border-surface-variant hover:bg-surface/50 transition-colors">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-full bg-secondary-container/30 text-secondary flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">receipt_long</span>
+</div>
+<div class="flex flex-col">
+<span class="font-body-lg text-body-lg text-on-surface font-medium">Table 2 ordered</span>
+<span class="font-body-md text-body-md text-on-surface-variant">Ticket #4092 • 3 items</span>
+</div>
+</div>
+<span class="font-data-mono text-data-mono text-on-surface-variant">5m ago</span>
+</li>
+<!-- Activity Item 3 (Filler for aesthetic) -->
+<li class="flex items-center justify-between p-lg border-b border-surface-variant hover:bg-surface/50 transition-colors">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">room_service</span>
+</div>
+<div class="flex flex-col">
+<span class="font-body-lg text-body-lg text-on-surface font-medium">Table 12 mains fired</span>
+<span class="font-body-md text-body-md text-on-surface-variant">Ticket #4088</span>
+</div>
+</div>
+<span class="font-data-mono text-data-mono text-on-surface-variant">12m ago</span>
+</li>
+<!-- Activity Item 4 (Filler for aesthetic) -->
+<li class="flex items-center justify-between p-lg hover:bg-surface/50 transition-colors">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-full bg-[#e8f5e9] text-[#2e7d32] flex items-center justify-center">
+<span class="material-symbols-outlined text-[20px]">check_circle</span>
+</div>
+<div class="flex flex-col">
+<span class="font-body-lg text-body-lg text-on-surface font-medium">Table 5 check closed</span>
+<span class="font-body-md text-body-md text-on-surface-variant">$145.00 • Visa ending in 4492</span>
+</div>
+</div>
+<span class="font-data-mono text-data-mono text-on-surface-variant">18m ago</span>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</main>
+</body></html>

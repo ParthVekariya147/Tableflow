@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Amber &amp; Grain - Edit Menu Item</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&amp;family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.filled {
+            font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed": "#25190e",
+                        "outline": "#857466",
+                        "primary": "#6a3c00",
+                        "surface-bright": "#fff8f5",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#2d1600",
+                        "on-background": "#211a15",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#6a3b00",
+                        "inverse-surface": "#372f29",
+                        "on-secondary-container": "#705f51",
+                        "surface-container-high": "#f4e6dc",
+                        "secondary-fixed-dim": "#d8c3b1",
+                        "primary-fixed": "#ffdcbf",
+                        "secondary": "#6c5b4d",
+                        "tertiary-fixed": "#cbe6ff",
+                        "on-tertiary-fixed": "#001e30",
+                        "surface-container": "#f9ebe2",
+                        "primary-container": "#8c5000",
+                        "on-tertiary-container": "#b7ddff",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#f2dcca",
+                        "surface-container-low": "#fff1e8",
+                        "error-container": "#ffdad6",
+                        "on-surface-variant": "#524438",
+                        "surface-container-highest": "#eee0d6",
+                        "error": "#ba1a1a",
+                        "secondary-fixed": "#f5decd",
+                        "on-error-container": "#93000a",
+                        "on-surface": "#211a15",
+                        "background": "#fff8f5",
+                        "surface-dim": "#e5d8ce",
+                        "surface-container-lowest": "#ffffff",
+                        "surface": "#fff8f5",
+                        "outline-variant": "#d7c3b3",
+                        "surface-tint": "#8c5000",
+                        "tertiary-fixed-dim": "#8fcdff",
+                        "on-tertiary-fixed-variant": "#004b71",
+                        "inverse-primary": "#ffb873",
+                        "tertiary": "#004b71",
+                        "inverse-on-surface": "#fceee4",
+                        "on-secondary-fixed-variant": "#534437",
+                        "primary-fixed-dim": "#ffb873",
+                        "on-primary-container": "#ffd0a6",
+                        "on-error": "#ffffff",
+                        "tertiary-container": "#006495",
+                        "surface-variant": "#eee0d6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "container-max": "1440px",
+                        "xs": "8px",
+                        "lg": "24px",
+                        "xxl": "48px",
+                        "base": "4px",
+                        "sm": "12px",
+                        "gutter": "24px",
+                        "xl": "32px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Literata"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "display-lg": ["Literata"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "headline-md": ["Literata"],
+                        "body-lg": ["Plus Jakarta Sans"],
+                        "title-lg": ["Plus Jakarta Sans"],
+                        "data-mono": ["Plus Jakarta Sans"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "600" }],
+                        "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "fontWeight": "600" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "title-lg": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "data-mono": ["14px", { "lineHeight": "20px", "fontWeight": "500" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen overflow-hidden flex">
+<!-- Background App (Blurred/Faded to show overlay context) -->
+<div class="flex-1 flex flex-col opacity-30 pointer-events-none transition-opacity duration-300">
+<!-- TopAppBar Placeholder (Hidden on Mobile) -->
+<header class="hidden md:flex justify-between items-center h-20 px-xl bg-surface border-b border-outline-variant ml-[280px]">
+<div class="font-headline-md text-headline-md font-bold text-primary">Amber &amp; Grain</div>
+</header>
+<!-- SideNavBar Placeholder -->
+<nav class="fixed left-0 top-0 h-full w-[280px] bg-surface-container-lowest border-r border-outline-variant flex flex-col py-lg px-md shadow-md">
+<div class="font-display-lg text-display-lg text-primary mb-xl px-md">A&amp;G</div>
+<div class="flex flex-col gap-sm">
+<a class="text-on-surface-variant hover:text-primary transition-colors duration-200 px-md py-sm rounded-lg flex items-center gap-md" href="#"><span class="material-symbols-outlined" data-icon="dashboard">dashboard</span> <span class="font-label-md text-label-md">Dashboard</span></a>
+<a class="text-primary font-bold border-r-4 border-primary px-md py-sm flex items-center gap-md" href="#"><span class="material-symbols-outlined" data-icon="restaurant_menu">restaurant_menu</span> <span class="font-label-md text-label-md">Menu Management</span></a>
+</div>
+</nav>
+<main class="ml-[280px] mt-20 p-xl flex-1 overflow-y-auto">
+<!-- Dummy Content for Menu Management -->
+<div class="max-w-container-max mx-auto">
+<h1 class="font-headline-lg text-headline-lg text-on-background mb-lg">Menu Management</h1>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-lg">
+<div class="bg-surface-container-lowest p-lg rounded-xl shadow-[0px_4px_20px_rgba(83,68,55,0.06)] h-64 border border-outline-variant"></div>
+<div class="bg-surface-container-lowest p-lg rounded-xl shadow-[0px_4px_20px_rgba(83,68,55,0.06)] h-64 border border-outline-variant"></div>
+<div class="bg-surface-container-lowest p-lg rounded-xl shadow-[0px_4px_20px_rgba(83,68,55,0.06)] h-64 border border-outline-variant"></div>
+</div>
+</div>
+</main>
+</div>
+<!-- Overlay Backdrop -->
+<div class="fixed inset-0 bg-on-background/20 backdrop-blur-sm z-50 flex justify-end">
+<!-- Right Side Panel -->
+<aside class="w-full max-w-md bg-surface-container-lowest h-full shadow-2xl flex flex-col border-l border-outline-variant translate-x-0 transition-transform duration-300 ease-out">
+<!-- Panel Header -->
+<header class="flex justify-between items-center px-lg py-md border-b border-outline-variant bg-surface shrink-0">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-background">Edit Item</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-base">Modifying Avocardo Toast</p>
+</div>
+<button class="text-on-surface-variant hover:text-on-background p-xs rounded-full hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</header>
+<!-- Panel Content (Scrollable) -->
+<div class="flex-1 overflow-y-auto p-lg flex flex-col gap-xl">
+<!-- Image Upload Section -->
+<section class="flex flex-col gap-sm">
+<label class="font-label-md text-label-md text-on-background">Photo</label>
+<div class="w-full h-48 bg-surface-container-high border border-dashed border-outline rounded-lg flex flex-col items-center justify-center cursor-pointer hover:bg-surface-container-highest transition-colors relative overflow-hidden group">
+<img class="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" data-alt="A high-quality, top-down view of beautifully plated avocado toast on rustic sourdough bread. The avocado is thinly sliced and fanned out, garnished with microgreens, red pepper flakes, and a drizzle of olive oil. The plate is matte white, resting on a clean, light wood tabletop in a well-lit cafe setting. Soft, natural daylight highlights the fresh ingredients, creating an appetizing, bright, and modern culinary aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDeWXNDslwlaPus5Goghm9qyXCm-jDiug86WjheS9MTed3ppj9RksQ6Sf1HrtBknSYVeEtgs6jpRWkTnQPHYkVZ4EwyJgD2EhvusEIQjb-J-OGKwtuRrRrcjw6zqlP1M_VXR7hN2tyUE1G8cZQpjum-7agQg9WdsJdF6cnFsjSTOgebjIC5m_h4fNVQsVou9l2vo7Q40zfT-Q5eMUmvlGYHLEviJ9kI981hFF3yNxZ-OQmry2sytEDRgPjLpJddOW5uuXqCWDGNGqM"/>
+<div class="absolute inset-0 bg-black/20 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-on-primary mb-xs" data-icon="photo_camera">photo_camera</span>
+<span class="font-label-md text-label-md text-on-primary">Change Photo</span>
+</div>
+</div>
+</section>
+<!-- Basic Info Fields -->
+<section class="flex flex-col gap-lg">
+<div class="flex flex-col gap-base">
+<label class="font-label-md text-label-md text-on-background uppercase" for="itemName">Item Name</label>
+<input class="bg-surface border border-outline-variant rounded-md px-sm py-sm font-body-md text-on-background focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-shadow" id="itemName" type="text" value="Avocado Toast"/>
+</div>
+<div class="flex gap-lg">
+<div class="flex flex-col gap-base flex-1">
+<label class="font-label-md text-label-md text-on-background uppercase" for="itemPrice">Price</label>
+<div class="relative">
+<span class="absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant font-data-mono">$</span>
+<input class="w-full bg-surface border border-outline-variant rounded-md pl-xl pr-sm py-sm font-data-mono text-on-background focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-shadow" id="itemPrice" type="number" value="14.00"/>
+</div>
+</div>
+<div class="flex flex-col gap-base flex-1">
+<label class="font-label-md text-label-md text-on-background uppercase" for="itemCategory">Category</label>
+<select class="w-full bg-surface border border-outline-variant rounded-md px-sm py-sm font-body-md text-on-background focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-shadow appearance-none cursor-pointer" id="itemCategory">
+<option>Breakfast</option>
+<option selected="">Brunch</option>
+<option>Lunch</option>
+<option>Sides</option>
+</select>
+</div>
+</div>
+<div class="flex flex-col gap-base">
+<label class="font-label-md text-label-md text-on-background uppercase" for="itemDesc">Description</label>
+<textarea class="bg-surface border border-outline-variant rounded-md px-sm py-sm font-body-md text-on-background focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-shadow resize-none" id="itemDesc" rows="3">Smashed Hass avocado, meyer lemon, chili flakes, sea salt on toasted artisanal sourdough.</textarea>
+</div>
+</section>
+<!-- Divider -->
+<hr class="border-outline-variant"/>
+<!-- Modifiers Section -->
+<section class="flex flex-col gap-md">
+<h3 class="font-title-lg text-title-lg text-on-background border-b border-outline-variant pb-xs">Modifiers</h3>
+<!-- Size -->
+<div class="bg-surface border border-outline-variant rounded-lg p-md">
+<div class="flex justify-between items-center mb-sm">
+<span class="font-body-md text-body-md font-bold text-on-background">Size Options</span>
+<button class="text-primary hover:text-primary-container"><span class="material-symbols-outlined" data-icon="add_circle">add_circle</span></button>
+</div>
+<div class="flex flex-wrap gap-sm">
+<span class="bg-surface-container-high border border-outline-variant text-on-surface-variant font-label-md text-label-md px-sm py-xs rounded-full flex items-center gap-xs">One Slice <button class="hover:text-error"><span class="material-symbols-outlined text-[16px]" data-icon="close">close</span></button></span>
+<span class="bg-surface-container-high border border-outline-variant text-on-surface-variant font-label-md text-label-md px-sm py-xs rounded-full flex items-center gap-xs">Two Slices (+$4) <button class="hover:text-error"><span class="material-symbols-outlined text-[16px]" data-icon="close">close</span></button></span>
+</div>
+</div>
+<!-- Add-ons -->
+<div class="bg-surface border border-outline-variant rounded-lg p-md">
+<div class="flex justify-between items-center mb-sm">
+<span class="font-body-md text-body-md font-bold text-on-background">Add-ons</span>
+<button class="text-primary hover:text-primary-container"><span class="material-symbols-outlined" data-icon="add_circle">add_circle</span></button>
+</div>
+<div class="flex flex-col gap-sm">
+<div class="flex items-center justify-between group">
+<span class="font-body-md text-body-md text-on-surface-variant">Poached Egg</span>
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-data-mono text-on-surface-variant">+$2.50</span>
+<button class="text-outline hover:text-error opacity-0 group-hover:opacity-100 transition-opacity"><span class="material-symbols-outlined" data-icon="delete">delete</span></button>
+</div>
+</div>
+<div class="flex items-center justify-between group">
+<span class="font-body-md text-body-md text-on-surface-variant">Smoked Salmon</span>
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-data-mono text-on-surface-variant">+$5.00</span>
+<button class="text-outline hover:text-error opacity-0 group-hover:opacity-100 transition-opacity"><span class="material-symbols-outlined" data-icon="delete">delete</span></button>
+</div>
+</div>
+<div class="flex items-center justify-between group">
+<span class="font-body-md text-body-md text-on-surface-variant">Cherry Tomatoes</span>
+<div class="flex items-center gap-sm">
+<span class="font-data-mono text-data-mono text-on-surface-variant">+$1.00</span>
+<button class="text-outline hover:text-error opacity-0 group-hover:opacity-100 transition-opacity"><span class="material-symbols-outlined" data-icon="delete">delete</span></button>
+</div>
+</div>
+</div>
+</div>
+<!-- Spice Level (Toggle) -->
+<div class="flex items-center justify-between bg-surface border border-outline-variant rounded-lg p-md">
+<span class="font-body-md text-body-md font-bold text-on-background">Allow Spice Level Selection</span>
+<div class="w-10 h-6 bg-primary rounded-full relative cursor-pointer shadow-inner">
+<div class="absolute right-1 top-1 w-4 h-4 bg-on-primary rounded-full shadow-sm"></div>
+</div>
+</div>
+</section>
+</div>
+<!-- Panel Footer Actions -->
+<footer class="p-lg border-t border-outline-variant bg-surface shrink-0 flex flex-col gap-md">
+<div class="flex gap-md">
+<button class="flex-1 bg-surface border border-primary text-primary font-label-md text-label-md uppercase tracking-wider py-sm rounded-full hover:bg-primary-container/10 transition-colors">Cancel</button>
+<button class="flex-1 bg-primary text-on-primary font-label-md text-label-md uppercase tracking-wider py-sm rounded-full shadow-md hover:bg-primary-container transition-colors">Save Changes</button>
+</div>
+<div class="text-center">
+<button class="font-label-md text-label-md text-error hover:text-on-error-container underline decoration-error/50 underline-offset-4 transition-colors">Delete Item</button>
+</div>
+</footer>
+</aside>
+</div>
+</body></html>

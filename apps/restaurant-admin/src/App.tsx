@@ -1,29 +1,42 @@
-import { MaterialIcon } from "@amber/ui";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { Shell } from "./components/Shell";
+import { DashboardPage } from "./pages/DashboardPage";
+import { MenuPage } from "./pages/MenuPage";
+import { TablesPage } from "./pages/TablesPage";
+import { TableSessionPage } from "./pages/TableSessionPage";
+import { BillingPage } from "./pages/BillingPage";
+import { PaymentCompletePage } from "./pages/PaymentCompletePage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { LoginPage } from "./pages/LoginPage";
+import { KdsPage } from "./kds/KdsPage";
 
 /**
- * Restaurant Admin shell — Kitchen Display System + menu/table management.
+ * Restaurant Admin — the manager "cockpit".
  *
- * Design spec: ./DESIGN.md and ./kds.html (in this app folder).
- * Build-out plan:
- *  - Connect to @amber/api-client; poll/subscribe to open Orders for the
- *    staff's tenant and render the KDS column board (DESIGN.md).
- *  - Advance item status (placed -> preparing -> served) via the orders API.
- *  - Menu & table CRUD screens.
- *  - Wrap in <TenantThemeProvider> with the staff member's tenant so the admin
- *    adopts that restaurant's brand, exactly like the customer app.
+ * Shell-wrapped pages share the sidebar + top bar (Dashboard, Menu, Tables,
+ * KDS, Analytics). Login, Billing and the post-payment confirmation render
+ * full-screen without the shell, matching the prototype. All screens read/write
+ * the in-memory AdminStore, so edits and take-backs propagate live.
  */
 export default function App() {
   return (
-    <div className="min-h-screen bg-background text-on-surface p-8">
-      <header className="flex items-center gap-3 mb-6">
-        <MaterialIcon name="skillet" filled size={28} className="text-primary" />
-        <h1 className="text-2xl font-serif font-bold">Kitchen Display</h1>
-      </header>
-      <p className="text-on-surface-variant max-w-prose">
-        KDS scaffold. Wire to <code>@amber/api-client</code> and render the
-        column board from <code>DESIGN.md</code>. Themed through the same tenant
-        tokens as every other app.
-      </p>
-    </div>
+    <Routes>
+      {/* Full-screen, no shell */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/tables/:id/billing" element={<BillingPage />} />
+      <Route path="/tables/:id/complete" element={<PaymentCompletePage />} />
+
+      {/* Shell-wrapped */}
+      <Route element={<Shell />}>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/menu" element={<MenuPage />} />
+        <Route path="/tables" element={<TablesPage />} />
+        <Route path="/tables/:id" element={<TableSessionPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/kds" element={<KdsPage />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

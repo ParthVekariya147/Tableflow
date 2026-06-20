@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Menu Management - Amber &amp; Grain</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&amp;family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .icon-fill {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Custom Utilities based on Style Guidance */
+        .card-shadow {
+            box-shadow: 0px 4px 20px rgba(83, 68, 55, 0.06);
+        }
+        
+        /* Editable Field Styling */
+        .editable-field {
+            border-bottom: 1px dashed theme('colors.outline-variant');
+            transition: all 0.2s ease;
+        }
+        .editable-field:hover, .editable-field:focus {
+            border-bottom-style: solid;
+            border-color: theme('colors.primary');
+            outline: none;
+        }
+        
+        /* Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: theme('colors.primary');
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: theme('colors.primary');
+        }
+        .toggle-checkbox:checked + .toggle-label:after {
+            transform: translateX(100%);
+            border-color: white;
+        }
+        
+        /* Hide scrollbar for clean look */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.outline-variant');
+            border-radius: 10px;
+        }
+    </style>
+<!-- Tailwind Config -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed": "#25190e",
+                        "outline": "#857466",
+                        "primary": "#6a3c00",
+                        "surface-bright": "#fff8f5",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#2d1600",
+                        "on-background": "#211a15",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#6a3b00",
+                        "inverse-surface": "#372f29",
+                        "on-secondary-container": "#705f51",
+                        "surface-container-high": "#f4e6dc",
+                        "secondary-fixed-dim": "#d8c3b1",
+                        "primary-fixed": "#ffdcbf",
+                        "secondary": "#6c5b4d",
+                        "tertiary-fixed": "#cbe6ff",
+                        "on-tertiary-fixed": "#001e30",
+                        "surface-container": "#f9ebe2",
+                        "primary-container": "#8c5000",
+                        "on-tertiary-container": "#b7ddff",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#f2dcca",
+                        "surface-container-low": "#fff1e8",
+                        "error-container": "#ffdad6",
+                        "on-surface-variant": "#524438",
+                        "surface-container-highest": "#eee0d6",
+                        "error": "#ba1a1a",
+                        "secondary-fixed": "#f5decd",
+                        "on-error-container": "#93000a",
+                        "on-surface": "#211a15",
+                        "background": "#fff8f5",
+                        "surface-dim": "#e5d8ce",
+                        "surface-container-lowest": "#ffffff",
+                        "surface": "#fff8f5",
+                        "outline-variant": "#d7c3b3",
+                        "surface-tint": "#8c5000",
+                        "tertiary-fixed-dim": "#8fcdff",
+                        "on-tertiary-fixed-variant": "#004b71",
+                        "inverse-primary": "#ffb873",
+                        "tertiary": "#004b71",
+                        "inverse-on-surface": "#fceee4",
+                        "on-secondary-fixed-variant": "#534437",
+                        "primary-fixed-dim": "#ffb873",
+                        "on-primary-container": "#ffd0a6",
+                        "on-error": "#ffffff",
+                        "tertiary-container": "#006495",
+                        "surface-variant": "#eee0d6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "1rem", /* Adjusted to 16px per Style Guidance */
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "container-max": "1440px",
+                        "xs": "8px",
+                        "lg": "24px",
+                        "xxl": "48px",
+                        "base": "4px",
+                        "sm": "12px",
+                        "gutter": "24px",
+                        "xl": "32px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Literata"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "display-lg": ["Literata"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "headline-md": ["Literata"],
+                        "body-lg": ["Plus Jakarta Sans"],
+                        "title-lg": ["Plus Jakarta Sans"],
+                        "data-mono": ["Plus Jakarta Sans"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                        "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "title-lg": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "data-mono": ["14px", {"lineHeight": "20px", "fontWeight": "500"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md antialiased overflow-x-hidden min-h-screen">
+<!-- Shared Component: SideNavBar -->
+<nav class="bg-surface-container-lowest border-r border-outline-variant fixed left-0 top-0 h-full w-[280px] shadow-md flex flex-col py-lg px-md z-50">
+<!-- Header -->
+<div class="mb-xxl px-sm flex items-center gap-sm">
+<div class="w-10 h-10 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center font-display-lg text-[24px] font-bold">A</div>
+<div>
+<h1 class="font-headline-md text-headline-md text-primary leading-none">Amber &amp; Grain</h1>
+<span class="font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Main Kitchen</span>
+</div>
+</div>
+<!-- Navigation Links -->
+<ul class="flex flex-col gap-xs flex-1">
+<!-- Dashboard (Inactive) -->
+<li>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">dashboard</span>
+<span class="font-label-md text-label-md">Dashboard</span>
+</a>
+</li>
+<!-- Menu Management (Active) -->
+<li>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-primary font-bold border-r-4 border-primary bg-surface-container-low transition-colors duration-200" href="#" style="transform: scale(0.98); transition: transform 0.15s;">
+<span class="material-symbols-outlined icon-fill text-[24px]">restaurant_menu</span>
+<span class="font-label-md text-label-md">Menu Management</span>
+</a>
+</li>
+<!-- Tables (Inactive) -->
+<li>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">table_restaurant</span>
+<span class="font-label-md text-label-md">Tables</span>
+</a>
+</li>
+<!-- Sales Analytics (Inactive) -->
+<li>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">analytics</span>
+<span class="font-label-md text-label-md">Sales Analytics</span>
+</a>
+</li>
+</ul>
+<!-- Footer Links -->
+<div class="mt-auto flex flex-col gap-xs border-t border-outline-variant pt-md">
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined text-[24px]">help</span>
+<span class="font-label-md text-label-md">Support</span>
+</a>
+<button class="mt-sm flex items-center gap-sm px-sm py-sm rounded-lg text-error hover:bg-error-container transition-colors duration-200">
+<span class="material-symbols-outlined text-[24px]">logout</span>
+<span class="font-label-md text-label-md">Logout</span>
+</button>
+</div>
+</nav>
+<!-- Shared Component: TopAppBar -->
+<header class="bg-surface border-b border-outline-variant fixed top-0 right-0 w-[calc(100%-280px)] z-40 flex justify-between items-center h-20 px-xl ml-[280px]">
+<!-- Left Section -->
+<div class="flex items-center gap-lg">
+<h2 class="font-headline-sm text-headline-sm font-bold text-primary mr-xl">Amber &amp; Grain</h2>
+<nav class="flex gap-md">
+<a class="font-label-md text-label-md text-on-surface-variant hover:bg-primary-container/10 rounded-lg px-sm py-xs transition-colors duration-200" href="#">Live Status</a>
+<a class="font-label-md text-label-md text-on-surface-variant hover:bg-primary-container/10 rounded-lg px-sm py-xs transition-colors duration-200" href="#">Global Orders</a>
+</nav>
+</div>
+<!-- Right Section -->
+<div class="flex items-center gap-md">
+<button class="p-xs text-on-surface-variant hover:bg-primary-container/10 rounded-full transition-colors duration-200 relative">
+<span class="material-symbols-outlined text-[24px]">sync</span>
+</button>
+<button class="p-xs text-on-surface-variant hover:bg-primary-container/10 rounded-full transition-colors duration-200 relative">
+<span class="material-symbols-outlined text-[24px]">notifications</span>
+<span class="absolute top-1 right-1 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<div class="w-[1px] h-8 bg-outline-variant mx-xs"></div>
+<div class="flex items-center gap-sm cursor-pointer hover:bg-primary-container/10 p-xs rounded-lg transition-colors duration-200">
+<div class="text-right">
+<p class="font-label-md text-label-md text-primary m-0">Manager On Duty</p>
+<p class="font-label-md text-label-md text-on-surface-variant text-[10px] m-0">Active Session</p>
+</div>
+<div class="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-on-surface-variant text-[20px]">person</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="ml-[280px] mt-20 p-xl flex gap-xl min-h-[calc(100vh-80px)]">
+<!-- Left Column: Categories -->
+<aside class="w-64 flex flex-col shrink-0">
+<h3 class="font-title-lg text-title-lg text-on-background mb-lg flex items-center justify-between">
+                Categories
+                <span class="font-label-md text-label-md text-on-surface-variant bg-surface-variant px-2 py-1 rounded-full">5</span>
+</h3>
+<ul class="flex flex-col gap-xs mb-lg">
+<!-- Active Category -->
+<li>
+<button class="w-full flex items-center justify-between px-md py-sm rounded-lg bg-surface-container-high text-primary border border-primary/20 font-label-md text-label-md">
+<span>Starters</span>
+<span class="text-on-surface-variant text-[10px]">8</span>
+</button>
+</li>
+<!-- Inactive Categories -->
+<li>
+<button class="w-full flex items-center justify-between px-md py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low border border-transparent hover:border-outline-variant/30 transition-all font-label-md text-label-md">
+<span>Mains</span>
+<span class="text-on-surface-variant text-[10px]">14</span>
+</button>
+</li>
+<li>
+<button class="w-full flex items-center justify-between px-md py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low border border-transparent hover:border-outline-variant/30 transition-all font-label-md text-label-md">
+<span>Sides</span>
+<span class="text-on-surface-variant text-[10px]">6</span>
+</button>
+</li>
+<li>
+<button class="w-full flex items-center justify-between px-md py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low border border-transparent hover:border-outline-variant/30 transition-all font-label-md text-label-md">
+<span>Drinks</span>
+<span class="text-on-surface-variant text-[10px]">22</span>
+</button>
+</li>
+<li>
+<button class="w-full flex items-center justify-between px-md py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low border border-transparent hover:border-outline-variant/30 transition-all font-label-md text-label-md">
+<span>Desserts</span>
+<span class="text-on-surface-variant text-[10px]">5</span>
+</button>
+</li>
+</ul>
+<button class="mt-auto w-full flex items-center justify-center gap-xs px-md py-sm rounded-full bg-transparent border border-primary text-primary font-label-md text-label-md hover:bg-primary-container/5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                Add Category
+            </button>
+</aside>
+<!-- Vertical Divider -->
+<div class="w-[1px] bg-outline-variant hidden lg:block"></div>
+<!-- Main Area: Grid of Items -->
+<section class="flex-1 flex flex-col">
+<!-- Section Header -->
+<div class="flex items-center justify-between mb-lg border-b border-outline-variant pb-md">
+<div>
+<h2 class="font-headline-md text-headline-md text-on-background">Starters</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mt-1">Manage items, pricing, and availability.</p>
+</div>
+<button class="flex items-center gap-xs px-lg py-sm rounded-full bg-primary text-on-primary font-label-md text-label-md hover:bg-primary-fixed-variant transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[18px]">add</span>
+                    Add Item
+                </button>
+</div>
+<!-- Items Grid -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-lg content-start">
+<!-- Card 1 -->
+<div class="bg-surface-container-lowest rounded-xl card-shadow border border-outline-variant overflow-hidden flex flex-col group relative">
+<!-- Photo -->
+<div class="h-32 w-full bg-surface-variant relative">
+<img class="w-full h-full object-cover" data-alt="A top-down view of a steaming cup of rich amber Masala Chai in a pristine white ceramic cup, resting on a clean textured wooden table. The lighting is soft and bright, evoking a modern, premium cafe setting. A cinnamon stick rests on the saucer." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBBlNwLPxBoE2pQujqzSnkIfEhhXc_tXRD_iW_M8lTrn0aeYGVWW_qAXJ275Akztpyx--y3vEh_eWnrIJ6zMmw3xkS46VoxLsUfUMEBVEB-47sl7FzB2NJ_hd8tsIZT5tj8nMBW3DzpnYtJG9qVETNTWAO-qyktqGoyXtE5w2F4scIYy_Qtmt3xRkuan1CUv62H0GxkuuDh6H1Oq0lsiOYbLL3WibHdq2HsB9guwIHp0K9tiA9W4NU9OxU-hhYO1PpuM9K6whP2sHQ"/>
+<!-- Status Chip Overaly -->
+<div class="absolute top-2 left-2 bg-surface-container-lowest/90 backdrop-blur-sm px-2 py-1 rounded-full border border-outline-variant flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span class="font-label-md text-[10px] text-on-surface">Available</span>
+</div>
+</div>
+<!-- Content -->
+<div class="p-md flex flex-col gap-sm flex-1">
+<div class="flex justify-between items-start gap-sm">
+<input class="font-title-lg text-title-lg text-on-background bg-transparent border-none p-0 editable-field w-full truncate focus:ring-0" type="text" value="Masala Chai"/>
+</div>
+<div class="flex items-center gap-xs text-primary font-data-mono text-data-mono">
+<span>$</span>
+<input class="bg-transparent border-none p-0 editable-field w-16 focus:ring-0" type="text" value="4.50"/>
+</div>
+</div>
+<!-- Footer / Actions -->
+<div class="px-md py-sm border-t border-outline-variant bg-surface-container flex items-center justify-between">
+<span class="font-label-md text-[11px] text-on-surface-variant uppercase tracking-wider">Availability</span>
+<!-- Custom Toggle Switch -->
+<label class="flex items-center cursor-pointer relative h-6 w-11 rounded-full">
+<input checked="" class="sr-only toggle-checkbox" type="checkbox"/>
+<div class="toggle-label block w-11 h-6 rounded-full bg-outline-variant transition-colors duration-200"></div>
+<div class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 transform translate-x-5 shadow-sm"></div>
+</label>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="bg-surface-container-lowest rounded-xl card-shadow border border-outline-variant overflow-hidden flex flex-col group relative">
+<div class="h-32 w-full bg-surface-variant relative">
+<img class="w-full h-full object-cover" data-alt="A close-up shot of crispy golden-brown vegetable samosas on a minimalist white ceramic plate. The lighting highlights the flaky texture of the pastry against a clean, bright off-white background, embodying a premium corporate dining aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBkYDYyND5hbD9t9qKWHVNMBhHf-dko7SAQf7E4f_Lny-hnZby1jfgBd4-zh8rCIRuvkE3DjQJnHX20soSYxCO3Lr3er8jpYT3F5WJARBcyxVDj4NG4TcjM7UJrA0Dhpid_o0X-DJoINaU37xWMwR2Xp2x5E7MFiGchMXDmZh2RCX491GfvdaL0OzU5EpSYyFNtbq6XiQHnBS_LY1ecHdo_TO4iIF0pBw0jI8Xmd6mG3WHrg4zAxRTc3De0FrPdQWRmBHUjSMwFepI"/>
+<div class="absolute top-2 left-2 bg-surface-container-lowest/90 backdrop-blur-sm px-2 py-1 rounded-full border border-outline-variant flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span class="font-label-md text-[10px] text-on-surface">Available</span>
+</div>
+</div>
+<div class="p-md flex flex-col gap-sm flex-1">
+<div class="flex justify-between items-start gap-sm">
+<input class="font-title-lg text-title-lg text-on-background bg-transparent border-none p-0 editable-field w-full truncate focus:ring-0" type="text" value="Vegetable Samosa"/>
+</div>
+<div class="flex items-center gap-xs text-primary font-data-mono text-data-mono">
+<span>$</span>
+<input class="bg-transparent border-none p-0 editable-field w-16 focus:ring-0" type="text" value="6.00"/>
+</div>
+</div>
+<div class="px-md py-sm border-t border-outline-variant bg-surface-container flex items-center justify-between">
+<span class="font-label-md text-[11px] text-on-surface-variant uppercase tracking-wider">Availability</span>
+<label class="flex items-center cursor-pointer relative h-6 w-11 rounded-full">
+<input checked="" class="sr-only toggle-checkbox" type="checkbox"/>
+<div class="toggle-label block w-11 h-6 rounded-full bg-outline-variant transition-colors duration-200"></div>
+<div class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 transform translate-x-5 shadow-sm"></div>
+</label>
+</div>
+</div>
+<!-- Card 3 (86'd State) -->
+<div class="bg-surface-container-lowest rounded-xl card-shadow border border-outline-variant overflow-hidden flex flex-col group relative opacity-75 grayscale-[30%]">
+<div class="h-32 w-full bg-surface-variant relative">
+<img class="w-full h-full object-cover" data-alt="An elegant small plate featuring a delicate portion of soft shell crab lightly fried, resting on a bed of microgreens. The image is styled with a calm, authority-evoking bright light, suitable for a high-end restaurant menu interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCLc7DrMf63tamotvDXOSdENgmyup-vKyzqb3_1oYruQ2tJambeWAQBzrwJFvoXwbDSZiBZspFsNhO2Ji-72UWA9dFTMCRGPyEKJ6MQ9-7DNa-okMfo39qqNIdDlZ-iNsdLyy8EQWgxHTNDxc49AiaLZ0uwyneky_3MeACCzbStVTZQIbNOtZfqwwsr2remwd7TfOIURgIk-SqBMrx38SatPSAZi_GWOCXHX_oqnWV4Dvrvjy6fBgVjsGsuRv_oGFiFpDs3IjjXvds"/>
+<div class="absolute top-2 left-2 bg-error-container/90 backdrop-blur-sm px-2 py-1 rounded-full border border-error/20 flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+<span class="font-label-md text-[10px] text-on-error-container">86'd</span>
+</div>
+</div>
+<div class="p-md flex flex-col gap-sm flex-1">
+<div class="flex justify-between items-start gap-sm">
+<input class="font-title-lg text-title-lg text-on-background bg-transparent border-none p-0 editable-field w-full truncate focus:ring-0 text-on-surface-variant" type="text" value="Soft Shell Crab"/>
+</div>
+<div class="flex items-center gap-xs text-on-surface-variant font-data-mono text-data-mono">
+<span>$</span>
+<input class="bg-transparent border-none p-0 editable-field w-16 focus:ring-0" type="text" value="14.50"/>
+</div>
+</div>
+<div class="px-md py-sm border-t border-outline-variant bg-surface-container flex items-center justify-between">
+<span class="font-label-md text-[11px] text-on-surface-variant uppercase tracking-wider">Availability</span>
+<label class="flex items-center cursor-pointer relative h-6 w-11 rounded-full">
+<input class="sr-only toggle-checkbox" type="checkbox"/>
+<div class="toggle-label block w-11 h-6 rounded-full bg-outline-variant transition-colors duration-200"></div>
+<div class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 shadow-sm"></div>
+</label>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="bg-surface-container-lowest rounded-xl card-shadow border border-outline-variant overflow-hidden flex flex-col group relative">
+<div class="h-32 w-full bg-surface-variant relative">
+<img class="w-full h-full object-cover" data-alt="A modern presentation of paneer tikka skewers on a sleek charcoal slate plate, contrasting with a clean off-white table surface. Subtle amber ambient lighting highlights the charred edges of the paneer, conveying a premium culinary experience." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCFjG39_Gsi72-G-C1vBaUJz2i18a3xFOWcOqS__oYGmF76N2c6q8jKMzniD-IQ8XeGPd3r7yXtfZzjFU2IckdukHrkGzNha7bdqldqkUUpAEYwH0-JKYRg5bsAEpE5w9ZA2z9sEd9yg_D9nZOPcb3f-iT48jSm2XyJv6u0yHhXJYpHhnMTjMtR6M5OThiIww2u_3fNqH50irZWv082rGemFuaTGqGC3ODxr0Sjalbbd2cmQyRLrCxpR3FQKhPMkH5PkVz0JxTyAno"/>
+<div class="absolute top-2 left-2 bg-surface-container-lowest/90 backdrop-blur-sm px-2 py-1 rounded-full border border-outline-variant flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span class="font-label-md text-[10px] text-on-surface">Available</span>
+</div>
+</div>
+<div class="p-md flex flex-col gap-sm flex-1">
+<div class="flex justify-between items-start gap-sm">
+<input class="font-title-lg text-title-lg text-on-background bg-transparent border-none p-0 editable-field w-full truncate focus:ring-0" type="text" value="Paneer Tikka Bites"/>
+</div>
+<div class="flex items-center gap-xs text-primary font-data-mono text-data-mono">
+<span>$</span>
+<input class="bg-transparent border-none p-0 editable-field w-16 focus:ring-0" type="text" value="8.50"/>
+</div>
+</div>
+<div class="px-md py-sm border-t border-outline-variant bg-surface-container flex items-center justify-between">
+<span class="font-label-md text-[11px] text-on-surface-variant uppercase tracking-wider">Availability</span>
+<label class="flex items-center cursor-pointer relative h-6 w-11 rounded-full">
+<input checked="" class="sr-only toggle-checkbox" type="checkbox"/>
+<div class="toggle-label block w-11 h-6 rounded-full bg-outline-variant transition-colors duration-200"></div>
+<div class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 transform translate-x-5 shadow-sm"></div>
+</label>
+</div>
+</div>
+</div>
+</section>
+</main>
+<script>
+        // Simple script to handle toggle visual changes for demonstration
+        document.querySelectorAll('.toggle-checkbox').forEach(toggle => {
+            toggle.addEventListener('change', function() {
+                const card = this.closest('.group');
+                const badgeContainer = card.querySelector('.absolute.top-2.left-2');
+                const badgeDot = badgeContainer.querySelector('.w-2');
+                const badgeText = badgeContainer.querySelector('.font-label-md');
+                
+                if (this.checked) {
+                    card.classList.remove('opacity-75', 'grayscale-[30%]');
+                    
+                    badgeContainer.classList.remove('bg-error-container/90', 'border-error/20');
+                    badgeContainer.classList.add('bg-surface-container-lowest/90', 'border-outline-variant');
+                    
+                    badgeDot.classList.remove('bg-error');
+                    badgeDot.classList.add('bg-green-500');
+                    
+                    badgeText.classList.remove('text-on-error-container');
+                    badgeText.classList.add('text-on-surface');
+                    badgeText.textContent = 'Available';
+                } else {
+                    card.classList.add('opacity-75', 'grayscale-[30%]');
+                    
+                    badgeContainer.classList.remove('bg-surface-container-lowest/90', 'border-outline-variant');
+                    badgeContainer.classList.add('bg-error-container/90', 'border-error/20');
+                    
+                    badgeDot.classList.remove('bg-green-500');
+                    badgeDot.classList.add('bg-error');
+                    
+                    badgeText.classList.remove('text-on-surface');
+                    badgeText.classList.add('text-on-error-container');
+                    badgeText.textContent = "86'd";
+                }
+            });
+        });
+    </script>
+</body></html>

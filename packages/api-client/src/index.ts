@@ -22,6 +22,25 @@ import { request, ApiError, type ApiClientConfig } from "./http.js";
 export { ApiError } from "./http.js";
 export type { ApiClientConfig } from "./http.js";
 
+// KDS realtime seam — the customer publishes rounds, the KDS renders/advances
+// them, both through KdsTransport. See ./kds.ts for the swap-the-backend story.
+export {
+  KDS_STAGES,
+  nextStage,
+  applyKdsEvent,
+  type KdsStage,
+  type KdsTicket,
+  type KdsTicketItem,
+  type KdsEvent,
+  type KdsTransport,
+  type PublishRoundInput,
+} from "./kds.js";
+export {
+  createHttpKdsTransport,
+  type HttpKdsTransportConfig,
+} from "./transports/http-kds.js";
+export { createStaticKdsTransport } from "./transports/static-kds.js";
+
 /** Body for adding a round to an order. */
 export interface AddRoundInput {
   type: z.infer<typeof roundTypeSchema>;
