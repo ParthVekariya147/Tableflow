@@ -115,3 +115,67 @@ body {
     background-color: rgb(var(--ag-error-container) / 0.25);
   }
 }
+
+/* Spinner for in-flight save/delete buttons. */
+.ag-spin {
+  animation: ag-spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes ag-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* "Crafting…" skeleton sweep, for optimistic placeholders (AI-gen style). */
+.ag-shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: rgb(var(--ag-surface-container-high));
+}
+.ag-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgb(var(--ag-surface-container-lowest) / 0.65),
+    transparent
+  );
+  animation: ag-shimmer 1.4s infinite;
+}
+@keyframes ag-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Global indeterminate top progress bar (any mutation in flight). */
+.ag-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 100;
+  background: rgb(var(--ag-primary-container) / 0.25);
+  overflow: hidden;
+}
+.ag-topbar::before {
+  content: "";
+  position: absolute;
+  height: 100%;
+  width: 40%;
+  background: rgb(var(--ag-primary));
+  animation: ag-topbar 1.1s ease-in-out infinite;
+}
+@keyframes ag-topbar {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}

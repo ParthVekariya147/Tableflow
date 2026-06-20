@@ -8,10 +8,11 @@ import { idSchema, moneyMinorSchema, isoTimestampSchema } from "./common.js";
  * (bundled) flows.
  */
 
-/** Kitchen lifecycle for a single line item. */
+/** Kitchen lifecycle for a single line item. `ready` = plated, not yet delivered. */
 export const itemStatusSchema = z.enum([
   "placed",
   "preparing",
+  "ready",
   "served",
   "cancelled",
 ]);
@@ -24,7 +25,8 @@ export const orderStatusSchema = z.enum(["open", "billed", "paid", "closed"]);
 
 export const orderItemSchema = z.object({
   id: idSchema,
-  menuItemId: idSchema,
+  /** Null once the source menu item is deleted — the name/price snapshot below preserves display. */
+  menuItemId: idSchema.nullable(),
   /** Snapshot of name at order time (menu may change later). */
   name: z.string().min(1),
   /** Snapshot of unit price in minor units at order time. */
@@ -46,9 +48,14 @@ export const orderSchema = z.object({
   tenantId: idSchema,
   tableId: idSchema,
   status: orderStatusSchema.default("open"),
+  /** Guest contact captured for the session — used on the bill/receipt. */
+  customerName: z.string().min(1).optional(),
+  customerPhone: z.string().min(1).optional(),
   rounds: z.array(roundSchema).default([]),
   createdAt: isoTimestampSchema,
   closedAt: isoTimestampSchema.optional(),
+  /** Set when the guest requests the bill — drives staff "Awaiting Bill". */
+  billRequestedAt: isoTimestampSchema.optional(),
 });
 
 export type ItemStatus = z.infer<typeof itemStatusSchema>;
@@ -62,6 +69,7 @@ export type Order = z.infer<typeof orderSchema>;
 export const ITEM_STATUS_FLOW: readonly ItemStatus[] = [
   "placed",
   "preparing",
+  "ready",
   "served",
 ] as const;
 

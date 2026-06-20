@@ -1,13 +1,13 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
 import { AppModule } from "./app.module.js";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors();
   app.setGlobalPrefix("");
-  app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  // DTO validation is handled per-route with Zod (`schema.parse(body)`), so no
+  // global class-validator ValidationPipe is needed.
   const port = Number(process.env.PORT ?? 3001);
   await app.listen(port);
   // eslint-disable-next-line no-console

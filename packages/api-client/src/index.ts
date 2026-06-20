@@ -9,13 +9,26 @@ import { z } from "zod";
 import {
   tenantSchema,
   menuSchema,
+  menuItemSchema,
+  menuCategorySchema,
   tableSchema,
+  floorTableSchema,
   orderSchema,
+  paymentSchema,
+  saleSchema,
   roundTypeSchema,
   type Tenant,
   type Menu,
+  type MenuItem,
+  type MenuCategory,
   type Table,
+  type FloorTable,
   type Order,
+  type OrderStatus,
+  type Payment,
+  type Sale,
+  type ItemStatus,
+  type PaymentMethod,
 } from "@amber/domain";
 import { request, ApiError, type ApiClientConfig } from "./http.js";
 
@@ -61,6 +74,36 @@ export interface CreateTenantInput {
   theme?: Tenant["theme"];
 }
 
+/** Body for creating a menu item. */
+export interface CreateItemInput {
+  categoryId: string;
+  name: string;
+  price: number;
+  description?: string;
+  badge?: string;
+  imageUrl?: string;
+  icon?: string;
+  swatch?: string;
+  available?: boolean;
+  sortOrder?: number;
+}
+export type UpdateItemInput = Partial<CreateItemInput>;
+
+/** Body for creating/editing a table. */
+export interface TableInput {
+  label: string;
+  seats?: number;
+  room?: string;
+  sortOrder?: number;
+}
+
+/** Body for capturing a payment. */
+export interface CapturePaymentInput {
+  method: PaymentMethod;
+  tip?: number;
+  tendered?: number;
+}
+
 export function createApiClient(config: ApiClientConfig) {
   return {
     /** Raw config (useful for cloning with a different tenant). */
@@ -82,26 +125,124 @@ export function createApiClient(config: ApiClientConfig) {
       /** Full menu (categories + items) for the active tenant. */
       get: (): Promise<Menu> =>
         request(config, "/menu", { schema: menuSchema }),
+      /** Add a category. */
+      addCategory: (input: {
+        name: string;
+        sortOrder?: number;
+      }): Promise<MenuCategory> =>
+        request(config, "/menu/categories", {
+          method: "POST",
+          body: input,
+          schema: menuCategorySchema,
+        }),
+      /** Rename / reorder a category. */
+      updateCategory: (
+        id: string,
+        input: { name?: string; sortOrder?: number },
+      ): Promise<MenuCategory> =>
+        request(config, `/menu/categories/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: menuCategorySchema,
+        }),
+      /** Delete a category (only when it holds no items). */
+      deleteCategory: (id: string): Promise<{ ok: true }> =>
+        request(config, `/menu/categories/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
+      /** Upload an item photo to storage; returns its public URL. */
+      uploadImage: (file: Blob, filename?: string): Promise<{ url: string }> => {
+        const form = new FormData();
+        form.append("file", file, filename ?? "upload");
+        return request(config, "/menu/upload", {
+          method: "POST",
+          body: form,
+          schema: z.object({ url: z.string() }),
+        });
+      },
+      /** Add a menu item. */
+      addItem: (input: CreateItemInput): Promise<MenuItem> =>
+        request(config, "/menu/items", {
+          method: "POST",
+          body: input,
+          schema: menuItemSchema,
+        }),
+      /** Patch a menu item (price, availability, name, …). */
+      updateItem: (id: string, input: UpdateItemInput): Promise<MenuItem> =>
+        request(config, `/menu/items/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: menuItemSchema,
+        }),
+      /** Delete a menu item. */
+      deleteItem: (id: string): Promise<{ ok: true }> =>
+        request(config, `/menu/items/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
     },
 
     tables: {
+      /** Floor view: every table with its live session + status. */
+      list: (): Promise<FloorTable[]> =>
+        request(config, "/tables", { schema: z.array(floorTableSchema) }),
       /** Resolve a scanned QR token to a Table. */
       byQrToken: (qrToken: string): Promise<Table> =>
-        request(config, `/tables/${encodeURIComponent(qrToken)}`, {
+        request(config, `/tables/qr/${encodeURIComponent(qrToken)}`, {
           schema: tableSchema,
+        }),
+      /** Add a table to the floor. */
+      create: (input: TableInput): Promise<Table> =>
+        request(config, "/tables", {
+          method: "POST",
+          body: input,
+          schema: tableSchema,
+        }),
+      /** Edit a table. */
+      update: (id: string, input: Partial<TableInput>): Promise<Table> =>
+        request(config, `/tables/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: tableSchema,
+        }),
+      /** Rotate a table's QR token. */
+      regenerateQr: (id: string): Promise<Table> =>
+        request(config, `/tables/${encodeURIComponent(id)}/qr`, {
+          method: "POST",
+          schema: tableSchema,
+        }),
+      /** Remove a table. */
+      remove: (id: string): Promise<{ ok: true }> =>
+        request(config, `/tables/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
         }),
     },
 
     orders: {
+      /** List sessions (defaults to live: open + billed). */
+      list: (status?: OrderStatus): Promise<Order[]> =>
+        request(
+          config,
+          status ? `/orders?status=${encodeURIComponent(status)}` : "/orders",
+          { schema: z.array(orderSchema) },
+        ),
+      /** Recent completed sales for dashboards. */
+      sales: (): Promise<Sale[]> =>
+        request(config, "/orders/sales", { schema: z.array(saleSchema) }),
       get: (id: string): Promise<Order> =>
         request(config, `/orders/${encodeURIComponent(id)}`, {
           schema: orderSchema,
         }),
-      /** Open a new dine-in session for a table. */
-      createForTable: (tableId: string): Promise<Order> =>
+      /** Open a new dine-in session for a table, optionally with guest contact. */
+      createForTable: (
+        tableId: string,
+        guest?: { customerName?: string; customerPhone?: string },
+      ): Promise<Order> =>
         request(config, "/orders", {
           method: "POST",
-          body: { tableId },
+          body: { tableId, ...guest },
           schema: orderSchema,
         }),
       /** Send a round to the kitchen ("bring it" / "bring these"). */
@@ -111,11 +252,48 @@ export function createApiClient(config: ApiClientConfig) {
           body: input,
           schema: orderSchema,
         }),
+      /** Add a single item to a running session (staff add-on). */
+      addItem: (
+        orderId: string,
+        input: { menuItemId: string; qty?: number },
+      ): Promise<Order> =>
+        request(config, `/orders/${encodeURIComponent(orderId)}/items`, {
+          method: "POST",
+          body: input,
+          schema: orderSchema,
+        }),
+      /** Change a line's qty (0 removes) and/or advance its kitchen status. */
+      updateItem: (
+        orderId: string,
+        itemId: string,
+        input: { qty?: number; status?: ItemStatus },
+      ): Promise<Order> =>
+        request(
+          config,
+          `/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(itemId)}`,
+          { method: "PATCH", body: input, schema: orderSchema },
+        ),
       /** Request the bill for an order. */
       requestBill: (orderId: string): Promise<Order> =>
         request(config, `/orders/${encodeURIComponent(orderId)}/bill`, {
           method: "POST",
           schema: orderSchema,
+        }),
+      /** Abandon a session without payment (walkout / mistake). */
+      cancel: (orderId: string): Promise<Order> =>
+        request(config, `/orders/${encodeURIComponent(orderId)}/cancel`, {
+          method: "POST",
+          schema: orderSchema,
+        }),
+      /** Settle the bill and close the session. */
+      capturePayment: (
+        orderId: string,
+        input: CapturePaymentInput,
+      ): Promise<Payment> =>
+        request(config, `/orders/${encodeURIComponent(orderId)}/payment`, {
+          method: "POST",
+          body: input,
+          schema: paymentSchema,
         }),
     },
 

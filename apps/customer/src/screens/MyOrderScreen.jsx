@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
+import FoodImage from "../components/FoodImage";
 import TopAppBar from "../components/TopAppBar";
 
 export default function MyOrderScreen() {
@@ -47,7 +48,7 @@ export default function MyOrderScreen() {
             <div key={item.id} className="bg-surface-container-lowest rounded-2xl shadow-[0px_2px_12px_rgba(26,26,26,0.04)] overflow-hidden fade-in">
               <div className="flex">
                 <div className="w-20 h-20 flex-shrink-0 overflow-hidden">
-                  <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+                  <FoodImage item={item} className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 p-3">
                   <div className="flex justify-between items-start">

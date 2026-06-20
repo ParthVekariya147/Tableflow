@@ -29,7 +29,7 @@ export const KDS_STAGES: readonly KdsStage[] = [
 /** Next stage after `stage`, or null if already terminal (served). */
 export function nextStage(stage: KdsStage): KdsStage | null {
   const i = KDS_STAGES.indexOf(stage);
-  return i >= 0 && i < KDS_STAGES.length - 1 ? KDS_STAGES[i + 1] : null;
+  return i >= 0 && i < KDS_STAGES.length - 1 ? KDS_STAGES[i + 1]! : null;
 }
 
 /** A single line on a ticket. */

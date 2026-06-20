@@ -8,5 +8,6 @@
 export * from "./common.js";
 export * from "./tenant.js";
 export * from "./menu.js";
-export * from "./table.js";
 export * from "./order.js";
+export * from "./table.js";
+export * from "./payment.js";

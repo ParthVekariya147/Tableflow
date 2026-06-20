@@ -1,0 +1,69 @@
+import { createContext, useContext, useEffect, useState } from "react";
+import { useBoot } from "./BootContext";
+
+/**
+ * Loads the active tenant's menu from the platform API (the same menu the
+ * restaurant-admin manages) and maps it to the shape the guest screens expect.
+ * Money arrives in cents; we expose `price` in dollars for display and keep
+ * `priceCents` + the API `id` for placing orders.
+ */
+const MenuContext = createContext(null);
+
+function toScreenItem(i) {
+  return {
+    id: i.id,
+    name: i.name,
+    category: i.category,
+    price: i.price / 100,
+    priceCents: i.price,
+    desc: i.description || "",
+    badge: i.badge,
+    img: i.imageUrl || null,
+    icon: i.icon || "restaurant",
+    swatch: i.swatch,
+  };
+}
+
+export function MenuProvider({ children }) {
+  const { api } = useBoot();
+  const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState(["All"]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    api.menu
+      .get()
+      .then((menu) => {
+        if (!active) return;
+        setItems(menu.items.map(toScreenItem));
+        setCategories(["All", ...menu.categories.map((c) => c.name)]);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
+
+  // Welcome-screen carousels, derived from the live menu (no placements API yet).
+  const drinks = items.filter((i) => /drink|beverage/i.test(i.category));
+  const bites = items.filter((i) => /starter|appetiz|side|small|bite/i.test(i.category));
+  const welcome = {
+    drinks: (drinks.length ? drinks : items).slice(0, 6),
+    bites: (bites.length ? bites : items.slice(6)).slice(0, 6),
+  };
+
+  return (
+    <MenuContext.Provider value={{ items, categories, welcome, loading, error }}>
+      {children}
+    </MenuContext.Provider>
+  );
+}
+
+export const useMenu = () => useContext(MenuContext);

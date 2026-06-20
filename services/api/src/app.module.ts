@@ -6,6 +6,7 @@ import {
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { TenantModule } from "./tenant/tenant.module.js";
 import { MenuModule } from "./menu/menu.module.js";
+import { TablesModule } from "./tables/tables.module.js";
 import { OrdersModule } from "./orders/orders.module.js";
 import { AdminModule } from "./admin/admin.module.js";
 import { TenantMiddleware } from "./tenant/tenant.middleware.js";
@@ -15,6 +16,7 @@ import { TenantMiddleware } from "./tenant/tenant.middleware.js";
     PrismaModule,
     TenantModule,
     MenuModule,
+    TablesModule,
     OrdersModule,
     AdminModule,
   ],

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { Toggle } from "./Toggle";
 import { useAdmin } from "../store/AdminStore";
@@ -32,7 +32,7 @@ export function ItemPanel({
   defaultCategoryId: string;
   onClose: () => void;
 }) {
-  const { state, dispatch } = useAdmin();
+  const { state, dispatch, uploadImage } = useAdmin();
   const isEdit = item !== null;
 
   const [name, setName] = useState(item?.name ?? "");
@@ -41,22 +41,56 @@ export function ItemPanel({
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? defaultCategoryId);
   const [icon, setIcon] = useState(item?.icon ?? "restaurant");
   const [swatch, setSwatch] = useState(item?.swatch ?? SWATCHES[0]!);
+  const [imageUrl, setImageUrl] = useState<string | undefined>(item?.imageUrl);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [available, setAvailable] = useState(item?.available ?? true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const busy = saving || deleting || uploading;
   const [allowSpice, setAllowSpice] = useState(true);
   const [addOns, setAddOns] = useState<AddOn[]>([
     { name: "Poached Egg", priceCents: 250 },
     { name: "Extra Cheese", priceCents: 200 },
   ]);
 
-  function save() {
+  async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setUploadError(null);
+    // Show an instant local preview while the upload runs; swap to the stored
+    // public URL on success, or revert if it fails.
+    const preview = URL.createObjectURL(file);
+    const prev = imageUrl;
+    setImageUrl(preview);
+    setUploading(true);
+    try {
+      const url = await uploadImage(file);
+      setImageUrl(url);
+    } catch (err) {
+      setImageUrl(prev);
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      URL.revokeObjectURL(preview);
+    }
+  }
+
+  async function save() {
     const priceCents = Math.round((parseFloat(price) || 0) * 100);
-    if (!name.trim()) return;
+    if (!name.trim() || busy) return;
     if (isEdit && item) {
-      dispatch({
+      // Keep the panel open with a spinner until the edit is confirmed.
+      setSaving(true);
+      await dispatch({
         type: "UPDATE_ITEM",
         itemId: item.id,
-        patch: { name, description, priceCents, categoryId, icon, swatch, available },
+        patch: { name, description, priceCents, categoryId, icon, swatch, available, imageUrl },
       });
+      onClose();
     } else {
       const newItem: MenuItem = {
         id: uid("it"),
@@ -67,14 +101,19 @@ export function ItemPanel({
         available,
         icon,
         swatch,
+        imageUrl,
       };
-      dispatch({ type: "ADD_ITEM", item: newItem });
+      // Fire and close immediately — the grid shows a "crafting" placeholder
+      // until the server confirms the new item.
+      void dispatch({ type: "ADD_ITEM", item: newItem });
+      onClose();
     }
-    onClose();
   }
 
-  function remove() {
-    if (item) dispatch({ type: "DELETE_ITEM", itemId: item.id });
+  async function remove() {
+    if (!item || busy) return;
+    setDeleting(true);
+    await dispatch({ type: "DELETE_ITEM", itemId: item.id });
     onClose();
   }
 
@@ -102,24 +141,70 @@ export function ItemPanel({
         </header>
 
         <div className="flex flex-1 flex-col gap-xl overflow-y-auto p-lg">
-          {/* "Photo" — gradient swatch + icon picker */}
+          {/* "Photo" — uploaded image, or gradient swatch + icon stand-in */}
           <section className="flex flex-col gap-sm">
             <label className="font-label-md text-label-md text-on-background">Photo</label>
             <div
-              className={`flex h-40 w-full items-center justify-center rounded-lg bg-gradient-to-br ${swatch}`}
+              className={`relative flex h-40 w-full items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br ${swatch}`}
             >
-              <Icon name={icon} size={64} className="text-on-background/70" />
-            </div>
-            <div className="flex gap-xs">
-              {SWATCHES.map((s) => (
+              {imageUrl ? (
+                <img src={imageUrl} alt={name || "Menu item"} className="h-full w-full object-cover" />
+              ) : (
+                <Icon name={icon} size={64} className="text-on-background/70" />
+              )}
+              {imageUrl && !uploading && (
                 <button
-                  key={s}
-                  onClick={() => setSwatch(s)}
-                  className={`h-7 w-7 rounded-full bg-gradient-to-br ${s} ${
-                    swatch === s ? "ring-2 ring-primary ring-offset-2" : ""
-                  }`}
-                />
-              ))}
+                  type="button"
+                  onClick={() => setImageUrl(undefined)}
+                  title="Remove photo"
+                  className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-lowest/90 text-on-surface-variant backdrop-blur-sm transition-colors hover:text-error"
+                >
+                  <Icon name="delete" size={18} />
+                </button>
+              )}
+              {uploading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-xs bg-on-background/40 text-on-primary backdrop-blur-sm">
+                  <Icon name="progress_activity" size={28} className="ag-spin" />
+                  <span className="font-label-md text-[11px] uppercase tracking-wider">
+                    Uploading…
+                  </span>
+                </div>
+              )}
+            </div>
+            {uploadError && (
+              <p className="font-body-md text-body-md text-error">{uploadError}</p>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={onPickImage}
+            />
+            <div className="flex items-center gap-sm">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center gap-xs rounded-full border border-primary bg-surface px-md py-xs font-label-md text-label-md text-primary transition-colors hover:bg-primary-container/10 disabled:opacity-50"
+              >
+                <Icon name={uploading ? "progress_activity" : "upload"} size={18} className={uploading ? "ag-spin" : ""} />
+                {uploading ? "Uploading…" : imageUrl ? "Change Photo" : "Upload Photo"}
+              </button>
+              {!imageUrl && (
+                <div className="flex gap-xs">
+                  {SWATCHES.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSwatch(s)}
+                      className={`h-7 w-7 rounded-full bg-gradient-to-br ${s} ${
+                        swatch === s ? "ring-2 ring-primary ring-offset-2" : ""
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </section>
 
@@ -228,29 +313,79 @@ export function ItemPanel({
           <div className="flex gap-md">
             <button
               onClick={onClose}
-              className="flex-1 rounded-full border border-primary bg-surface py-sm font-label-md text-label-md uppercase tracking-wider text-primary transition-colors hover:bg-primary-container/10"
+              disabled={busy}
+              className="flex-1 rounded-full border border-primary bg-surface py-sm font-label-md text-label-md uppercase tracking-wider text-primary transition-colors hover:bg-primary-container/10 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={save}
-              className="flex-1 rounded-full bg-primary py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary shadow-md transition-colors hover:bg-primary-container"
+              disabled={busy}
+              className="flex flex-1 items-center justify-center gap-xs rounded-full bg-primary py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary shadow-md transition-colors hover:bg-primary-container disabled:opacity-70"
             >
-              {isEdit ? "Save Changes" : "Create Item"}
+              {saving && <Icon name="progress_activity" size={18} className="ag-spin" />}
+              {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Item"}
             </button>
           </div>
           {isEdit && (
             <div className="text-center">
               <button
-                onClick={remove}
-                className="font-label-md text-label-md text-error underline decoration-error/50 underline-offset-4 transition-colors hover:text-on-error-container"
+                onClick={() => setConfirmDelete(true)}
+                disabled={busy}
+                className="inline-flex items-center justify-center gap-xs font-label-md text-label-md text-error underline decoration-error/50 underline-offset-4 transition-colors hover:text-on-error-container disabled:opacity-50"
               >
-                Delete Item
+                {deleting && <Icon name="progress_activity" size={16} className="ag-spin" />}
+                {deleting ? "Deleting…" : "Delete Item"}
               </button>
             </div>
           )}
         </footer>
       </aside>
+
+      {confirmDelete && item && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-on-background/30 p-md backdrop-blur-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!deleting) setConfirmDelete(false);
+          }}
+        >
+          <div
+            className="w-full max-w-sm animate-scale-in rounded-card border border-outline-variant bg-surface-container-lowest p-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-md flex items-start gap-md">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-error-container text-on-error-container">
+                <Icon name="delete" size={22} />
+              </span>
+              <div>
+                <h3 className="font-headline-md text-headline-md text-on-background">Delete item?</h3>
+                <p className="mt-1 font-body-md text-body-md text-on-surface-variant">
+                  <span className="font-bold text-on-background">{item.name}</span> will be removed
+                  from the menu. This can't be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-lg flex gap-sm">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="flex-1 rounded-full border border-outline px-md py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={remove}
+                disabled={deleting}
+                className="flex flex-1 items-center justify-center gap-xs rounded-full bg-error px-md py-sm font-label-md text-label-md text-on-error transition-colors hover:bg-error/90 disabled:opacity-70"
+              >
+                {deleting && <Icon name="progress_activity" size={16} className="ag-spin" />}
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
-import menuData from "../data/menu.json";
+import { useMenu } from "../context/MenuContext";
+import FoodImage from "../components/FoodImage";
 
 function StarterCard({ item, onBringIt, onAdd, selected }) {
   return (
     <div className={`min-w-[140px] bg-surface-container-lowest rounded-2xl shadow-[0px_4px_16px_rgba(26,26,26,0.06)] overflow-hidden flex-shrink-0 transition-all ${selected ? "ring-2 ring-primary" : ""}`}>
       <div className="h-24 overflow-hidden">
-        <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+        <FoodImage item={item} className="w-full h-full object-cover" />
       </div>
       <div className="p-3 flex flex-col gap-2">
         <p className="text-[13px] font-semibold text-on-surface leading-tight truncate">{item.name}</p>
@@ -36,6 +37,7 @@ function StarterCard({ item, onBringIt, onAdd, selected }) {
 export default function WelcomeScreen() {
   const navigate = useNavigate();
   const { tableNumber, bringIt, addToOrder, myOrderCount } = useSession();
+  const { welcome } = useMenu();
   const [added, setAdded] = useState(new Set());
 
   const handleBringIt = (item) => {
@@ -49,8 +51,8 @@ export default function WelcomeScreen() {
   };
 
   const sections = [
-    { title: "Something to drink?", items: menuData.starters.drinks },
-    { title: "Quick bites while you settle in?", items: menuData.starters.bites },
+    { title: "Something to drink?", items: welcome.drinks },
+    { title: "Quick bites while you settle in?", items: welcome.bites },
   ];
 
   return (

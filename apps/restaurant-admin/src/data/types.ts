@@ -7,7 +7,12 @@
  * Money is stored in integer cents, matching the real domain contract.
  */
 
-export type ItemStatus = "placed" | "preparing" | "served" | "cancelled";
+export type ItemStatus =
+  | "placed"
+  | "preparing"
+  | "ready"
+  | "served"
+  | "cancelled";
 export type RoundType = "instant" | "bundled";
 export type TableStatus = "free" | "seated" | "ordering" | "bill";
 export type PaymentMethod = "cash" | "card";
@@ -28,6 +33,8 @@ export interface MenuItem {
   icon: string;
   /** Tailwind gradient classes for the card photo backdrop. */
   swatch: string;
+  /** Optional uploaded photo (data URL). When set, it replaces the icon/swatch stand-in. */
+  imageUrl?: string;
 }
 
 export interface OrderItem {
@@ -49,6 +56,8 @@ export interface Round {
 }
 
 export interface TableSession {
+  /** Server-side Order id backing this session (used for API mutations). */
+  orderId?: string;
   openedAt: number;
   rounds: Round[];
 }

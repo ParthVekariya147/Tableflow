@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
-import menuData from "../data/menu.json";
+import { useMenu } from "../context/MenuContext";
+import FoodImage from "../components/FoodImage";
 import TopAppBar from "../components/TopAppBar";
 
 export default function MenuScreen() {
   const [activeCategory, setActiveCategory] = useState("All");
   const { setSheetItem, myOrderCount, myOrderTotal, bringThese } = useSession();
+  const { items, categories, loading } = useMenu();
   const navigate = useNavigate();
 
   const filtered = activeCategory === "All"
-    ? menuData.items
-    : menuData.items.filter((i) => i.category === activeCategory);
+    ? items
+    : items.filter((i) => i.category === activeCategory);
 
   const featured = filtered[0];
   const rest = filtered.slice(1);
@@ -23,7 +25,7 @@ export default function MenuScreen() {
       {/* Category tabs */}
       <div className="sticky top-[57px] z-40 bg-surface/95 backdrop-blur-md py-3 border-b border-outline-variant/20">
         <div className="flex overflow-x-auto hide-scrollbar gap-2 px-5">
-          {menuData.categories.map((cat) => (
+          {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
@@ -40,6 +42,16 @@ export default function MenuScreen() {
       </div>
 
       <main className="px-5 py-4 max-w-2xl mx-auto">
+        {loading && (
+          <div className="py-20 text-center text-on-surface-variant text-[14px]">
+            Loading menu…
+          </div>
+        )}
+        {!loading && filtered.length === 0 && (
+          <div className="py-20 text-center text-on-surface-variant text-[14px]">
+            No items in this category.
+          </div>
+        )}
         {/* Featured card */}
         {featured && (
           <article
@@ -47,7 +59,7 @@ export default function MenuScreen() {
             className="mb-4 bg-surface-container-lowest rounded-2xl shadow-[0px_4px_20px_rgba(26,26,26,0.05)] overflow-hidden cursor-pointer active:scale-[0.99] transition-all group"
           >
             <div className="h-48 overflow-hidden relative">
-              <img src={featured.img} alt={featured.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+              <FoodImage item={featured} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
               {featured.badge && (
                 <span className="absolute top-3 left-3 bg-secondary-container text-on-secondary-container text-[11px] px-3 py-1 rounded-full font-semibold">
                   {featured.badge}
@@ -73,7 +85,7 @@ export default function MenuScreen() {
               className="bg-surface-container-lowest rounded-2xl shadow-[0px_2px_12px_rgba(26,26,26,0.04)] overflow-hidden flex cursor-pointer active:scale-[0.99] transition-all group"
             >
               <div className="w-24 h-24 flex-shrink-0 overflow-hidden">
-                <img src={item.img} alt={item.name} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                <FoodImage item={item} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
               </div>
               <div className="flex-1 p-3 flex flex-col justify-between">
                 <div>

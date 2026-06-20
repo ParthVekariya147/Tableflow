@@ -17,6 +17,7 @@ export function BillingPage() {
   );
 
   const [method, setMethod] = useState<PaymentMethod>("card");
+  const [paying, setPaying] = useState(false);
   const [tendered, setTendered] = useState<string>(() =>
     totals ? (totals.total / 100).toFixed(2) : "0.00",
   );
@@ -48,8 +49,11 @@ export function BillingPage() {
     });
   }
 
-  function complete() {
-    dispatch({ type: "COMPLETE_PAYMENT", tableId: activeTable.id, method, amountCents: bill.total });
+  async function complete() {
+    if (paying) return;
+    // Wait for the charge to be confirmed before showing the success screen.
+    setPaying(true);
+    await dispatch({ type: "COMPLETE_PAYMENT", tableId: activeTable.id, method, amountCents: bill.total });
     navigate(`/tables/${activeTable.id}/complete`, {
       state: { method, totalCents: bill.total, tableLabel: activeTable.label },
     });
@@ -161,9 +165,11 @@ export function BillingPage() {
 
           <button
             onClick={complete}
-            className="mt-lg flex w-full items-center justify-center gap-xs rounded-full bg-[#2e7d32] py-md font-label-md text-label-md uppercase tracking-wider text-white shadow-sm transition-colors hover:bg-[#1b5e20]"
+            disabled={paying}
+            className="mt-lg flex w-full items-center justify-center gap-xs rounded-full bg-[#2e7d32] py-md font-label-md text-label-md uppercase tracking-wider text-white shadow-sm transition-colors hover:bg-[#1b5e20] disabled:opacity-70"
           >
-            <Icon name="check_circle" size={18} /> Mark Paid &amp; Complete Session
+            <Icon name={paying ? "progress_activity" : "check_circle"} size={18} className={paying ? "ag-spin" : ""} />
+            {paying ? "Processing…" : "Mark Paid & Complete Session"}
           </button>
         </section>
       </div>

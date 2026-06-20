@@ -1,10 +1,11 @@
 import { useSession } from "../context/SessionContext";
 import TopAppBar from "../components/TopAppBar";
 
-const STATUS_ORDER = ["placed", "preparing", "served"];
+const STATUS_ORDER = ["placed", "preparing", "ready", "served"];
 const STATUS_CONFIG = {
   placed:    { icon: "receipt",             label: "Placed",    color: "text-secondary bg-secondary-container/40" },
   preparing: { icon: "local_fire_department", label: "Preparing", color: "text-primary bg-primary-container",      pulse: true },
+  ready:     { icon: "done_all",            label: "Ready",     color: "text-amber-700 bg-amber-100",            pulse: true },
   served:    { icon: "room_service",        label: "Served",    color: "text-green-700 bg-green-100" },
 };
 
@@ -26,7 +27,7 @@ function StatusPill({ status, stage }) {
   );
 }
 
-function RoundCard({ round, onAdvance }) {
+function RoundCard({ round }) {
   const allServed = round.items.every((i) => i.status === "served");
   const time = round.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const label = round.type === "instant" ? "Instant" : `Round`;
@@ -65,15 +66,6 @@ function RoundCard({ round, onAdvance }) {
                 <StatusPill key={stage} status={item.status} stage={stage} />
               ))}
             </div>
-            {/* Prototype: tap to advance status */}
-            {item.status !== "served" && (
-              <button
-                onClick={() => onAdvance(round.id, item.id)}
-                className="mt-2 w-full text-[11px] text-on-surface-variant/50 text-center py-1 border border-dashed border-outline-variant/30 rounded-lg"
-              >
-                [Demo: advance status →]
-              </button>
-            )}
           </div>
         ))}
       </div>
@@ -82,7 +74,13 @@ function RoundCard({ round, onAdvance }) {
 }
 
 export default function StatusScreen() {
-  const { rounds, advanceStatus, tableNumber } = useSession();
+  const { rounds } = useSession();
+
+  // Amount accrued onto the session so far — items the kitchen has marked served.
+  const servedTotal = rounds.reduce(
+    (s, r) => s + r.items.filter((i) => i.status === "served").reduce((rs, i) => rs + i.price * i.qty, 0),
+    0,
+  );
 
   return (
     <div className="min-h-screen pb-28">
@@ -97,6 +95,16 @@ export default function StatusScreen() {
           </div>
         </div>
 
+        {rounds.length > 0 && (
+          <div className="mb-5 flex items-center justify-between bg-surface-container-lowest rounded-2xl px-4 py-3 shadow-[0px_2px_12px_rgba(26,26,26,0.04)]">
+            <span className="text-[13px] text-on-surface-variant flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[18px] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>room_service</span>
+              Served so far
+            </span>
+            <span className="text-[16px] font-bold text-on-surface">${servedTotal.toFixed(2)}</span>
+          </div>
+        )}
+
         {rounds.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-16 text-center gap-4">
             <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center">
@@ -107,7 +115,7 @@ export default function StatusScreen() {
         ) : (
           <div className="flex flex-col gap-4">
             {rounds.map((round) => (
-              <RoundCard key={round.id} round={round} onAdvance={advanceStatus} />
+              <RoundCard key={round.id} round={round} />
             ))}
           </div>
         )}

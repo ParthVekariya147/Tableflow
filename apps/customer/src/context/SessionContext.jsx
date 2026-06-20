@@ -1,19 +1,27 @@
-import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { kitchen } from "../kitchen";
+import { useBoot } from "./BootContext";
 
 const SessionContext = createContext(null);
 
-/** Map a kitchen stage onto the guest's coarser status pills. */
+/** Map a kitchen (KDS) stage onto the guest's status pills. The guest now sees
+ *  the full kitchen lifecycle: placed → preparing → ready → served. */
 function stageToStatus(stage) {
   if (stage === "served") return "served";
-  if (stage === "preparing" || stage === "ready") return "preparing";
+  if (stage === "ready") return "ready";
+  if (stage === "preparing") return "preparing";
   return "placed";
 }
 
 export function SessionProvider({ children }) {
-  const [tableNumber] = useState(7);
+  // The api-client + table resolved by the QR bootstrap (BootProvider).
+  const { api, table } = useBoot();
+  const [tableNumber, setTableNumber] = useState(table?.label ?? "");
   const [sessionStarted, setSessionStarted] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState(null);
+  // The platform Order (session) backing this visit, once opened via the API.
+  const [orderId, setOrderId] = useState(null);
+  const orderIdRef = useRef(null);
 
   // My Order (holding area — not yet sent)
   const [myOrder, setMyOrder] = useState([]);
@@ -27,10 +35,31 @@ export function SessionProvider({ children }) {
   // Item detail sheet
   const [sheetItem, setSheetItem] = useState(null);
 
-  const startSession = useCallback(() => {
-    setSessionStarted(true);
-    setSessionStartTime(new Date());
-  }, []);
+  // Open a real session on the platform for the scanned table, with the guest's
+  // contact. Re-checks occupancy first (race guard: two guests scanning at once)
+  // and throws on failure so the reserve screen can show the error.
+  const startSession = useCallback(
+    async ({ customerName, customerPhone }) => {
+      if (!table) throw new Error("No table — please rescan the QR code.");
+
+      const open = await api.orders.list("open");
+      if (open.some((o) => o.tableId === table.id)) {
+        throw new Error("This table was just taken. Please ask a staff member.");
+      }
+
+      const order = await api.orders.createForTable(table.id, {
+        customerName,
+        customerPhone,
+      });
+      orderIdRef.current = order.id;
+      setOrderId(order.id);
+      setTableNumber(table.label);
+      setSessionStarted(true);
+      setSessionStartTime(new Date());
+      return order;
+    },
+    [api, table],
+  );
 
   const showToast = useCallback((msg, icon = "check_circle") => {
     setToast({ msg, icon, id: Date.now() });
@@ -75,9 +104,30 @@ export function SessionProvider({ children }) {
         })),
       })
       .catch(() => {
-        /* kitchen relay offline — order stays local */
+        // Kitchen relay unreachable. Surface it instead of failing silently —
+        // a silent failure looks like "nothing happened". Start the relay with
+        // `pnpm dev` (it runs on :4001).
+        showToast("Kitchen offline — couldn't send to KDS", "wifi_off");
       });
-  }, [tableNumber]);
+  }, [tableNumber, showToast]);
+
+  // Persist a round to the platform API so it shows up in the restaurant-admin
+  // floor/sessions. Fire-and-forget: the relay still drives the live KDS board.
+  const sendRoundToApi = useCallback((round) => {
+    const oid = orderIdRef.current;
+    if (!oid) return;
+    api.orders
+      .addRound(oid, {
+        type: round.type,
+        items: round.items.map((i) => ({
+          menuItemId: String(i.id),
+          name: i.name,
+          unitPrice: i.priceCents ?? Math.round((i.price ?? 0) * 100),
+          qty: i.qty,
+        })),
+      })
+      .catch(() => {});
+  }, [api]);
 
   // Bring it — instant single item to kitchen
   const bringIt = useCallback((item, qty = 1) => {
@@ -89,9 +139,10 @@ export function SessionProvider({ children }) {
     };
     setRounds((prev) => [round, ...prev]);
     publishRound(round);
+    sendRoundToApi(round);
     showToast(`${item.name} is on its way!`, "local_shipping");
     return round.id;
-  }, [showToast, publishRound]);
+  }, [showToast, publishRound, sendRoundToApi]);
 
   // Bring these — send full My Order queue to kitchen
   const bringThese = useCallback(() => {
@@ -104,10 +155,11 @@ export function SessionProvider({ children }) {
     };
     setRounds((prev) => [round, ...prev]);
     publishRound(round);
+    sendRoundToApi(round);
     setMyOrder([]);
     showToast("Order sent to kitchen!", "restaurant");
     return round.id;
-  }, [myOrder, showToast, publishRound]);
+  }, [myOrder, showToast, publishRound, sendRoundToApi]);
 
   // Reflect kitchen status back onto this session's rounds (live from the KDS).
   useEffect(() => {
@@ -133,24 +185,6 @@ export function SessionProvider({ children }) {
     });
   }, []);
 
-  // Simulate status progression (for prototype interactivity)
-  const advanceStatus = useCallback((roundId, itemId) => {
-    const order = ["placed", "preparing", "served"];
-    setRounds((prev) =>
-      prev.map((r) => {
-        if (r.id !== roundId) return r;
-        return {
-          ...r,
-          items: r.items.map((item) => {
-            if (item.id !== itemId) return item;
-            const next = order[order.indexOf(item.status) + 1];
-            return next ? { ...item, status: next } : item;
-          }),
-        };
-      })
-    );
-  }, []);
-
   const myOrderTotal = myOrder.reduce((s, i) => s + i.price * i.qty, 0);
   const myOrderCount = myOrder.reduce((s, i) => s + i.qty, 0);
 
@@ -166,7 +200,7 @@ export function SessionProvider({ children }) {
       tableNumber, sessionStarted, startSession, sessionStartTime,
       myOrder, addToOrder, updateOrderQty, removeFromOrder,
       myOrderTotal, myOrderCount,
-      rounds, bringIt, bringThese, advanceStatus,
+      rounds, bringIt, bringThese,
       billTotal, billRequested, setBillRequested,
       toast, showToast,
       sheetItem, setSheetItem,

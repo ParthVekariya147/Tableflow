@@ -1,8 +1,10 @@
-import type { Order } from "@amber/domain";
+import type { Order, Payment, Sale } from "@amber/domain";
 import type {
   Order as PrismaOrder,
   Round as PrismaRound,
   OrderItem as PrismaOrderItem,
+  Payment as PrismaPayment,
+  Table as PrismaTable,
 } from "@prisma/client";
 
 type OrderWithRounds = PrismaOrder & {
@@ -35,5 +37,35 @@ export function toDomainOrder(row: OrderWithRounds): Order {
         notes: i.notes ?? undefined,
       })),
     })),
+  };
+}
+
+/** Prisma payment row -> domain Payment. */
+export function toDomainPayment(row: PrismaPayment): Payment {
+  return {
+    id: row.id,
+    tenantId: row.tenantId,
+    orderId: row.orderId,
+    method: row.method,
+    subtotal: row.subtotal,
+    tax: row.tax,
+    tip: row.tip,
+    total: row.total,
+    tendered: row.tendered ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/** Payment (+ its order's table) -> denormalized Sale for dashboards. */
+export function toSale(
+  row: PrismaPayment & { order: { table: PrismaTable } },
+): Sale {
+  return {
+    id: row.id,
+    orderId: row.orderId,
+    tableLabel: row.order.table.label,
+    method: row.method,
+    total: row.total,
+    createdAt: row.createdAt.toISOString(),
   };
 }

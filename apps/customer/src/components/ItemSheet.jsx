@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSession } from "../context/SessionContext";
+import FoodImage from "./FoodImage";
 
 export default function ItemSheet() {
   const { sheetItem, setSheetItem, bringIt, addToOrder } = useSession();
@@ -35,7 +36,7 @@ export default function ItemSheet() {
           <div className="h-72 overflow-hidden relative flex-shrink-0">
             {/* Drag handle */}
             <div className="absolute top-2.5 left-1/2 -translate-x-1/2 z-10 w-10 h-1.5 rounded-full bg-white/70" />
-            <img src={item.img} alt={item.name} className="w-full h-full object-cover" />
+            <FoodImage item={item} className="w-full h-full object-cover" />
             <button
               onClick={() => { setSheetItem(null); setQty(1); }}
               className="absolute top-3 right-3 w-9 h-9 bg-surface/80 backdrop-blur rounded-full flex items-center justify-center active:scale-95"

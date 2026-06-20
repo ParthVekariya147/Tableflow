@@ -13,7 +13,12 @@ export const menuItemSchema = z.object({
   category: z.string().min(1),
   /** Optional callout, e.g. "Signature" / "Popular". */
   badge: z.string().optional(),
-  imageUrl: z.string().url().optional(),
+  /** Image URL or inline data-URL (staff photo upload). */
+  imageUrl: z.string().optional(),
+  /** Material Symbols icon name used as a photo stand-in when imageUrl is unset. */
+  icon: z.string().optional(),
+  /** Tailwind gradient classes for the stand-in card backdrop. */
+  swatch: z.string().optional(),
   /** Available to order right now. */
   available: z.boolean().default(true),
   /** Sort order within its category. */

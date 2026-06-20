@@ -28,6 +28,7 @@ export interface ApiClientConfig {
 
 export interface RequestOptions<S extends z.ZodTypeAny> {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
+  /** JSON-serialized, unless it's a FormData (sent as multipart). */
   body?: unknown;
   /** Zod schema used to validate + type the response body. */
   schema: S;
@@ -56,8 +57,11 @@ export async function request<S extends z.ZodTypeAny>(
   const token = config.getToken?.();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  let body: string | undefined;
-  if (opts.body !== undefined) {
+  let body: BodyInit | undefined;
+  if (opts.body instanceof FormData) {
+    // Let fetch set multipart/form-data + boundary itself.
+    body = opts.body;
+  } else if (opts.body !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(opts.body);
   }

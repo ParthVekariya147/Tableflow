@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "node tools/dev.mjs",
+    "dev:apps": "turbo run dev",
     "dev:kds-relay": "node tools/kds-relay.mjs",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
