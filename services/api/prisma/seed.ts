@@ -34,7 +34,19 @@ interface SeedItem {
   swatch: string;
   badge?: string;
   available?: boolean;
+  /** Public photo URL → MenuItem.imageUrl (icon/swatch are the fallback). */
+  imageUrl?: string;
 }
+
+/**
+ * Keyword-locked LoremFlickr photo — real food photography tagged with the
+ * dish keyword. `lock` pins one specific result so the demo is deterministic
+ * (without it the image randomises on every load). For a few dishes we instead
+ * use exact curated shots from TheMealDB / TheCocktailDB (see items below).
+ * Replace any of these with real uploads via the admin (→ Supabase) for prod.
+ */
+const flickr = (tag: string, lock = 1): string =>
+  `https://loremflickr.com/800/600/${tag}?lock=${lock}`;
 
 interface TableDef {
   label: string;
@@ -91,6 +103,7 @@ async function seedMenu(
         swatch: it.swatch,
         badge: it.badge,
         available: it.available ?? true,
+        imageUrl: it.imageUrl,
         sortOrder,
       },
     });
@@ -133,26 +146,28 @@ async function seedTables(
 const AMBER_CATEGORIES = ["Starters", "Mains", "Sides", "Drinks", "Desserts"];
 const AMBER_ITEMS: SeedItem[] = [
   // Starters
-  { name: "Vegetable Samosa", category: "Starters", price: 600, description: "Crisp pastry, spiced potato & pea, tamarind chutney.", icon: "lunch_dining", swatch: "from-yellow-200 to-amber-400" },
-  { name: "Soft Shell Crab", category: "Starters", price: 1450, description: "Lightly fried, micro-greens, citrus aioli.", icon: "set_meal", swatch: "from-rose-200 to-red-300", available: false },
-  { name: "Paneer Tikka Bites", category: "Starters", price: 850, description: "Char-grilled paneer skewers, mint yogurt.", icon: "kebab_dining", swatch: "from-orange-200 to-amber-300" },
+  { name: "Vegetable Samosa", category: "Starters", price: 600, description: "Crisp pastry, spiced potato & pea, tamarind chutney.", icon: "lunch_dining", swatch: "from-yellow-200 to-amber-400", imageUrl: flickr("samosa") },
+  { name: "Soft Shell Crab", category: "Starters", price: 1450, description: "Lightly fried, micro-greens, citrus aioli.", icon: "set_meal", swatch: "from-rose-200 to-red-300", available: false, imageUrl: flickr("crab") },
+  { name: "Paneer Tikka Bites", category: "Starters", price: 850, description: "Char-grilled paneer skewers, mint yogurt.", icon: "kebab_dining", swatch: "from-orange-200 to-amber-300", imageUrl: flickr("paneer-tikka") },
   // Mains
-  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature" },
-  { name: "Ribeye Steak", category: "Mains", price: 4400, description: "12oz dry-aged ribeye, peppercorn jus.", icon: "restaurant", swatch: "from-red-300 to-rose-500" },
-  { name: "Grilled Salmon", category: "Mains", price: 2600, description: "Atlantic salmon, lemon butter, seasonal veg.", icon: "set_meal", swatch: "from-rose-200 to-orange-300" },
-  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular" },
+  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature", imageUrl: flickr("burger") },
+  { name: "Ribeye Steak", category: "Mains", price: 4400, description: "12oz dry-aged ribeye, peppercorn jus.", icon: "restaurant", swatch: "from-red-300 to-rose-500", imageUrl: flickr("steak") },
+  { name: "Grilled Salmon", category: "Mains", price: 2600, description: "Atlantic salmon, lemon butter, seasonal veg.", icon: "set_meal", swatch: "from-rose-200 to-orange-300", imageUrl: flickr("grilled-salmon") },
+  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular", imageUrl: flickr("butter-chicken") },
   // Sides
-  { name: "Truffle Fries", category: "Sides", price: 900, description: "Hand-cut fries, truffle oil, parmesan.", icon: "fastfood", swatch: "from-yellow-200 to-amber-400" },
-  { name: "House Salad", category: "Sides", price: 1200, description: "Mixed greens, heirloom tomato, vinaigrette.", icon: "eco", swatch: "from-green-200 to-emerald-400" },
-  { name: "Garlic Naan", category: "Sides", price: 500, description: "Tandoor-baked flatbread, garlic butter.", icon: "bakery_dining", swatch: "from-amber-100 to-yellow-300" },
+  { name: "Truffle Fries", category: "Sides", price: 900, description: "Hand-cut fries, truffle oil, parmesan.", icon: "fastfood", swatch: "from-yellow-200 to-amber-400", imageUrl: flickr("fries") },
+  { name: "House Salad", category: "Sides", price: 1200, description: "Mixed greens, heirloom tomato, vinaigrette.", icon: "eco", swatch: "from-green-200 to-emerald-400", imageUrl: flickr("salad") },
+  { name: "Garlic Naan", category: "Sides", price: 500, description: "Tandoor-baked flatbread, garlic butter.", icon: "bakery_dining", swatch: "from-amber-100 to-yellow-300", imageUrl: flickr("naan") },
   // Drinks
-  { name: "Masala Chai", category: "Drinks", price: 450, description: "Spiced black tea simmered with milk, cardamom & ginger.", icon: "local_cafe", swatch: "from-amber-200 to-orange-300" },
-  { name: "House Old Fashioned", category: "Drinks", price: 1400, description: "Bourbon, bitters, demerara, orange twist.", icon: "local_bar", swatch: "from-amber-400 to-orange-600", badge: "Signature" },
-  { name: "Oat Latte", category: "Drinks", price: 550, description: "Double espresso, steamed oat milk.", icon: "coffee", swatch: "from-stone-200 to-amber-300" },
-  { name: "Fresh Lemonade", category: "Drinks", price: 600, description: "Hand-pressed lemon, mint, soda.", icon: "local_drink", swatch: "from-lime-200 to-yellow-300" },
-  // Desserts
-  { name: "Burnt Basque Cheesecake", category: "Desserts", price: 1100, description: "Caramelised top, vanilla cream.", icon: "cake", swatch: "from-amber-200 to-yellow-400" },
-  { name: "Gulab Jamun", category: "Desserts", price: 700, description: "Warm milk dumplings, rose syrup.", icon: "icecream", swatch: "from-orange-200 to-rose-300" },
+  { name: "Masala Chai", category: "Drinks", price: 450, description: "Spiced black tea simmered with milk, cardamom & ginger.", icon: "local_cafe", swatch: "from-amber-200 to-orange-300", imageUrl: flickr("chai") },
+  // Curated exact shot from TheCocktailDB.
+  { name: "House Old Fashioned", category: "Drinks", price: 1400, description: "Bourbon, bitters, demerara, orange twist.", icon: "local_bar", swatch: "from-amber-400 to-orange-600", badge: "Signature", imageUrl: "https://www.thecocktaildb.com/images/media/drink/vrwquq1478252802.jpg" },
+  { name: "Oat Latte", category: "Drinks", price: 550, description: "Double espresso, steamed oat milk.", icon: "coffee", swatch: "from-stone-200 to-amber-300", imageUrl: flickr("latte") },
+  // Curated exact shot from TheCocktailDB.
+  { name: "Fresh Lemonade", category: "Drinks", price: 600, description: "Hand-pressed lemon, mint, soda.", icon: "local_drink", swatch: "from-lime-200 to-yellow-300", imageUrl: "https://www.thecocktaildb.com/images/media/drink/b3n0ge1503565473.jpg" },
+  // Desserts — curated cheesecake shot from TheMealDB.
+  { name: "Burnt Basque Cheesecake", category: "Desserts", price: 1100, description: "Caramelised top, vanilla cream.", icon: "cake", swatch: "from-amber-200 to-yellow-400", imageUrl: "https://www.themealdb.com/images/media/meals/swttys1511385853.jpg" },
+  { name: "Gulab Jamun", category: "Desserts", price: 700, description: "Warm milk dumplings, rose syrup.", icon: "icecream", swatch: "from-orange-200 to-rose-300", imageUrl: flickr("gulab-jamun") },
 ];
 
 const AMBER_TABLES: TableDef[] = [
@@ -332,11 +347,11 @@ async function main(): Promise<void> {
     },
   });
   await seedMenu(green.id, ["Bowls", "Drinks", "Sides"], [
-    { name: "Buddha Bowl", category: "Bowls", price: 1300, description: "Quinoa, roast veg, tahini dressing.", icon: "ramen_dining", swatch: "from-green-200 to-emerald-400", badge: "Signature" },
-    { name: "Quinoa Crunch", category: "Bowls", price: 1200, description: "Crispy chickpeas, kale, avocado.", icon: "rice_bowl", swatch: "from-lime-200 to-green-300" },
-    { name: "Green Goddess Smoothie", category: "Drinks", price: 700, description: "Spinach, mango, banana, coconut water.", icon: "local_drink", swatch: "from-emerald-200 to-teal-300" },
-    { name: "Kombucha", category: "Drinks", price: 600, description: "House-brewed ginger kombucha.", icon: "sports_bar", swatch: "from-amber-100 to-lime-200" },
-    { name: "Miso Soup", category: "Sides", price: 500, description: "White miso, tofu, scallion.", icon: "soup_kitchen", swatch: "from-yellow-100 to-amber-200" },
+    { name: "Buddha Bowl", category: "Bowls", price: 1300, description: "Quinoa, roast veg, tahini dressing.", icon: "ramen_dining", swatch: "from-green-200 to-emerald-400", badge: "Signature", imageUrl: flickr("buddha-bowl") },
+    { name: "Quinoa Crunch", category: "Bowls", price: 1200, description: "Crispy chickpeas, kale, avocado.", icon: "rice_bowl", swatch: "from-lime-200 to-green-300", imageUrl: flickr("quinoa-salad") },
+    { name: "Green Goddess Smoothie", category: "Drinks", price: 700, description: "Spinach, mango, banana, coconut water.", icon: "local_drink", swatch: "from-emerald-200 to-teal-300", imageUrl: flickr("green-smoothie") },
+    { name: "Kombucha", category: "Drinks", price: 600, description: "House-brewed ginger kombucha.", icon: "sports_bar", swatch: "from-amber-100 to-lime-200", imageUrl: flickr("kombucha") },
+    { name: "Miso Soup", category: "Sides", price: 500, description: "White miso, tofu, scallion.", icon: "soup_kitchen", swatch: "from-yellow-100 to-amber-200", imageUrl: flickr("miso-soup") },
   ]);
   await seedTables(green.id, "green-bowl", [
     { label: "1", room: "Dining", seats: 2 }, { label: "2", room: "Dining", seats: 2 },
@@ -355,11 +370,13 @@ async function main(): Promise<void> {
     },
   });
   await seedMenu(bella.id, ["Pizza", "Pasta", "Drinks"], [
-    { name: "Margherita", category: "Pizza", price: 1400, description: "San Marzano, fior di latte, basil.", icon: "local_pizza", swatch: "from-red-200 to-rose-300", badge: "Classic" },
-    { name: "Diavola", category: "Pizza", price: 1600, description: "Spicy salami, chilli, mozzarella.", icon: "local_pizza", swatch: "from-rose-300 to-red-400" },
-    { name: "Carbonara", category: "Pasta", price: 1500, description: "Guanciale, egg, pecorino, pepper.", icon: "ramen_dining", swatch: "from-amber-100 to-yellow-300" },
-    { name: "Chianti Glass", category: "Drinks", price: 900, description: "Tuscan red, by the glass.", icon: "wine_bar", swatch: "from-rose-300 to-red-500" },
-    { name: "Aperol Spritz", category: "Drinks", price: 1000, description: "Aperol, prosecco, soda, orange.", icon: "local_bar", swatch: "from-orange-200 to-rose-300" },
+    // Curated exact pizza/pasta shots from TheMealDB.
+    { name: "Margherita", category: "Pizza", price: 1400, description: "San Marzano, fior di latte, basil.", icon: "local_pizza", swatch: "from-red-200 to-rose-300", badge: "Classic", imageUrl: "https://www.themealdb.com/images/media/meals/x0lk931587671540.jpg" },
+    { name: "Diavola", category: "Pizza", price: 1600, description: "Spicy salami, chilli, mozzarella.", icon: "local_pizza", swatch: "from-rose-300 to-red-400", imageUrl: flickr("pepperoni-pizza") },
+    { name: "Carbonara", category: "Pasta", price: 1500, description: "Guanciale, egg, pecorino, pepper.", icon: "ramen_dining", swatch: "from-amber-100 to-yellow-300", imageUrl: "https://www.themealdb.com/images/media/meals/llcbn01574260722.jpg" },
+    { name: "Chianti Glass", category: "Drinks", price: 900, description: "Tuscan red, by the glass.", icon: "wine_bar", swatch: "from-rose-300 to-red-500", imageUrl: flickr("red-wine") },
+    // Curated exact shot from TheCocktailDB.
+    { name: "Aperol Spritz", category: "Drinks", price: 1000, description: "Aperol, prosecco, soda, orange.", icon: "local_bar", swatch: "from-orange-200 to-rose-300", imageUrl: "https://www.thecocktaildb.com/images/media/drink/iloasq1587661955.jpg" },
   ]);
   await seedTables(bella.id, "bella-pizza", [
     { label: "1", room: "Trattoria", seats: 2 }, { label: "2", room: "Trattoria", seats: 4 },

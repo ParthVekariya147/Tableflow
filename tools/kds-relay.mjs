@@ -24,38 +24,10 @@ const PORT = Number(process.env.KDS_RELAY_PORT ?? 4001);
 const clients = new Set();
 let refSeq = 100;
 
-/** Sample tickets so the board isn't empty on first load. */
-function seed() {
-  const now = Date.now();
-  const mk = (mins, t) => new Date(now - mins * 60_000).toISOString();
-  return [
-    {
-      id: "seed-1",
-      tableLabel: "Table 7",
-      type: "bundled",
-      note: "Extra jalapeños, less ice",
-      stage: "preparing",
-      createdAt: mk(11),
-      items: [
-        { id: "i1", name: "Loaded Nachos", qty: 1, ref: `KDS-${refSeq++}` },
-        { id: "i2", name: "Iced Oat Latte", qty: 1, ref: `KDS-${refSeq++}` },
-      ],
-    },
-    {
-      id: "seed-2",
-      tableLabel: "Table 2",
-      type: "bundled",
-      stage: "ready",
-      createdAt: mk(7),
-      items: [
-        { id: "i3", name: "Flat White", qty: 2, ref: `KDS-${refSeq++}` },
-        { id: "i4", name: "Avocado Toast", qty: 1, ref: `KDS-${refSeq++}` },
-      ],
-    },
-  ];
-}
-
-let tickets = seed();
+// The board starts EMPTY — tickets only appear when the customer app actually
+// sends a round (POST /kds/rounds). No seeded/sample tickets, so nothing shows
+// on the KDS unless there's a real order.
+let tickets = [];
 
 function broadcast(event) {
   const frame = `data: ${JSON.stringify(event)}\n\n`;

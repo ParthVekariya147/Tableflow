@@ -145,6 +145,8 @@ export interface PendingItem {
 interface AdminContextValue {
   state: AdminState;
   dispatch: (action: Action) => Promise<void>;
+  /** Force an immediate re-sync from the API (used on session-page open). */
+  refresh: () => Promise<void>;
   /** Upload an item photo to storage; resolves to its public URL. */
   uploadImage: (file: File) => Promise<string>;
   loading: boolean;
@@ -179,6 +181,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // Read live mutating status inside the poll loop without re-subscribing it.
+  const mutatingRef = useRef(false);
+  mutatingRef.current = mutateCount > 0;
+
   const refresh = useCallback(async () => {
     const [tenant, menu, floor, sales] = await Promise.all([
       api.tenant.current(),
@@ -193,6 +199,28 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [refresh]);
+
+  // Background sync — keep the floor/menu/sales live so external changes (guest
+  // QR reservations, payments, KDS status from other devices) appear without a
+  // manual reload. Polls while the tab is visible and refetches immediately on
+  // focus; skips while a mutation (+ its own refetch) is in flight to avoid
+  // clobbering optimistic state. (Phase 2: swap polling for true realtime.)
+  useEffect(() => {
+    if (!loaded) return;
+    const POLL_MS = 4000;
+    const syncNow = () => {
+      if (document.hidden || mutatingRef.current) return;
+      refresh().catch(() => {});
+    };
+    const id = setInterval(syncNow, POLL_MS);
+    document.addEventListener("visibilitychange", syncNow);
+    window.addEventListener("focus", syncNow);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", syncNow);
+      window.removeEventListener("focus", syncNow);
+    };
+  }, [loaded, refresh]);
 
   const orderIdFor = useCallback((tableId: string): string | undefined => {
     return stateRef.current.tables.find((t) => t.id === tableId)?.session
@@ -360,13 +388,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       dispatch,
+      refresh,
       uploadImage,
       loading: !loaded,
       mutating: mutateCount > 0,
       pendingItems,
       error,
     }),
-    [state, dispatch, uploadImage, loaded, mutateCount, pendingItems, error],
+    [state, dispatch, refresh, uploadImage, loaded, mutateCount, pendingItems, error],
   );
 
   if (!loaded) {

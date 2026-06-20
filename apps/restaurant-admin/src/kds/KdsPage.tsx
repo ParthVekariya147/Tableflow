@@ -1,3 +1,4 @@
+import { useLocation } from "react-router-dom";
 import { MaterialIcon, useTenant } from "@amber/ui";
 import type { KdsStage } from "@amber/api-client";
 import { useKds } from "./useKds";
@@ -13,6 +14,10 @@ const COLUMNS: { stage: KdsStage; title: string; badge?: string }[] = [
 export function KdsPage() {
   const { tickets, connected, advance } = useKds();
   const tenant = useTenant();
+  const location = useLocation();
+  // The chrome-free board lives at /kds/display; only offer the link from the
+  // in-shell /kds view so kitchen staff can pop out a full-screen board.
+  const isFullScreen = location.pathname === "/kds/display";
   useTick(1000);
 
   const clock = new Date().toLocaleTimeString("en-GB", {
@@ -55,6 +60,17 @@ export function KdsPage() {
             <span className="text-[14px] font-bold text-primary bg-secondary-fixed px-3 py-1 rounded-full border border-secondary">
               {tickets.length} Orders
             </span>
+            {!isFullScreen && (
+              <a
+                href="/kds/display"
+                target="_blank"
+                rel="noreferrer"
+                title="Open full-screen kitchen board"
+                className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full"
+              >
+                <MaterialIcon name="open_in_full" size={20} />
+              </a>
+            )}
             <button className="text-primary hover:bg-surface-container-high transition-colors p-2 rounded-full">
               <MaterialIcon name="settings" size={20} />
             </button>

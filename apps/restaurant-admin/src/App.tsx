@@ -7,6 +7,7 @@ import { TableSessionPage } from "./pages/TableSessionPage";
 import { BillingPage } from "./pages/BillingPage";
 import { PaymentCompletePage } from "./pages/PaymentCompletePage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { OrderHistoryPage } from "./pages/OrderHistoryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { KdsPage } from "./kds/KdsPage";
 
@@ -25,6 +26,9 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/tables/:id/billing" element={<BillingPage />} />
       <Route path="/tables/:id/complete" element={<PaymentCompletePage />} />
+      {/* Dedicated full-screen kitchen board (kitchen staff open this URL — no
+          admin sidebar/top bar). Same live KDS as the in-shell /kds route. */}
+      <Route path="/kds/display" element={<KdsPage />} />
 
       {/* Shell-wrapped */}
       <Route element={<Shell />}>
@@ -32,6 +36,7 @@ export default function App() {
         <Route path="/menu" element={<MenuPage />} />
         <Route path="/tables" element={<TablesPage />} />
         <Route path="/tables/:id" element={<TableSessionPage />} />
+        <Route path="/history" element={<OrderHistoryPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/kds" element={<KdsPage />} />
       </Route>

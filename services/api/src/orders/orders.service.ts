@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
 } from "@nestjs/common";
 import type { Order, OrderStatus, Payment, Sale, ItemStatus } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -30,22 +32,43 @@ const STATUS_STAMP: Record<ItemStatus, string | null> = {
 export class OrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Load an order, scoped to the tenant so cross-tenant access is impossible. */
-  async get(tenantId: string, id: string): Promise<Order> {
+  /**
+   * Load an order, scoped to the tenant so cross-tenant access is impossible.
+   * If `deviceId` is supplied (a guest device) and the order is device-bound,
+   * it must match — so a guest can't read/resume another device's session.
+   */
+  async get(tenantId: string, id: string, deviceId?: string): Promise<Order> {
     const row = await this.prisma.order.findFirst({
       where: { id, tenantId },
       include: ROUND_INCLUDE,
     });
     if (!row) throw new NotFoundException(`Order not found: ${id}`);
+    this.assertDevice(row.deviceId, deviceId);
     return toDomainOrder(row);
   }
 
   /** Open a new dine-in session for one of the tenant's tables. */
-  async createForTable(tenantId: string, dto: CreateOrderDto): Promise<Order> {
+  async createForTable(
+    tenantId: string,
+    dto: CreateOrderDto,
+    deviceId?: string,
+  ): Promise<Order> {
     const table = await this.prisma.table.findFirst({
       where: { id: dto.tableId, tenantId },
     });
     if (!table) throw new NotFoundException(`Table not found: ${dto.tableId}`);
+
+    // Occupancy guard (trust boundary): a table may hold only ONE live session.
+    // Refuse if one is already open/billed so a second guest (or a stale client)
+    // can't spawn a duplicate session on the same table.
+    const live = await this.prisma.order.findFirst({
+      where: { tenantId, tableId: dto.tableId, status: { in: ["open", "billed"] } },
+      select: { id: true },
+    });
+    if (live)
+      throw new ConflictException(
+        `Table ${table.label} already has an active session.`,
+      );
 
     const row = await this.prisma.order.create({
       data: {
@@ -54,6 +77,7 @@ export class OrdersService {
         status: "open",
         customerName: dto.customerName,
         customerPhone: dto.customerPhone,
+        deviceId,
       },
       include: ROUND_INCLUDE,
     });
@@ -65,8 +89,9 @@ export class OrdersService {
     tenantId: string,
     orderId: string,
     dto: AddRoundDto,
+    deviceId?: string,
   ): Promise<Order> {
-    await this.assertOrder(tenantId, orderId);
+    await this.assertOrder(tenantId, orderId, deviceId);
     await this.prisma.round.create({
       data: {
         tenantId,
@@ -88,8 +113,12 @@ export class OrdersService {
   }
 
   /** Mark an order as bill-requested. */
-  async requestBill(tenantId: string, orderId: string): Promise<Order> {
-    await this.assertOrder(tenantId, orderId);
+  async requestBill(
+    tenantId: string,
+    orderId: string,
+    deviceId?: string,
+  ): Promise<Order> {
+    await this.assertOrder(tenantId, orderId, deviceId);
     await this.prisma.order.update({
       where: { id: orderId },
       data: { status: "billed", billRequestedAt: new Date() },
@@ -225,8 +254,9 @@ export class OrdersService {
     orderId: string,
     taxRate: number,
     dto: CapturePaymentDto,
+    deviceId?: string,
   ): Promise<Payment> {
-    const order = await this.get(tenantId, orderId);
+    const order = await this.get(tenantId, orderId, deviceId);
     if (order.status === "paid")
       throw new BadRequestException("Order already paid");
 
@@ -263,22 +293,51 @@ export class OrdersService {
     return toDomainPayment(payment);
   }
 
-  /** Recent completed sales for dashboards (most recent first). */
-  async listSales(tenantId: string, limit = 50): Promise<Sale[]> {
+  /**
+   * Completed sales (most recent first). Without a range it returns the recent
+   * 50 (dashboard feed). With a `from`/`to` window it returns every sale in that
+   * window (capped at 1000) so the Order History page can show a full day/range.
+   */
+  async listSales(
+    tenantId: string,
+    range?: { from?: string; to?: string },
+  ): Promise<Sale[]> {
+    const ranged = Boolean(range?.from || range?.to);
+    const createdAt: { gte?: Date; lte?: Date } = {};
+    if (range?.from) createdAt.gte = new Date(range.from);
+    if (range?.to) createdAt.lte = new Date(range.to);
+
     const rows = await this.prisma.payment.findMany({
-      where: { tenantId },
+      where: { tenantId, ...(ranged ? { createdAt } : {}) },
       orderBy: { createdAt: "desc" },
-      take: limit,
+      take: ranged ? 1000 : 50,
       include: { order: { include: { table: true } } },
     });
     return rows.map(toSale);
   }
 
-  private async assertOrder(tenantId: string, orderId: string): Promise<void> {
-    const exists = await this.prisma.order.findFirst({
+  private async assertOrder(
+    tenantId: string,
+    orderId: string,
+    deviceId?: string,
+  ): Promise<void> {
+    const order = await this.prisma.order.findFirst({
       where: { id: orderId, tenantId },
-      select: { id: true },
+      select: { id: true, deviceId: true },
     });
-    if (!exists) throw new NotFoundException(`Order not found: ${orderId}`);
+    if (!order) throw new NotFoundException(`Order not found: ${orderId}`);
+    this.assertDevice(order.deviceId, deviceId);
+  }
+
+  /**
+   * Session-ownership guard. Only enforced when BOTH the order is device-bound
+   * and the caller presents a device id (a guest): a mismatch means a different
+   * device is trying to act on this session → 403. Staff (restaurant-admin) send
+   * no device id, so their calls are unaffected (auth proper is still deferred).
+   */
+  private assertDevice(orderDeviceId: string | null, deviceId?: string): void {
+    if (orderDeviceId && deviceId && orderDeviceId !== deviceId) {
+      throw new ForbiddenException("This session belongs to another device.");
+    }
   }
 }

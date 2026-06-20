@@ -5,9 +5,38 @@ import TopAppBar from "../components/TopAppBar";
 const GST_RATE = 0.1;
 
 export default function BillScreen() {
-  const { rounds, billTotal, tableNumber, sessionStartTime, billRequested, setBillRequested } = useSession();
-  const [paid, setPaid] = useState(false);
+  const { rounds, billTotal, tableNumber, sessionStartTime, billRequested, requestBill, payBill, showToast } = useSession();
   const [payMethod, setPayMethod] = useState(null);
+  const [processing, setProcessing] = useState(false);
+
+  // "online" is recorded as a card payment server-side (methods are cash | card;
+  // no separate online provider). Cash is NOT captured here — staff settle it at
+  // the counter and the session ends once the admin marks the order paid.
+  async function handlePay(method) {
+    if (processing) return;
+    setProcessing(true);
+    setPayMethod(method);
+    try {
+      await payBill(method);
+    } catch {
+      showToast("Payment didn’t go through — please try again", "error");
+      setPayMethod(null);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function handleRequestBill() {
+    if (processing) return;
+    setProcessing(true);
+    try {
+      await requestBill();
+    } catch {
+      showToast("Couldn’t reach staff — please try again", "wifi_off");
+    } finally {
+      setProcessing(false);
+    }
+  }
 
   const gst = billTotal * GST_RATE;
   const grandTotal = billTotal + gst;
@@ -16,31 +45,9 @@ export default function BillScreen() {
     ? sessionStartTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "--";
 
-  if (paid) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center gap-5 fade-in">
-        <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-          <span className="material-symbols-outlined text-[40px] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-        </div>
-        <h2 className="text-[28px] font-bold text-on-surface font-serif">Thanks for visiting!</h2>
-        <p className="text-on-surface-variant text-[15px]">
-          {payMethod === "online" ? "Payment confirmed online." : "Please settle at the counter."}<br />
-          Hope to see you again soon ☕
-        </p>
-        <div className="bg-surface-container-lowest rounded-2xl p-5 w-full max-w-sm shadow-sm">
-          <p className="text-[12px] text-on-surface-variant mb-1">Total paid</p>
-          <p className="text-[32px] font-bold text-primary">${grandTotal.toFixed(2)}</p>
-          <p className="text-[12px] text-on-surface-variant mt-1">Table {tableNumber} · Session started {startTime}</p>
-        </div>
-        <div className="flex gap-2 mt-2">
-          {[1,2,3,4,5].map(s => (
-            <span key={s} className="material-symbols-outlined text-[28px] text-secondary-fixed-dim" style={{ fontVariationSettings: "'FILL' 1" }}>star</span>
-          ))}
-        </div>
-        <p className="text-[13px] text-on-surface-variant">Rate your experience</p>
-      </div>
-    );
-  }
+  // Note: the settled ("Thanks for visiting") and awaiting-cash screens are
+  // rendered above the router (SessionEndScreen in App.jsx) so the phone back
+  // button can't escape them back into the order flow.
 
   return (
     <div className="min-h-screen pb-28">
@@ -104,11 +111,12 @@ export default function BillScreen() {
         {/* Actions */}
         {!billRequested ? (
           <button
-            onClick={() => setBillRequested(true)}
-            className="w-full bg-primary text-on-primary font-bold py-4 rounded-full shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2 text-[16px]"
+            onClick={handleRequestBill}
+            disabled={processing}
+            className="w-full bg-primary text-on-primary font-bold py-4 rounded-full shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2 text-[16px] disabled:opacity-70"
           >
             <span className="material-symbols-outlined text-[18px]">receipt_long</span>
-            Request Bill
+            {processing ? "Requesting…" : "Request Bill"}
           </button>
         ) : !payMethod ? (
           <div className="fade-in space-y-3">
@@ -119,15 +127,17 @@ export default function BillScreen() {
             <p className="text-center text-[14px] font-semibold text-on-surface mb-3">How would you like to pay?</p>
             <div className="flex gap-3">
               <button
-                onClick={() => { setPayMethod("online"); setPaid(true); }}
-                className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl flex flex-col items-center gap-1 active:scale-95 transition-transform"
+                onClick={() => handlePay("card")}
+                disabled={processing}
+                className="flex-1 bg-primary text-on-primary font-bold py-4 rounded-2xl flex flex-col items-center gap-1 active:scale-95 transition-transform disabled:opacity-70"
               >
                 <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>contactless</span>
                 <span className="text-[13px]">Pay Online</span>
               </button>
               <button
-                onClick={() => { setPayMethod("cash"); setPaid(true); }}
-                className="flex-1 border-2 border-primary text-primary font-bold py-4 rounded-2xl flex flex-col items-center gap-1 active:scale-95 transition-transform"
+                onClick={() => handlePay("cash")}
+                disabled={processing}
+                className="flex-1 border-2 border-primary text-primary font-bold py-4 rounded-2xl flex flex-col items-center gap-1 active:scale-95 transition-transform disabled:opacity-70"
               >
                 <span className="material-symbols-outlined text-[22px]" style={{ fontVariationSettings: "'FILL' 1" }}>payments</span>
                 <span className="text-[13px]">Pay Cash</span>

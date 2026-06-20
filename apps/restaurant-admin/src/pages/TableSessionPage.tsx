@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { useAdmin, billTotals } from "../store/AdminStore";
@@ -21,8 +21,16 @@ function roundState(round: Round): keyof typeof ROUND_STATE {
 export function TableSessionPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch } = useAdmin();
+  const { state, dispatch, refresh } = useAdmin();
   const [picker, setPicker] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  // Force a fresh sync on open so we never render this table's previous session
+  // snapshot (e.g. after it was reused, paid, or changed from another device).
+  useEffect(() => {
+    refresh().catch(() => {});
+  }, [refresh, id]);
 
   const table = state.tables.find((t) => t.id === id);
 
@@ -193,12 +201,7 @@ export function TableSessionPage() {
               <Icon name="payments" /> Take Payment
             </button>
             <button
-              onClick={() => {
-                if (window.confirm(`Cancel the entire order for ${table.label}? This frees the table.`)) {
-                  dispatch({ type: "CANCEL_ORDER", tableId: table.id });
-                  navigate("/tables");
-                }
-              }}
+              onClick={() => setConfirmCancel(true)}
               className="w-full rounded-lg border border-error/50 py-sm font-label-md text-label-md text-error transition-colors hover:border-error hover:bg-error-container"
             >
               Cancel Order
@@ -213,7 +216,61 @@ export function TableSessionPage() {
           onPick={(menuItemId) => dispatch({ type: "ADD_ORDER_ITEM", tableId: table.id, menuItemId })}
         />
       )}
+
+      {confirmCancel && (
+        <ModalShell onClose={() => !cancelling && setConfirmCancel(false)}>
+          <div className="flex flex-col items-center gap-md text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-error-container">
+              <Icon name="cancel" size={26} className="text-error" />
+            </div>
+            <div>
+              <h3 className="font-headline-md text-headline-md text-on-background">Cancel order?</h3>
+              <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
+                This abandons {table.label}&rsquo;s session without payment and frees the table. This can&rsquo;t be undone.
+              </p>
+            </div>
+          </div>
+          <div className="mt-lg flex gap-sm">
+            <button
+              onClick={() => setConfirmCancel(false)}
+              disabled={cancelling}
+              className="flex-1 rounded-full border border-outline px-md py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-70"
+            >
+              Keep Session
+            </button>
+            <button
+              onClick={async () => {
+                if (cancelling) return;
+                setCancelling(true);
+                await dispatch({ type: "CANCEL_ORDER", tableId: table.id });
+                navigate("/tables");
+              }}
+              disabled={cancelling}
+              className="flex flex-1 items-center justify-center gap-xs rounded-full bg-error px-md py-sm font-label-md text-label-md text-on-error transition-colors hover:bg-error/90 disabled:opacity-70"
+            >
+              {cancelling && <Icon name="progress_activity" size={16} className="ag-spin" />}
+              {cancelling ? "Cancelling…" : "Cancel Order"}
+            </button>
+          </div>
+        </ModalShell>
+      )}
     </>
+  );
+}
+
+function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-on-background/20 p-md backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm animate-scale-in rounded-card border border-outline-variant bg-surface-container-lowest p-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
   );
 }
 

@@ -170,9 +170,11 @@ function TableCard({
   const { dispatch } = useAdmin();
   const meta = STATUS_META[table.status];
 
-  function primaryAction() {
+  async function primaryAction() {
     if (table.status === "free") {
-      dispatch({ type: "OPEN_SESSION", tableId: table.id });
+      // Await the create + refetch so the session page opens on fresh data
+      // (not the previous/empty snapshot for this table).
+      await dispatch({ type: "OPEN_SESSION", tableId: table.id });
       navigate(`/tables/${table.id}`);
     } else if (table.status === "bill") {
       navigate(`/tables/${table.id}/billing`);

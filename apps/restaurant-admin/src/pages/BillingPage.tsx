@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { useAdmin, billTotals } from "../store/AdminStore";
@@ -8,7 +8,13 @@ import type { PaymentMethod } from "../data/types";
 export function BillingPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch } = useAdmin();
+  const { state, dispatch, refresh } = useAdmin();
+
+  // Sync on open so the bill reflects the latest items (the server also
+  // recomputes totals on capture, but the displayed figures should match).
+  useEffect(() => {
+    refresh().catch(() => {});
+  }, [refresh, id]);
 
   const table = state.tables.find((t) => t.id === id);
   const totals = useMemo(

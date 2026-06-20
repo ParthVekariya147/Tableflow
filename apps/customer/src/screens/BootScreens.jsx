@@ -41,6 +41,28 @@ export function InvalidQr({ reason }) {
   );
 }
 
+/**
+ * Terminal screen for a device whose session has already been settled. After
+ * paying, a refresh must NOT drop back into the ordering flow — the device can
+ * only see this neutral page until it scans a fresh table QR to start anew.
+ */
+export function SessionClosed() {
+  return (
+    <Shell>
+      <span className="material-symbols-outlined text-[48px] text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+        local_cafe
+      </span>
+      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+        Thanks for dining with us
+      </h1>
+      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+        Your previous order has been settled. To start a new order, please scan
+        the QR code on your table again.
+      </p>
+    </Shell>
+  );
+}
+
 /** The scanned table already has a live session — block and defer to staff. */
 export function TableInUse({ table }) {
   return (

@@ -22,6 +22,12 @@ export interface ApiClientConfig {
   tenantSlug?: string;
   /** Returns a bearer token for authenticated (admin) calls, if any. */
   getToken?: () => string | null | undefined;
+  /**
+   * Returns this guest device's opaque id, sent as `X-Device-Id`. It binds a
+   * dine-in session to the device that opened it (the server stores it on the
+   * Order and enforces ownership on writes/resume). Omitted by staff.
+   */
+  getDeviceId?: () => string | null | undefined;
   /** Injectable fetch (defaults to global fetch); handy for tests/SSR. */
   fetch?: typeof fetch;
 }
@@ -56,6 +62,9 @@ export async function request<S extends z.ZodTypeAny>(
 
   const token = config.getToken?.();
   if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const deviceId = config.getDeviceId?.();
+  if (deviceId) headers["X-Device-Id"] = deviceId;
 
   let body: BodyInit | undefined;
   if (opts.body instanceof FormData) {

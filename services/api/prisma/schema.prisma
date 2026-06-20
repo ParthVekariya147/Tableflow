@@ -275,6 +275,14 @@ model Order {
   /** Guest contact captured for the session — used on the bill/receipt. */
   customerName  String?
   customerPhone String?
+  /**
+   * Opaque per-device id (sent as `X-Device-Id`) of the guest device that opened
+   * this session. Acts as the session capability: guest writes/resumes must
+   * present a matching id. NEVER serialized back to clients (kept secret so it
+   * can't be read from the public order list and replayed). Null for staff
+   * walk-in sessions opened from restaurant-admin (no device).
+   */
+  deviceId  String?
   status    OrderStatus @default(open)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt

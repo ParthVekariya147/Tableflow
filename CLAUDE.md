@@ -15,7 +15,7 @@ tenant config → CSS variables → shared components.
 amber-grain/
 ├── apps/
 │   ├── customer/          # guest ordering PWA (Vite + React 19) — the original app
-│   ├── restaurant-admin/  # KDS + menu/table mgmt (shell; spec in DESIGN.md + kds.html)
+│   ├── restaurant-admin/  # KDS + menu/table mgmt (shell; spec in DESIGN.md)
 │   └── super-admin/       # tenant onboarding / billing / analytics (shell)
 ├── packages/
 │   ├── config/            # shared tsconfig bases, eslint presets, Tailwind preset
@@ -96,12 +96,23 @@ All shapes are Zod schemas with inferred types. Key entities:
   `POST /menu/upload` multipart item-photo upload → `{ url }`),
   `tables/` (`GET /tables` floor list + status + live session, `GET /tables/qr/:token`,
   `POST /tables`, `PATCH /tables/:id`, `POST /tables/:id/qr` regen, `DELETE /tables/:id`),
-  `orders/` (`GET /orders?status=` live list, `GET /orders/sales`, `GET /orders/:id`,
+  `orders/` (`GET /orders?status=` live list, `GET /orders/sales` (optional
+  `?from=&to=` ISO window for Order History; else recent feed), `GET /orders/:id`,
   `POST /orders`, `/:id/rounds`, `/:id/items` add, `PATCH /:id/items/:itemId` qty/status,
   `/:id/bill`, `/:id/cancel`, `/:id/payment` capture),
   `admin/` (`GET|POST /admin/tenants`). `prisma/` is a global module.
   Item-status PATCH stamps the per-stage timestamps; payment recomputes
   subtotal/tax (from `tenant.taxRate`)/total server-side and closes the order.
+  **`POST /orders` enforces single-occupancy**: it 409s if the table already has
+  an `open`/`billed` order, so a second guest or a stale client can't spawn a
+  duplicate live session on one table (the trust-boundary occupancy guard).
+  **Device-bound sessions:** the guest client sends an opaque per-device id as
+  `X-Device-Id`; `createForTable` stores it on `Order.deviceId` and guest
+  reads/writes (`get`/`addRound`/`bill`/`payment`) 403 if a *different* device id
+  is presented (`assertDevice`). `deviceId` is **never serialized** back to
+  clients (so it can't be read from the public order list and replayed). Staff
+  (restaurant-admin) send no `X-Device-Id`, so their calls are unaffected — full
+  auth is still deferred, this just binds a guest session to its origin device.
 - DTO validation via Zod (`*.dto.ts`). Mappers convert Prisma rows ↔ domain types.
 - **Item images** live in **Supabase Storage** (bucket `menu-images`, public read),
   not the DB. `storage/StorageService` uploads with the **service-role key**
@@ -150,7 +161,31 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   Welcome carousels are derived from the live menu. `context/SessionContext.jsx` opens a
   real **Order** on `startSession({ customerName, customerPhone })` for the scanned table
   via `api.orders.createForTable` and **persists each round** via `api.orders.addRound`,
-  so guest orders appear in restaurant-admin's floor/sessions.
+  so guest orders appear in restaurant-admin's floor/sessions. The bill flow is wired
+  end-to-end: `requestBill()` → `api.orders.requestBill` (flips the admin table to
+  "Awaiting Bill"). `payBill(method)` then splits by method: **"Pay Online" (`card`)**
+  captures immediately (`api.orders.capturePayment` → Order closed, table frees, sale
+  recorded) and ends the session; **"Pay Cash"** does *not* capture — it shows a "pay at
+  the counter" screen and keeps the session alive (`awaitingCash`), polling
+  `api.orders.get` until **staff capture the cash in the admin** (BillingPage) and the
+  Order flips to `paid`/`closed`, which ends the guest session. (Methods are `cash | card`;
+  no separate online provider.) Session-end is **terminal**: it clears `orderIdRef`,
+  blocks further ordering (`bringIt`/`bringThese`/`addToOrder` no-op once `sessionEnded`
+  **or with no live `orderId`** — so a refreshed/settled client can't fire a phantom KDS
+  ticket) and hides the BottomNav. The settled/awaiting-cash terminal screen
+  (`screens/SessionEndScreen.jsx`) is rendered **above the router** (`App.jsx` `AppRoutes`
+  guard) so the phone's hardware **back button** can't pop history back into the order
+  flow — the end screen wins regardless of the URL.
+  **Sessions are device-bound, persistent + resumable** (fixes the refresh-loses-session
+  → phantom-KDS bug): `src/device.js` mints a stable per-device id in `localStorage`
+  (`getDeviceId`, built from `crypto.getRandomValues` since `crypto.randomUUID` needs a
+  secure context the LAN http origin lacks), sent as `X-Device-Id` by `createGuestApi`.
+  `src/session-store.js` persists the live `{slug,qrToken,tableId,orderId}` and a terminal
+  `{ended:true}` marker. On boot, `BootContext` **resumes** the saved order (re-verified
+  against the API; ownership proven by the device id) instead of losing it; a settled
+  device gets the neutral `SessionClosed` screen (locked out of ordering until it scans a
+  fresh QR). `SessionProvider` rehydrates `orderId`/`rounds`/`billRequested` from the
+  resumed Order via `useBoot().resumeOrder`.
   Seed items have no photos, so `components/FoodImage.jsx` falls back to an icon stand-in.
   ⚠️ The live **KDS board still flows through the relay** (`src/kitchen.js` →
   `createHttpKdsTransport` :4001), separate from the persisted API — so KDS status
@@ -165,23 +200,38 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   `TenantThemeProvider` in `App.jsx`, no longer the static `tenant/defaultTenant.ts`)
   and the table via `api.tables.byQrToken`, then checks occupancy via
   `api.orders.list("open")`. Boot renders its own loading / **"Invalid QR"** /
-  **"Table in use"** screens (`screens/BootScreens.jsx`); only a free table renders the
-  app. `screens/SplashScreen.jsx` is the **reserve form**: required name + phone
+  **"Table in use"** / **"Session closed"** screens (`screens/BootScreens.jsx`); a free
+  table renders the app, an occupied table that belongs to *this device* is **resumed**. `screens/SplashScreen.jsx` is the **reserve form**: required name + phone
   (client validation + honeypot) → `startSession` **re-checks occupancy** (race guard)
   → `createForTable(tableId, { customerName, customerPhone })`. Security: `qrToken` is
   the capability; the create-order DTO (`services/api/src/orders/orders.dto.ts`)
   enforces name/phone **format** server-side (the trust boundary) — kept optional so
   staff walk-in open-session still works, with *required* enforced client-side for
-  guests. ⚠️ Still deferred: server-side **rate-limit** on order creation; SPA host
-  fallback for deep QR links in production.
+  guests. Live sessions are **device-bound** via `X-Device-Id` (`Order.deviceId`) so a
+  guest can't read/resume/write another device's session. ⚠️ Still deferred: server-side
+  **rate-limit** on order creation; SPA host fallback for deep QR links in production;
+  and proper auth (the device-id guard is bypassable by a non-staff actor who simply
+  omits the header — same gap as the rest of the deferred-auth surface).
 - **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API.**
   `store/AdminStore.tsx` is now API-backed: it loads menu + floor (`tables.list`) +
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each
   UI action (menu edit, add table, open/run/cancel session, take payment) into the
-  matching `@amber/api-client` call, then refetches. Pages (`MenuPage`, `TablesPage`,
+  matching `@amber/api-client` call, then refetches. **Background sync** keeps the
+  floor live so *external* changes (guest QR reservations, payments, KDS status from
+  other devices) appear without a manual reload: a visible-tab poll (~4s) + refetch on
+  window focus/visibility, skipped while a mutation is in flight; `refresh()` is exposed
+  so `TableSessionPage`/`BillingPage` force a sync on open (avoids rendering a table's
+  previous session snapshot), and `OPEN_SESSION` is awaited before navigating.
+  ⚠️ Phase 2: replace polling with true realtime (Supabase Realtime / SSE). Pages
+  (`MenuPage`, `TablesPage`,
   `TableSessionPage`, `BillingPage`, `DashboardPage`, `AnalyticsPage`) read the same
-  `{ state, dispatch }` from `useAdmin()`. `TablesPage` supports add / edit / **delete**
+  `{ state, dispatch }` from `useAdmin()`. **`OrderHistoryPage`** (`/history`, sidebar
+  "Order History") lists completed/paid sales for a date range (Today default /
+  Yesterday / Last 7 days / All) via `api.orders.sales({from,to})`, with revenue/count
+  summary and expandable rows that lazy-load each order's items (`api.orders.get`) to
+  show what each table ordered. It uses the shared `lib/api.ts` client (not the store's
+  action `dispatch`). `TablesPage` supports add / edit / **delete**
   (delete blocked while occupied / with order history) and renders a **real scannable
   QR** per table (`QRCodeCanvas` from `qrcode.react`) encoding
   `<VITE_CUSTOMER_URL>/<slug>/t/<qrToken>` via `lib/tableQr.ts` — with copy-link +
@@ -191,11 +241,129 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   server-side.
   ⚠️ The `kds/` board still runs on its own
   `KdsTransport` seam (not yet pointed at `orders.list`); Dashboard/Analytics totals
-  still derive client-side from the sales feed. `tenant/defaultTenant.ts` supplies the
+  still derive client-side from the sales feed. The real KDS (`kds/KdsPage`) renders
+  both in-shell at **`/kds`** (managers) and chrome-free full-screen at **`/kds/display`**
+  (kitchen staff — same live board, no sidebar; the in-shell view links to it). The
+  KDS relay (`tools/kds-relay.mjs`) starts **empty** (no seeded sample tickets); tickets
+  appear only when the customer app sends a round. The old static `kds.html` mockup
+  (hardcoded dummy tickets) has been removed. `tenant/defaultTenant.ts` supplies the
   slug (`amber-grain`) + theme; base URL via `VITE_API_URL` (default `:3001`),
   customer PWA origin via `VITE_CUSTOMER_URL` (default `:5173`, for QR links).
 - **super-admin** — TS shell wired to `@amber/ui` + `@amber/api-client`, ready to
   build out (tenant onboarding/analytics).
+
+## Major flows (end-to-end)
+
+> The cross-cutting flows that span app → client → API → DB. Each lists the exact
+> files so a change can be traced without re-reading everything. Keep in sync when
+> the lifecycle changes.
+
+### 1. Guest dine-in lifecycle (scan → order → pay)
+The whole guest journey is one **Order** (a table session) holding **Rounds**.
+1. **Scan.** The table QR encodes `<VITE_CUSTOMER_URL>/<slug>/t/<qrToken>`
+   (minted in restaurant-admin `lib/tableQr.ts`, rendered with `qrcode.react`).
+2. **Boot** (`apps/customer/src/context/BootContext.jsx`): parse the path →
+   `{slug, qrToken}`; build a tenant-bound guest client (`src/api.js`
+   `createGuestApi`); resolve tenant (`api.tenant.bySlug` → dynamic theme) + table
+   (`api.tables.byQrToken`); check occupancy (`api.orders.list("open")`). A free
+   table renders the app; otherwise an "Invalid QR" / "Table in use" / "Session
+   closed" boot screen (`screens/BootScreens.jsx`).
+3. **Reserve** (`screens/SplashScreen.jsx`): required name + phone (client
+   validation + honeypot) → `SessionContext.startSession()` **re-checks occupancy**
+   (race guard) → `api.orders.createForTable(tableId, {customerName, customerPhone})`.
+   This opens the Order (`POST /orders`, status `open`) and persists the session
+   locally (see flow 3).
+4. **Order.** `MenuScreen` → `addToOrder` (local cart) → **"Bring these"**
+   (`bringThese`, bundled round) or **"Bring it"** (`bringIt`, instant round). Each
+   round is **dual-written**: `publishRound` → KDS relay (live board, flow 4) AND
+   `sendRoundToApi` → `api.orders.addRound` (persists to the Order so it shows on the
+   admin floor/sessions). Rounds carry `menuItemId`+`unitPrice` (cents) snapshots.
+5. **Track.** `StatusScreen` shows per-item kitchen status (`placed → preparing →
+   ready → served`), updated live from the KDS relay subscription.
+6. **Bill.** `BillScreen` → `requestBill` → `api.orders.requestBill` (Order →
+   `billed`, `billRequestedAt` set → admin "Awaiting Bill").
+7. **Pay** (`payBill(method)`): **card** → `api.orders.capturePayment` captures
+   immediately (Order → `paid`/`closed`, table frees, sale recorded), session ends
+   now. **cash** → NOT captured by the guest; enters `awaitingCash` ("pay at the
+   counter") and polls `api.orders.get` until **staff capture the cash** in
+   restaurant-admin `BillingPage`, flipping the Order to `paid`/`closed`, which ends
+   the session. Server recomputes subtotal/tax (`tenant.taxRate`)/total — the client
+   total is display-only.
+
+### 2. Device-bound session security (the trust boundary)
+Auth is deferred, so a session is protected by **two server-side guards** plus a
+**per-device capability**:
+- **Occupancy guard** (`orders.service.ts` `createForTable`): a table may hold only
+  ONE live (`open`/`billed`) Order → `POST /orders` 409s otherwise. Stops a second
+  guest or a stale client spawning a duplicate session.
+- **Device binding**: the guest client mints a stable opaque id
+  (`src/device.js` `getDeviceId`, in `localStorage`, built from
+  `crypto.getRandomValues` because `crypto.randomUUID` needs a secure context the LAN
+  http origin lacks). It rides every guest call as **`X-Device-Id`**
+  (`api-client` `getDeviceId` config → `http.ts` header). `createForTable` stores it
+  on `Order.deviceId`; guest reads/writes (`get`/`addRound`/`bill`/`payment`) **403**
+  if a *different* id is presented (`orders.service.ts` `assertDevice`). `deviceId` is
+  **never serialized back** to clients, so it can't be read from the public order list
+  and replayed.
+- **Format guard**: the create-order DTO (`orders.dto.ts`) enforces name/phone format
+  server-side (kept optional so staff walk-ins work; required client-side for guests).
+- Staff (restaurant-admin) send **no** `X-Device-Id`, so their calls bypass the
+  device guard. ⚠️ Gap: a non-staff actor who simply omits the header is
+  indistinguishable from staff — closing this needs the deferred auth layer.
+
+### 3. Session persistence, resume & lockout (refresh-safe)
+Session state is in-memory; without persistence a refresh lost `orderId` and the app
+fired **phantom KDS tickets** with no backing Order. Now:
+- **Persist** (`src/session-store.js`): on `startSession`, store
+  `{slug, qrToken, tableId, orderId}` in `localStorage`. On settle, replace it with a
+  terminal `{ended:true}` marker.
+- **Resume** (`BootContext` `tryResume`): on a no-QR boot (refresh / direct hit) or a
+  re-scan of an occupied table that matches the saved `tableId`, re-fetch the Order
+  (`api.orders.get`, ownership re-verified by `X-Device-Id`). If still `open`/`billed`
+  → resume it (pass `resumeOrder` down; `SessionProvider` rehydrates
+  `orderId`/`rounds`/`billRequested` from it). If settled/cancelled or 403/404 → set
+  the ended marker.
+- **Lockout**: a device with the ended marker boots straight to the neutral
+  `SessionClosed` screen (`BootScreens.jsx`) — no ordering until it **scans a fresh
+  QR** (which clears the marker). In-session settle shows the richer
+  `screens/SessionEndScreen.jsx`.
+- **Ordering gate**: `bringIt`/`bringThese`/`addToOrder` no-op unless there is a live
+  `orderIdRef` (and `!sessionEnded`) — the definitive phantom-ticket fix.
+- **Back-button guard**: `App.jsx` `AppRoutes` renders `SessionEndScreen` **above the
+  router** when `sessionEnded || awaitingCash`, so the phone's hardware back button
+  (which pops history through the ordering screens) can't re-enter the order flow.
+
+### 4. KDS (kitchen display) flow — still relay-based
+The live board does **not** yet run on the persisted API. Customer rounds publish via
+`apps/customer/src/kitchen.js` (`createHttpKdsTransport`, `VITE_KDS_URL` :4001) to the
+relay (`tools/kds-relay.mjs`, in-memory, SSE + JSON POST, starts empty). Both the
+in-shell KDS (`/kds`) and chrome-free `/kds/display` in restaurant-admin
+(`kds/kdsClient.ts`) subscribe to the same relay. ⚠️ KDS stage changes therefore do
+**not** write back to the Order yet (the customer `StatusScreen` reflects the relay,
+not the DB). Unifying KDS onto `orders.list` / an API Orders gateway is the next step.
+
+### 5. LAN / mobile access (testing on a phone)
+Dev servers + API must be reachable from a phone on the same Wi-Fi, and the apps must
+address the **dev machine's LAN IP**, not `localhost` (which on the phone means the
+phone itself).
+- Vite dev servers bind `0.0.0.0` via `server: { host: true }` in each app's
+  `vite.config.*`. The API binds `0.0.0.0` (`services/api/src/main.ts`
+  `app.listen(port, "0.0.0.0")`); CORS is open (`enableCors()`). The KDS relay already
+  binds all interfaces.
+- Point the apps at the LAN IP via **`.env.local`** (git-ignored, machine-specific):
+  customer needs `VITE_API_URL` + `VITE_KDS_URL`; admin needs `VITE_API_URL` +
+  `VITE_KDS_URL` + `VITE_CUSTOMER_URL` (the last bakes the LAN IP into the table QR
+  codes so a scan from the phone resolves). Restart Vite after editing — env is read at
+  startup. ⚠️ `crypto.randomUUID`/`subtle` and PWA/camera/geo need a secure context, so
+  they don't work over plain `http://<ip>` (use a tunnel for HTTPS if needed).
+
+### 6. Menu item images
+`MenuItem.imageUrl` (optional) flows API → customer (`MenuContext` maps it to `img` →
+`components/FoodImage.jsx` `<img>`, with the `icon`/`swatch` as fallback). The seed
+(`prisma/seed.ts`) ships stand-in photos: curated exact shots from TheMealDB /
+TheCocktailDB where a dish matches, else keyword-locked LoremFlickr (`flickr()` helper,
+`?lock=` for determinism). Production path: upload real photos per item via the admin
+(`POST /menu/upload` → Supabase Storage), which overwrites `imageUrl`.
 
 ## Conventions & gotchas
 - Money is **integer cents** in the domain/API. The legacy customer screens still

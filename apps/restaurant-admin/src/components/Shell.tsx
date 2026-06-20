@@ -6,6 +6,7 @@ const NAV = [
   { to: "/menu", label: "Menu Management", icon: "restaurant_menu" },
   { to: "/tables", label: "Tables", icon: "table_restaurant" },
   { to: "/kds", label: "Kitchen Display", icon: "skillet" },
+  { to: "/history", label: "Order History", icon: "history" },
   { to: "/analytics", label: "Sales Analytics", icon: "analytics" },
 ];
 

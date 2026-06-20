@@ -228,9 +228,17 @@ export function createApiClient(config: ApiClientConfig) {
           status ? `/orders?status=${encodeURIComponent(status)}` : "/orders",
           { schema: z.array(orderSchema) },
         ),
-      /** Recent completed sales for dashboards. */
-      sales: (): Promise<Sale[]> =>
-        request(config, "/orders/sales", { schema: z.array(saleSchema) }),
+      /** Completed sales. With a `from`/`to` ISO window, returns every sale in
+       *  that range (Order History); without it, the recent dashboard feed. */
+      sales: (range?: { from?: string; to?: string }): Promise<Sale[]> => {
+        const qs = new URLSearchParams();
+        if (range?.from) qs.set("from", range.from);
+        if (range?.to) qs.set("to", range.to);
+        const q = qs.toString();
+        return request(config, q ? `/orders/sales?${q}` : "/orders/sales", {
+          schema: z.array(saleSchema),
+        });
+      },
       get: (id: string): Promise<Order> =>
         request(config, `/orders/${encodeURIComponent(id)}`, {
           schema: orderSchema,

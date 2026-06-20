@@ -11,10 +11,11 @@ const tabs = [
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { myOrderCount } = useSession();
+  const { myOrderCount, sessionEnded } = useSession();
 
   const hiddenPaths = ["/", "/welcome"];
-  if (hiddenPaths.includes(location.pathname)) return null;
+  // Once the session is settled the visit is over — no nav back to ordering.
+  if (sessionEnded || hiddenPaths.includes(location.pathname)) return null;
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl bg-surface/90 backdrop-blur-xl shadow-[0px_-4px_20px_rgba(26,26,26,0.06)] md:max-w-md md:left-1/2 md:-translate-x-1/2">

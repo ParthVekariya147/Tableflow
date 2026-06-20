@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -31,26 +32,37 @@ export class OrdersController {
     return this.orders.list(tenant.id, status);
   }
 
-  /** Recent completed sales (declared before :id so it isn't read as an id). */
+  /** Completed sales (declared before :id so it isn't read as an id). Optional
+   *  ?from=&to= ISO window for the Order History page; omitted = recent feed. */
   @Get("sales")
-  sales(@CurrentTenant() tenant: Tenant): Promise<Sale[]> {
-    return this.orders.listSales(tenant.id);
+  sales(
+    @CurrentTenant() tenant: Tenant,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<Sale[]> {
+    return this.orders.listSales(tenant.id, { from, to });
   }
 
   @Get(":id")
   get(
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
+    @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
-    return this.orders.get(tenant.id, id);
+    return this.orders.get(tenant.id, id, deviceId);
   }
 
   @Post()
   create(
     @CurrentTenant() tenant: Tenant,
     @Body() body: unknown,
+    @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
-    return this.orders.createForTable(tenant.id, createOrderSchema.parse(body));
+    return this.orders.createForTable(
+      tenant.id,
+      createOrderSchema.parse(body),
+      deviceId,
+    );
   }
 
   @Post(":id/rounds")
@@ -58,8 +70,14 @@ export class OrdersController {
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
     @Body() body: unknown,
+    @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
-    return this.orders.addRound(tenant.id, id, addRoundSchema.parse(body));
+    return this.orders.addRound(
+      tenant.id,
+      id,
+      addRoundSchema.parse(body),
+      deviceId,
+    );
   }
 
   @Post(":id/items")
@@ -90,8 +108,9 @@ export class OrdersController {
   requestBill(
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
+    @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
-    return this.orders.requestBill(tenant.id, id);
+    return this.orders.requestBill(tenant.id, id, deviceId);
   }
 
   @Post(":id/cancel")
@@ -107,12 +126,14 @@ export class OrdersController {
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
     @Body() body: unknown,
+    @Headers("x-device-id") deviceId?: string,
   ): Promise<Payment> {
     return this.orders.capturePayment(
       tenant.id,
       id,
       tenant.taxRate,
       capturePaymentSchema.parse(body),
+      deviceId,
     );
   }
 }
