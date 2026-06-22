@@ -13,6 +13,9 @@ const COLUMNS: { stage: KdsStage; title: string; badge?: string }[] = [
 
 export function KdsPage() {
   const { tickets, connected, advance } = useKds();
+  // Served tickets linger briefly on the relay (so a reconnecting guest can read
+  // the final status) but aren't active kitchen work — keep them out of the count.
+  const activeCount = tickets.filter((t) => t.stage !== "served").length;
   const tenant = useTenant();
   const location = useLocation();
   // The chrome-free board lives at /kds/display; only offer the link from the
@@ -58,7 +61,7 @@ export function KdsPage() {
               {clock}
             </div>
             <span className="text-[14px] font-bold text-primary bg-secondary-fixed px-3 py-1 rounded-full border border-secondary">
-              {tickets.length} Orders
+              {activeCount} Orders
             </span>
             {!isFullScreen && (
               <a

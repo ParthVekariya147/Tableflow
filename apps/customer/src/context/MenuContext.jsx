@@ -21,6 +21,26 @@ function toScreenItem(i) {
     img: i.imageUrl || null,
     icon: i.icon || "restaurant",
     swatch: i.swatch,
+    dietary: i.dietary ?? null,
+    jain: i.jain ?? false,
+    // Modifier groups, deltas in dollars for display (priceCents kept for orders).
+    modifierGroups: (i.modifierGroups ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      inputType: g.inputType,
+      required: g.required,
+      minSelect: g.minSelect,
+      maxSelect: g.maxSelect,
+      maxLength: g.maxLength,
+      placeholder: g.placeholder,
+      options: g.options.map((o) => ({
+        id: o.id,
+        name: o.name,
+        price: o.priceDelta / 100,
+        priceCents: o.priceDelta,
+        available: o.available,
+      })),
+    })),
   };
 }
 

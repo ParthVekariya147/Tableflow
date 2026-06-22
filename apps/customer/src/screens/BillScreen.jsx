@@ -2,10 +2,8 @@ import { useState } from "react";
 import { useSession } from "../context/SessionContext";
 import TopAppBar from "../components/TopAppBar";
 
-const GST_RATE = 0.1;
-
 export default function BillScreen() {
-  const { rounds, billTotal, tableNumber, sessionStartTime, billRequested, requestBill, payBill, showToast } = useSession();
+  const { rounds, billTotal, taxRate, tableNumber, sessionStartTime, billRequested, requestBill, payBill, showToast } = useSession();
   const [payMethod, setPayMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
 
@@ -38,8 +36,9 @@ export default function BillScreen() {
     }
   }
 
-  const gst = billTotal * GST_RATE;
+  const gst = billTotal * taxRate;
   const grandTotal = billTotal + gst;
+  const taxPct = Math.round(taxRate * 100);
 
   const startTime = sessionStartTime
     ? sessionStartTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -67,20 +66,36 @@ export default function BillScreen() {
             <div className="divide-y divide-surface-container">
               {[...rounds].reverse().map((round, idx) => {
                 const time = round.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                const roundTotal = round.items.reduce((s, i) => s + i.price * i.qty, 0);
+                // Round total excludes cancelled lines, matching the grand total
+                // (SessionContext.billTotal) and the server-captured amount.
+                const roundTotal = round.items
+                  .filter((i) => i.status !== "cancelled")
+                  .reduce((s, i) => s + i.price * i.qty, 0);
                 return (
                   <div key={round.id} className="p-4">
                     <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold mb-3">
                       {round.type === "instant" ? "Instant" : `Round ${rounds.length - idx}`} · {time}
                     </p>
-                    {round.items.map((item) => (
-                      <div key={item.id} className="flex justify-between mb-1.5">
-                        <div>
-                          <p className="text-[14px] text-on-surface">{item.qty}× {item.name}</p>
+                    {round.items.map((item) => {
+                      const cancelled = item.status === "cancelled";
+                      return (
+                        <div key={item.lineKey ?? item.id} className="flex justify-between mb-1.5">
+                          <div>
+                            <p className={`text-[14px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{item.qty}× {item.name}</p>
+                            {item.modifiers?.length > 0 && (
+                              <p className={`text-[11px] text-on-surface-variant ${cancelled ? "line-through" : ""}`}>
+                                {item.modifiers.map((m) => (m.textValue ? `“${m.textValue}”` : m.name)).join(", ")}
+                              </p>
+                            )}
+                          </div>
+                          {cancelled ? (
+                            <p className="text-[11px] font-bold uppercase tracking-wide text-red-700">Cancelled</p>
+                          ) : (
+                            <p className="text-[14px] font-semibold text-on-surface">${(item.price * item.qty).toFixed(2)}</p>
+                          )}
                         </div>
-                        <p className="text-[14px] font-semibold text-on-surface">${(item.price * item.qty).toFixed(2)}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <div className="flex justify-between mt-2 pt-2 border-t border-surface-container/60">
                       <span className="text-[12px] text-on-surface-variant">Round total</span>
                       <span className="text-[12px] font-semibold text-on-surface-variant">${roundTotal.toFixed(2)}</span>
@@ -100,7 +115,7 @@ export default function BillScreen() {
               <span>Subtotal</span><span>${billTotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-on-surface-variant text-[14px]">
-              <span>GST (10%)</span><span>${gst.toFixed(2)}</span>
+              <span>GST ({taxPct}%)</span><span>${gst.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-primary font-bold text-[22px] pt-1">
               <span>Total</span><span>${grandTotal.toFixed(2)}</span>

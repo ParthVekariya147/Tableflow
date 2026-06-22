@@ -28,7 +28,11 @@ function StatusPill({ status, stage }) {
 }
 
 function RoundCard({ round }) {
-  const allServed = round.items.every((i) => i.status === "served");
+  // "Done" = served OR cancelled, so a round of served+cancelled items still
+  // reads as finished (cancelled lines aren't pending kitchen work).
+  const allServed =
+    round.items.length > 0 &&
+    round.items.every((i) => i.status === "served" || i.status === "cancelled");
   const time = round.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const label = round.type === "instant" ? "Instant" : `Round`;
 
@@ -52,22 +56,37 @@ function RoundCard({ round }) {
 
       {/* Items */}
       <div className="divide-y divide-surface-container">
-        {round.items.map((item) => (
-          <div key={item.id} className="p-4">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <h4 className="font-bold text-on-surface text-[15px]">{item.name}</h4>
-                <p className="text-[12px] text-on-surface-variant">Qty {item.qty}</p>
+        {round.items.map((item) => {
+          const cancelled = item.status === "cancelled";
+          return (
+            <div key={item.lineKey ?? item.id} className={`p-4 ${cancelled ? "opacity-70" : ""}`}>
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <h4 className={`font-bold text-[15px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{item.name}</h4>
+                  {item.modifiers?.length > 0 && (
+                    <p className={`text-[11px] text-on-surface-variant ${cancelled ? "line-through" : ""}`}>
+                      {item.modifiers.map((m) => (m.textValue ? `“${m.textValue}”` : m.name)).join(", ")}
+                    </p>
+                  )}
+                  <p className="text-[12px] text-on-surface-variant">Qty {item.qty}</p>
+                </div>
+                <span className={`font-bold text-[14px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>${(item.price * item.qty).toFixed(2)}</span>
               </div>
-              <span className="font-bold text-on-surface text-[14px]">${(item.price * item.qty).toFixed(2)}</span>
+              {cancelled ? (
+                <div className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2.5 text-red-700">
+                  <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
+                  <span className="text-[11px] font-bold uppercase tracking-wide">Cancelled by restaurant</span>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  {STATUS_ORDER.map((stage) => (
+                    <StatusPill key={stage} status={item.status} stage={stage} />
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="flex gap-2">
-              {STATUS_ORDER.map((stage) => (
-                <StatusPill key={stage} status={item.status} stage={stage} />
-              ))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

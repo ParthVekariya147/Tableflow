@@ -25,6 +25,23 @@ const PLACEHOLDER_HASH = "$2b$10$seedplaceholderseedplaceholderseedplaceholders"
 
 type ItemStatus = "placed" | "preparing" | "ready" | "served" | "cancelled";
 
+type ModifierInputType = "single" | "multiple" | "toggle" | "text";
+
+interface SeedModifierOption {
+  name: string;
+  priceDelta?: number; // cents
+}
+interface SeedModifierGroup {
+  name: string;
+  inputType: ModifierInputType;
+  required?: boolean;
+  minSelect?: number;
+  maxSelect?: number | null;
+  maxLength?: number | null;
+  placeholder?: string;
+  options?: SeedModifierOption[];
+}
+
 interface SeedItem {
   name: string;
   category: string;
@@ -36,6 +53,8 @@ interface SeedItem {
   available?: boolean;
   /** Public photo URL → MenuItem.imageUrl (icon/swatch are the fallback). */
   imageUrl?: string;
+  /** Custom modifier groups (see MODIFIERS.md). */
+  modifiers?: SeedModifierGroup[];
 }
 
 /**
@@ -105,6 +124,29 @@ async function seedMenu(
         available: it.available ?? true,
         imageUrl: it.imageUrl,
         sortOrder,
+        modifierGroups: it.modifiers?.length
+          ? {
+              create: it.modifiers.map((g, gi) => ({
+                tenantId,
+                name: g.name,
+                inputType: g.inputType,
+                required: g.required ?? false,
+                minSelect: g.minSelect ?? 0,
+                maxSelect: g.maxSelect ?? null,
+                maxLength: g.maxLength ?? null,
+                placeholder: g.placeholder,
+                sortOrder: gi,
+                options: {
+                  create: (g.options ?? []).map((o, oi) => ({
+                    tenantId,
+                    name: o.name,
+                    priceDelta: o.priceDelta ?? 0,
+                    sortOrder: oi,
+                  })),
+                },
+              })),
+            }
+          : undefined,
       },
     });
     itemByName.set(it.name, { id: mi.id, price: mi.price });
@@ -150,10 +192,19 @@ const AMBER_ITEMS: SeedItem[] = [
   { name: "Soft Shell Crab", category: "Starters", price: 1450, description: "Lightly fried, micro-greens, citrus aioli.", icon: "set_meal", swatch: "from-rose-200 to-red-300", available: false, imageUrl: flickr("crab") },
   { name: "Paneer Tikka Bites", category: "Starters", price: 850, description: "Char-grilled paneer skewers, mint yogurt.", icon: "kebab_dining", swatch: "from-orange-200 to-amber-300", imageUrl: flickr("paneer-tikka") },
   // Mains
-  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature", imageUrl: flickr("burger") },
+  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature", imageUrl: flickr("burger"),
+    modifiers: [
+      { name: "Doneness", inputType: "single", required: true, options: [{ name: "Medium Rare" }, { name: "Medium" }, { name: "Well Done" }] },
+      { name: "Add-ons", inputType: "toggle", options: [{ name: "Extra cheese", priceDelta: 200 }, { name: "Bacon", priceDelta: 300 }, { name: "Fried egg", priceDelta: 250 }] },
+      { name: "Notes for the kitchen", inputType: "text", maxLength: 140, placeholder: "e.g. no pickles" },
+    ] },
   { name: "Ribeye Steak", category: "Mains", price: 4400, description: "12oz dry-aged ribeye, peppercorn jus.", icon: "restaurant", swatch: "from-red-300 to-rose-500", imageUrl: flickr("steak") },
   { name: "Grilled Salmon", category: "Mains", price: 2600, description: "Atlantic salmon, lemon butter, seasonal veg.", icon: "set_meal", swatch: "from-rose-200 to-orange-300", imageUrl: flickr("grilled-salmon") },
-  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular", imageUrl: flickr("butter-chicken") },
+  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular", imageUrl: flickr("butter-chicken"),
+    modifiers: [
+      { name: "Spice Level", inputType: "single", required: true, options: [{ name: "Mild" }, { name: "Medium" }, { name: "Hot" }] },
+      { name: "Add naan", inputType: "toggle", options: [{ name: "Garlic naan", priceDelta: 500 }, { name: "Butter naan", priceDelta: 400 }] },
+    ] },
   // Sides
   { name: "Truffle Fries", category: "Sides", price: 900, description: "Hand-cut fries, truffle oil, parmesan.", icon: "fastfood", swatch: "from-yellow-200 to-amber-400", imageUrl: flickr("fries") },
   { name: "House Salad", category: "Sides", price: 1200, description: "Mixed greens, heirloom tomato, vinaigrette.", icon: "eco", swatch: "from-green-200 to-emerald-400", imageUrl: flickr("salad") },
@@ -371,7 +422,12 @@ async function main(): Promise<void> {
   });
   await seedMenu(bella.id, ["Pizza", "Pasta", "Drinks"], [
     // Curated exact pizza/pasta shots from TheMealDB.
-    { name: "Margherita", category: "Pizza", price: 1400, description: "San Marzano, fior di latte, basil.", icon: "local_pizza", swatch: "from-red-200 to-rose-300", badge: "Classic", imageUrl: "https://www.themealdb.com/images/media/meals/x0lk931587671540.jpg" },
+    { name: "Margherita", category: "Pizza", price: 1400, description: "San Marzano, fior di latte, basil.", icon: "local_pizza", swatch: "from-red-200 to-rose-300", badge: "Classic", imageUrl: "https://www.themealdb.com/images/media/meals/x0lk931587671540.jpg",
+      modifiers: [
+        { name: "Crust", inputType: "single", required: true, options: [{ name: "Thin" }, { name: "Classic" }, { name: "Thick", priceDelta: 150 }] },
+        { name: "Extra toppings", inputType: "multiple", minSelect: 0, maxSelect: 5, options: [{ name: "Mushroom", priceDelta: 150 }, { name: "Olives", priceDelta: 150 }, { name: "Pepperoni", priceDelta: 250 }, { name: "Extra mozzarella", priceDelta: 200 }, { name: "Rocket", priceDelta: 100 }] },
+        { name: "Special request", inputType: "text", maxLength: 140, placeholder: "e.g. well done" },
+      ] },
     { name: "Diavola", category: "Pizza", price: 1600, description: "Spicy salami, chilli, mozzarella.", icon: "local_pizza", swatch: "from-rose-300 to-red-400", imageUrl: flickr("pepperoni-pizza") },
     { name: "Carbonara", category: "Pasta", price: 1500, description: "Guanciale, egg, pecorino, pepper.", icon: "ramen_dining", swatch: "from-amber-100 to-yellow-300", imageUrl: "https://www.themealdb.com/images/media/meals/llcbn01574260722.jpg" },
     { name: "Chianti Glass", category: "Drinks", price: 900, description: "Tuscan red, by the glass.", icon: "wine_bar", swatch: "from-rose-300 to-red-500", imageUrl: flickr("red-wine") },

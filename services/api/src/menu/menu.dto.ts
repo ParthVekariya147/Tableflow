@@ -1,4 +1,26 @@
 import { z } from "zod";
+import { modifierInputTypeSchema, dietaryTypeSchema } from "@amber/domain";
+
+/** A modifier option as authored in the admin (no id — server mints them). */
+export const modifierOptionInputSchema = z.object({
+  name: z.string().trim().min(1),
+  priceDelta: z.number().int(), // cents; may be negative
+  available: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+
+/** A modifier group as authored in the admin. */
+export const modifierGroupInputSchema = z.object({
+  name: z.string().trim().min(1),
+  inputType: modifierInputTypeSchema,
+  required: z.boolean().optional(),
+  minSelect: z.number().int().nonnegative().optional(),
+  maxSelect: z.number().int().positive().nullable().optional(),
+  maxLength: z.number().int().positive().nullable().optional(),
+  placeholder: z.string().optional(),
+  sortOrder: z.number().int().optional(),
+  options: z.array(modifierOptionInputSchema).default([]),
+});
 
 /** POST /menu/categories */
 export const createCategorySchema = z.object({
@@ -22,7 +44,12 @@ export const createItemSchema = z.object({
   icon: z.string().optional(),
   swatch: z.string().optional(),
   available: z.boolean().optional(),
+  /** Veg / Non-veg marker; null clears it. */
+  dietary: dietaryTypeSchema.nullable().optional(),
+  jain: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  /** Full modifier set (replace-on-save). Omit to leave untouched on PATCH. */
+  modifierGroups: z.array(modifierGroupInputSchema).optional(),
 });
 export type CreateItemDto = z.infer<typeof createItemSchema>;
 

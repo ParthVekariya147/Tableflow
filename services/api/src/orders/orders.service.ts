@@ -6,7 +6,9 @@ import {
   ForbiddenException,
 } from "@nestjs/common";
 import type { Order, OrderStatus, Payment, Sale, ItemStatus } from "@amber/domain";
+import { orderItemUnitPrice } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { OrdersEvents } from "./orders.events.js";
 import { toDomainOrder, toDomainPayment, toSale } from "./orders.mapper.js";
 import type {
   AddRoundDto,
@@ -16,8 +18,14 @@ import type {
   CapturePaymentDto,
 } from "./orders.dto.js";
 
-const ROUND_INCLUDE = { rounds: { include: { items: true } } } as const;
+const ROUND_INCLUDE = {
+  rounds: { include: { items: { include: { modifiers: true } } } },
+} as const;
 const LIVE_STATUSES: OrderStatus[] = ["open", "billed"];
+
+type RoundItemModifier = NonNullable<
+  AddRoundDto["items"][number]["modifiers"]
+>[number];
 
 /** Maps a kitchen status to the timestamp column that records reaching it. */
 const STATUS_STAMP: Record<ItemStatus, string | null> = {
@@ -30,7 +38,25 @@ const STATUS_STAMP: Record<ItemStatus, string | null> = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly events: OrdersEvents,
+  ) {}
+
+  /**
+   * Re-load an order and broadcast it on the tenant's live stream, then return
+   * it. Every mutation funnels through here so all three clients (admin,
+   * customer, KDS) see the change in real time without polling.
+   */
+  private async refreshAndEmit(
+    tenantId: string,
+    orderId: string,
+    type: "created" | "updated" | "closed",
+  ): Promise<Order> {
+    const order = await this.get(tenantId, orderId);
+    this.events.emit(tenantId, { type, orderId, order });
+    return order;
+  }
 
   /**
    * Load an order, scoped to the tenant so cross-tenant access is impossible.
@@ -81,10 +107,13 @@ export class OrdersService {
       },
       include: ROUND_INCLUDE,
     });
-    return toDomainOrder(row);
+    const order = toDomainOrder(row);
+    this.events.emit(tenantId, { type: "created", orderId: order.id, order });
+    return order;
   }
 
-  /** Append a round (instant or bundled) to an open order. */
+  /** Append a round (instant or bundled) to an open order. Modifiers are
+   *  re-validated + re-priced server-side before they're persisted. */
   async addRound(
     tenantId: string,
     orderId: string,
@@ -92,24 +121,146 @@ export class OrdersService {
     deviceId?: string,
   ): Promise<Order> {
     await this.assertOrder(tenantId, orderId, deviceId);
+
+    // Resolve each line's modifiers up front (async DB lookups).
+    const lines = await Promise.all(
+      dto.items.map(async (i) => ({
+        // Honour a client-supplied id (shared id space with the KDS ticket); else
+        // Prisma mints a cuid.
+        ...(i.id ? { id: i.id } : {}),
+        tenantId,
+        menuItemId: i.menuItemId,
+        name: i.name,
+        unitPrice: i.unitPrice,
+        qty: i.qty,
+        notes: i.notes,
+        modifiers: {
+          create: await this.resolveItemModifiers(
+            tenantId,
+            i.menuItemId,
+            i.modifiers ?? [],
+          ),
+        },
+      })),
+    );
+
     await this.prisma.round.create({
       data: {
+        ...(dto.id ? { id: dto.id } : {}),
         tenantId,
         orderId,
         type: dto.type,
-        items: {
-          create: dto.items.map((i) => ({
-            tenantId,
-            menuItemId: i.menuItemId,
-            name: i.name,
-            unitPrice: i.unitPrice,
-            qty: i.qty,
-            notes: i.notes,
-          })),
-        },
+        items: { create: lines },
       },
     });
-    return this.get(tenantId, orderId);
+    return this.refreshAndEmit(tenantId, orderId, "updated");
+  }
+
+  /**
+   * Validate a line's submitted modifiers against the menu item's groups and
+   * return the rows to persist (price/name snapshotted from the DB, not the
+   * client). Enforces option validity + availability, text-group existence, and
+   * required / min / max counts. The trust boundary for modifier pricing.
+   */
+  private async resolveItemModifiers(
+    tenantId: string,
+    menuItemId: string,
+    mods: RoundItemModifier[],
+  ): Promise<
+    {
+      tenantId: string;
+      optionId: string | null;
+      groupName: string;
+      name: string;
+      priceDelta: number;
+      textValue: string | null;
+    }[]
+  > {
+    const item = await this.prisma.menuItem.findFirst({
+      where: { id: menuItemId, tenantId },
+      include: { modifierGroups: { include: { options: true } } },
+    });
+    // Unknown/deleted item: nothing to validate against — reject if mods were sent.
+    if (!item) {
+      if (mods.length)
+        throw new BadRequestException(`Menu item not found: ${menuItemId}`);
+      return [];
+    }
+
+    const optionMap = new Map(
+      item.modifierGroups.flatMap((g) =>
+        g.options.map((o) => [o.id, { option: o, group: g }] as const),
+      ),
+    );
+    const textGroupByName = new Map(
+      item.modifierGroups
+        .filter((g) => g.inputType === "text")
+        .map((g) => [g.name, g] as const),
+    );
+
+    const rows: {
+      tenantId: string;
+      optionId: string | null;
+      groupName: string;
+      name: string;
+      priceDelta: number;
+      textValue: string | null;
+    }[] = [];
+    const countByGroup = new Map<string, number>();
+    const textByGroup = new Map<string, boolean>();
+
+    for (const m of mods) {
+      if (m.optionId) {
+        const hit = optionMap.get(m.optionId);
+        if (!hit || !hit.option.available)
+          throw new BadRequestException(`Invalid option: ${m.optionId}`);
+        rows.push({
+          tenantId,
+          optionId: hit.option.id,
+          groupName: hit.group.name,
+          name: hit.option.name,
+          priceDelta: hit.option.priceDelta, // recomputed from DB
+          textValue: null,
+        });
+        countByGroup.set(
+          hit.group.id,
+          (countByGroup.get(hit.group.id) ?? 0) + 1,
+        );
+      } else {
+        const grp = textGroupByName.get(m.groupName);
+        if (!grp)
+          throw new BadRequestException(`Unknown modifier: ${m.groupName}`);
+        const text = (m.textValue ?? "").trim();
+        if (!text) continue; // empty optional text → skip
+        rows.push({
+          tenantId,
+          optionId: null,
+          groupName: grp.name,
+          name: "",
+          priceDelta: 0,
+          textValue: text,
+        });
+        textByGroup.set(grp.id, true);
+      }
+    }
+
+    // Per-group count / required enforcement.
+    for (const g of item.modifierGroups) {
+      const n = countByGroup.get(g.id) ?? 0;
+      if (g.inputType === "text") {
+        if (g.required && !textByGroup.get(g.id))
+          throw new BadRequestException(`${g.name} is required.`);
+        continue;
+      }
+      if (g.inputType === "single" && n > 1)
+        throw new BadRequestException(`${g.name}: pick only one.`);
+      if (g.maxSelect != null && n > g.maxSelect)
+        throw new BadRequestException(`${g.name}: too many selected.`);
+      const min = g.required ? Math.max(g.minSelect, 1) : g.minSelect;
+      if (n < min) throw new BadRequestException(`${g.name}: pick at least ${min}.`);
+    }
+
+    return rows;
   }
 
   /** Mark an order as bill-requested. */
@@ -123,7 +274,7 @@ export class OrdersService {
       where: { id: orderId },
       data: { status: "billed", billRequestedAt: new Date() },
     });
-    return this.get(tenantId, orderId);
+    return this.refreshAndEmit(tenantId, orderId, "updated");
   }
 
   /** List sessions for the floor / KDS. Defaults to live (open + billed). */
@@ -205,7 +356,7 @@ export class OrdersService {
         },
       });
     }
-    return this.get(tenantId, orderId);
+    return this.refreshAndEmit(tenantId, orderId, "updated");
   }
 
   /** Change a line's quantity (0 removes it) and/or advance its kitchen status. */
@@ -215,7 +366,20 @@ export class OrdersService {
     itemId: string,
     dto: UpdateItemDto,
   ): Promise<Order> {
-    await this.assertOrder(tenantId, orderId);
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+      select: { id: true, status: true },
+    });
+    if (!order) throw new NotFoundException(`Order not found: ${orderId}`);
+    // A cancelled/paid session is terminal. Refuse item edits — including the
+    // KDS status write-through — so a stale kitchen board can't resurrect a dead
+    // order (e.g. mark "preparing" after staff cancelled it, which would wrongly
+    // reach the guest's phone). The relay ticket should already be gone too.
+    if (order.status === "closed" || order.status === "paid")
+      throw new ConflictException(
+        "This session is closed; its items can no longer be changed.",
+      );
+
     const item = await this.prisma.orderItem.findFirst({
       where: { id: itemId, tenantId, round: { orderId } },
       select: { id: true },
@@ -224,7 +388,7 @@ export class OrdersService {
 
     if (dto.qty === 0) {
       await this.prisma.orderItem.delete({ where: { id: itemId } });
-      return this.get(tenantId, orderId);
+      return this.refreshAndEmit(tenantId, orderId, "updated");
     }
 
     const data: Record<string, unknown> = {};
@@ -235,7 +399,7 @@ export class OrdersService {
       if (stamp) data[stamp] = new Date();
     }
     await this.prisma.orderItem.update({ where: { id: itemId }, data });
-    return this.get(tenantId, orderId);
+    return this.refreshAndEmit(tenantId, orderId, "updated");
   }
 
   /** Abandon a session without payment (walkout / mistake). Frees the table. */
@@ -245,7 +409,7 @@ export class OrdersService {
       where: { id: orderId },
       data: { status: "closed", closedAt: new Date() },
     });
-    return this.get(tenantId, orderId);
+    return this.refreshAndEmit(tenantId, orderId, "closed");
   }
 
   /** Settle the bill: snapshot totals, record the payment, close the session. */
@@ -259,13 +423,17 @@ export class OrdersService {
     const order = await this.get(tenantId, orderId, deviceId);
     if (order.status === "paid")
       throw new BadRequestException("Order already paid");
+    // A cancelled/abandoned session is `closed`. Refuse to capture against it so
+    // a stale guest client can't resurrect a cancelled order into a paid sale.
+    if (order.status === "closed")
+      throw new ConflictException("This session was cancelled and can't be paid.");
 
     const subtotal = order.rounds.reduce(
       (sum, r) =>
         sum +
         r.items
           .filter((i) => i.status !== "cancelled")
-          .reduce((s, i) => s + i.unitPrice * i.qty, 0),
+          .reduce((s, i) => s + orderItemUnitPrice(i) * i.qty, 0),
       0,
     );
     const tax = Math.round(subtotal * taxRate);
@@ -290,6 +458,10 @@ export class OrdersService {
         data: { status: "paid", closedAt: new Date() },
       }),
     ]);
+    // Broadcast the now-closed order so the floor frees the table and the guest
+    // phone leaves the bill screen in real time.
+    const closed = await this.get(tenantId, orderId);
+    this.events.emit(tenantId, { type: "closed", orderId, order: closed });
     return toDomainPayment(payment);
   }
 

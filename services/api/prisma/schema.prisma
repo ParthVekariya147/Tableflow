@@ -157,6 +157,10 @@ model MenuItem {
   /** Tailwind gradient classes for the stand-in card backdrop. */
   swatch      String?
   available   Boolean  @default(true)
+  /** Veg / Non-veg dietary marker (Indian menu convention). null = unmarked. */
+  dietary     DietaryType?
+  /** Jain (no roots/onion/garlic). Independent of `dietary`; shown as a J badge. */
+  jain        Boolean  @default(false)
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -175,25 +179,43 @@ model MenuItem {
 // plus MenuItem.modifierGroups and OrderItem.modifiers — nothing else uses them.
 
 /** single = pick one (Size, Spice level). multiple = pick any (Add-ons). */
-enum ModifierSelection {
+/**
+ * How a modifier group is presented + behaves while ordering (see MODIFIERS.md).
+ *   single   → pick one  (radio / bullet list; dropdown if many)
+ *   multiple → pick many (checkboxes, bounded by min/maxSelect)
+ *   toggle   → independent on/off switches, one per option
+ *   text     → free text, NO options
+ */
+enum ModifierInputType {
   single
   multiple
+  toggle
+  text
 }
 
-/** A choice group attached to a menu item, e.g. "Size", "Add-ons", "Spice level". */
+/** Veg / Non-veg dietary marker shown on item cards (Indian menu convention). */
+enum DietaryType {
+  veg
+  non_veg
+}
+
+/** A choice group attached to a menu item, e.g. "Cheese", "Toppings", "Spice level". */
 model ModifierGroup {
-  id         String            @id @default(cuid())
-  tenantId   String
-  menuItemId String
-  name       String
-  selection  ModifierSelection @default(single)
-  required   Boolean           @default(false)
-  minSelect  Int               @default(0)
-  maxSelect  Int? // null = unlimited (for `multiple`)
-  sortOrder  Int               @default(0)
-  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  menuItem   MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
-  options    ModifierOption[]
+  id          String            @id @default(cuid())
+  tenantId    String
+  menuItemId  String
+  name        String
+  inputType   ModifierInputType @default(single)
+  required    Boolean           @default(false)
+  minSelect   Int               @default(0)
+  maxSelect   Int? // null = unlimited (for `multiple`)
+  /** `text` only: optional length cap + input hint. */
+  maxLength   Int?
+  placeholder String?
+  sortOrder   Int               @default(0)
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  menuItem    MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  options     ModifierOption[]
 
   @@index([tenantId])
   @@index([menuItemId])
@@ -344,14 +366,17 @@ model OrderItem {
   @@index([menuItemId])
 }
 
-/** A chosen option on an order line. Name + priceDelta are snapshotted at order time. */
+/** A chosen modifier on an order line. groupName/name/priceDelta are snapshotted
+ *  at order time so historical bills stay correct even if the source is edited. */
 model OrderItemModifier {
   id          String          @id @default(cuid())
   tenantId    String
   orderItemId String
-  optionId    String? // null if option later deleted; snapshot below preserves display
-  name        String // snapshot
-  priceDelta  Int // snapshot, cents
+  optionId    String? // null for `text`, or if the option was later deleted
+  groupName   String // snapshot of the group label, e.g. "Spice Level"
+  name        String // snapshot of the chosen option name ("" for text)
+  priceDelta  Int             @default(0) // snapshot, cents
+  textValue   String? // for `text` groups
   tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   orderItem   OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   option      ModifierOption? @relation(fields: [optionId], references: [id], onDelete: SetNull)

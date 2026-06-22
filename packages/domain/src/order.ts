@@ -23,6 +23,21 @@ export const roundTypeSchema = z.enum(["instant", "bundled"]);
 /** Lifecycle of the whole table session. */
 export const orderStatusSchema = z.enum(["open", "billed", "paid", "closed"]);
 
+/** A chosen modifier on an order line — snapshotted so bills survive menu edits. */
+export const orderItemModifierSchema = z.object({
+  id: idSchema,
+  /** Null for `text`, or if the source option was later deleted. */
+  optionId: idSchema.nullable(),
+  /** Snapshot of the group label, e.g. "Spice Level". */
+  groupName: z.string().min(1),
+  /** Snapshot of the chosen option name ("" for text). */
+  name: z.string().default(""),
+  /** Snapshot of the per-unit price change, in minor units (cents). */
+  priceDelta: z.number().int().default(0),
+  /** Free text for `text` groups. */
+  textValue: z.string().optional(),
+});
+
 export const orderItemSchema = z.object({
   id: idSchema,
   /** Null once the source menu item is deleted — the name/price snapshot below preserves display. */
@@ -34,6 +49,8 @@ export const orderItemSchema = z.object({
   qty: z.number().int().positive(),
   status: itemStatusSchema.default("placed"),
   notes: z.string().optional(),
+  /** Chosen modifiers; their priceDelta is added per-unit to unitPrice. */
+  modifiers: z.array(orderItemModifierSchema).default([]),
 });
 
 export const roundSchema = z.object({
@@ -61,9 +78,20 @@ export const orderSchema = z.object({
 export type ItemStatus = z.infer<typeof itemStatusSchema>;
 export type RoundType = z.infer<typeof roundTypeSchema>;
 export type OrderStatus = z.infer<typeof orderStatusSchema>;
+export type OrderItemModifier = z.infer<typeof orderItemModifierSchema>;
 export type OrderItem = z.infer<typeof orderItemSchema>;
 export type Round = z.infer<typeof roundSchema>;
 export type Order = z.infer<typeof orderSchema>;
+
+/** Per-unit price of a line including its modifier deltas, in minor units. */
+export function orderItemUnitPrice(
+  item: Pick<OrderItem, "unitPrice" | "modifiers">,
+): number {
+  return (
+    item.unitPrice +
+    (item.modifiers ?? []).reduce((s, m) => s + m.priceDelta, 0)
+  );
+}
 
 /** Ordered kitchen stages; index used to compare/advance progress. */
 export const ITEM_STATUS_FLOW: readonly ItemStatus[] = [
@@ -73,11 +101,12 @@ export const ITEM_STATUS_FLOW: readonly ItemStatus[] = [
   "served",
 ] as const;
 
-/** Subtotal (pre-tax) of an order across all rounds, in minor units. */
+/** Subtotal (pre-tax) of an order across all rounds, in minor units. Includes
+ *  each line's modifier price deltas (per-unit). */
 export function orderSubtotal(order: Pick<Order, "rounds">): number {
   return order.rounds.reduce(
     (sum, round) =>
-      sum + round.items.reduce((s, i) => s + i.unitPrice * i.qty, 0),
+      sum + round.items.reduce((s, i) => s + orderItemUnitPrice(i) * i.qty, 0),
     0,
   );
 }

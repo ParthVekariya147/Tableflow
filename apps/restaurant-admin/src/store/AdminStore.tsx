@@ -18,12 +18,34 @@ import type {
 import type {
   AdminState,
   MenuItem,
+  ModifierGroup,
   PaymentMethod,
   Round,
   Table,
   TableSession,
 } from "../data/types";
 import { defaultTenant } from "../tenant/defaultTenant";
+import { kdsClient } from "../kds/kdsClient";
+
+/** View-model modifier groups (priceCents) → api-client input (priceDelta). */
+function toModifierGroupsInput(groups: ModifierGroup[]) {
+  return groups.map((g, gi) => ({
+    name: g.name,
+    inputType: g.inputType,
+    required: g.required,
+    minSelect: g.minSelect,
+    maxSelect: g.maxSelect ?? null,
+    maxLength: g.maxLength ?? null,
+    placeholder: g.placeholder,
+    sortOrder: gi,
+    options: (g.inputType === "text" ? [] : g.options).map((o, oi) => ({
+      name: o.name,
+      priceDelta: o.priceCents,
+      available: o.available ?? true,
+      sortOrder: oi,
+    })),
+  }));
+}
 
 /**
  * API-backed store for the admin panel. The provider loads the tenant's menu,
@@ -120,9 +142,27 @@ function mapState(
       description: i.description,
       priceCents: i.price,
       available: i.available,
+      dietary: i.dietary ?? null,
+      jain: i.jain ?? false,
       icon: i.icon ?? DEFAULT_ICON,
       swatch: i.swatch ?? DEFAULT_SWATCH,
       imageUrl: i.imageUrl,
+      modifierGroups: i.modifierGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        inputType: g.inputType,
+        required: g.required,
+        minSelect: g.minSelect,
+        maxSelect: g.maxSelect,
+        maxLength: g.maxLength,
+        placeholder: g.placeholder,
+        options: g.options.map((o) => ({
+          id: o.id,
+          name: o.name,
+          priceCents: o.priceDelta,
+          available: o.available,
+        })),
+      })),
     })),
     tables: floor.map(mapTable),
     sales: sales.map((s) => ({
@@ -196,18 +236,68 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     setLoaded(true);
   }, [api]);
 
+  // Lighter refetch for live order events: only the floor + sales change on an
+  // order mutation, so leave menu/categories/taxRate untouched (less load than a
+  // full `refresh`). Driven by the SSE stream below.
+  const refreshFloor = useCallback(async () => {
+    const [floor, sales] = await Promise.all([
+      api.tables.list(),
+      api.orders.sales(),
+    ]);
+    setState((s) => ({
+      ...s,
+      tables: floor.map(mapTable),
+      sales: sales.map((sl) => ({
+        id: sl.id,
+        tableLabel: sl.tableLabel,
+        totalCents: sl.total,
+        method: sl.method,
+        at: Date.parse(sl.createdAt),
+      })),
+    }));
+  }, [api]);
+
   useEffect(() => {
     refresh().catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [refresh]);
 
-  // Background sync — keep the floor/menu/sales live so external changes (guest
-  // QR reservations, payments, KDS status from other devices) appear without a
-  // manual reload. Polls while the tab is visible and refetches immediately on
-  // focus; skips while a mutation (+ its own refetch) is in flight to avoid
-  // clobbering optimistic state. (Phase 2: swap polling for true realtime.)
+  // Real-time: subscribe to the tenant's live order stream so external changes
+  // (guest QR reservations, payments, KDS status, another device's edits) land
+  // on the floor instantly. Coalesce bursts (snapshot + deltas) into one floor
+  // refetch, and skip while a local mutation (+ its refetch) is in flight so a
+  // pushed event can't clobber optimistic state (existing `mutatingRef` guard).
   useEffect(() => {
     if (!loaded) return;
-    const POLL_MS = 4000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsub = api.orders.stream((event) => {
+      // An order that just closed (staff cancelled, or settled) must vanish from
+      // the KDS too — otherwise the kitchen keeps seeing a dead order and can
+      // advance it (writing a bogus status back to the guest). The relay is
+      // separate from the API, so push the removal across (best-effort).
+      if (event.type === "closed") {
+        void kdsClient.cancelOrder?.(event.orderId);
+      }
+      if (mutatingRef.current || timer) return;
+      timer = setTimeout(() => {
+        timer = undefined;
+        if (mutatingRef.current) return;
+        refreshFloor().catch(() => {});
+      }, 150);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsub();
+    };
+  }, [loaded, api, refreshFloor]);
+
+  // Background sync — low-frequency self-heal fallback behind the SSE stream
+  // above (covers a dropped stream, e.g. a backgrounded tab, and resyncs menu).
+  // Polls while the tab is visible and refetches immediately on focus; skips
+  // while a mutation (+ its own refetch) is in flight to avoid clobbering
+  // optimistic state.
+  useEffect(() => {
+    if (!loaded) return;
+    const POLL_MS = 20000;
     const syncNow = () => {
       if (document.hidden || mutatingRef.current) return;
       refresh().catch(() => {});
@@ -247,7 +337,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
             icon: p.icon,
             swatch: p.swatch,
             available: p.available,
+            dietary: p.dietary,
+            jain: p.jain,
             imageUrl: p.imageUrl,
+            // undefined = leave untouched; an array (incl. []) = replace.
+            modifierGroups: p.modifierGroups
+              ? toModifierGroupsInput(p.modifierGroups)
+              : undefined,
           });
           return;
         }
@@ -262,6 +358,11 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
             swatch: i.swatch,
             imageUrl: i.imageUrl,
             available: i.available,
+            dietary: i.dietary,
+            jain: i.jain,
+            modifierGroups: i.modifierGroups
+              ? toModifierGroupsInput(i.modifierGroups)
+              : undefined,
           });
           return;
         }
@@ -322,15 +423,26 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         }
         case "CANCEL_ITEM": {
           const orderId = orderIdFor(action.tableId);
-          if (orderId)
+          if (orderId) {
             await api.orders.updateItem(orderId, action.itemId, {
               status: "cancelled",
             });
+            // Signal the KDS to pull this dish's card off the board (any column).
+            // The ticket id is `roundId::orderItemId` (shared id space). The order
+            // itself stays live, so this is the only way the kitchen learns the
+            // single item was cancelled.
+            void kdsClient.removeTicket?.(`${action.roundId}::${action.itemId}`);
+          }
           return;
         }
         case "CANCEL_ORDER": {
           const orderId = orderIdFor(action.tableId);
-          if (orderId) await api.orders.cancel(orderId);
+          if (orderId) {
+            await api.orders.cancel(orderId);
+            // Drop the whole order from the KDS immediately (don't wait for the
+            // stream round-trip). Idempotent with the closed-event handler.
+            void kdsClient.cancelOrder?.(orderId);
+          }
           return;
         }
         case "COMPLETE_PAYMENT": {

@@ -46,6 +46,9 @@ export interface KdsTicketItem {
  *  round-trip back to the guest's app. */
 export interface KdsTicket {
   id: string;
+  /** DB Order id this ticket belongs to. Lets the KDS persist status advances
+   *  back to the Order (so served/preparing survives a guest refresh). */
+  orderId?: string;
   tableLabel: string;
   /** "instant" = "bring it", "bundled" = "bring these". */
   type: "instant" | "bundled";
@@ -62,6 +65,8 @@ export interface KdsTicket {
 export interface PublishRoundInput {
   /** Share the customer's round id so kitchen status can be reflected back. */
   id?: string;
+  /** DB Order id, forwarded onto each ticket so the KDS can persist status. */
+  orderId?: string;
   tableLabel: string;
   type: "instant" | "bundled";
   note?: string;
@@ -88,6 +93,12 @@ export interface KdsTransport {
   publishRound(input: PublishRoundInput): Promise<KdsTicket>;
   /** KDS side: move a ticket to a new stage (served removes it from the board). */
   setStage(ticketId: string, stage: KdsStage): Promise<void>;
+  /** Drop every ticket for an order (it was cancelled/settled) so the kitchen
+   *  stops seeing — and can't advance — a dead order. */
+  cancelOrder?(orderId: string): Promise<void>;
+  /** Drop one ticket (a single item was cancelled), in whatever column it's in.
+   *  Ticket id is `roundId::orderItemId`. */
+  removeTicket?(ticketId: string): Promise<void>;
   /** Optional cleanup (e.g. close the event stream). */
   close?(): void;
 }

@@ -30,6 +30,13 @@ export interface ApiClientConfig {
   getDeviceId?: () => string | null | undefined;
   /** Injectable fetch (defaults to global fetch); handy for tests/SSR. */
   fetch?: typeof fetch;
+  /**
+   * Per-request timeout in ms. A hung request (e.g. the API blocked on a slow/
+   * unreachable DB) would otherwise never settle, leaving callers stuck on a
+   * loading state forever. On timeout the request aborts and rejects with an
+   * `ApiError(0, …)`. Defaults to 15s; multipart uploads get at least 60s.
+   */
+  timeoutMs?: number;
 }
 
 export interface RequestOptions<S extends z.ZodTypeAny> {
@@ -75,11 +82,31 @@ export async function request<S extends z.ZodTypeAny>(
     body = JSON.stringify(opts.body);
   }
 
-  const res = await doFetch(`${config.baseUrl}${path}`, {
-    method: opts.method ?? "GET",
-    headers,
-    body,
-  });
+  // Abort a request that hangs too long (slow/unreachable DB) so callers fail
+  // fast with an error instead of spinning on a loading state indefinitely.
+  const isUpload = opts.body instanceof FormData;
+  const timeoutMs = isUpload
+    ? Math.max(config.timeoutMs ?? 15_000, 60_000)
+    : config.timeoutMs ?? 15_000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await doFetch(`${config.baseUrl}${path}`, {
+      method: opts.method ?? "GET",
+      headers,
+      body,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ApiError(0, `Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = await res.text();
   const json = text ? safeParse(text) : undefined;

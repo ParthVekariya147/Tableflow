@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
 import FoodImage from "../components/FoodImage";
+import DietaryMark from "../components/DietaryMark";
 import TopAppBar from "../components/TopAppBar";
 
 export default function MenuScreen() {
@@ -65,6 +66,11 @@ export default function MenuScreen() {
                   {featured.badge}
                 </span>
               )}
+              {(featured.dietary || featured.jain) && (
+                <div className="absolute top-3 right-3 rounded-md bg-white/85 p-1 shadow-sm backdrop-blur-sm">
+                  <DietaryMark dietary={featured.dietary} jain={featured.jain} size={20} />
+                </div>
+              )}
             </div>
             <div className="p-4 flex justify-between items-end">
               <div className="flex-1 pr-4">
@@ -84,8 +90,13 @@ export default function MenuScreen() {
               onClick={() => setSheetItem(item)}
               className="bg-surface-container-lowest rounded-2xl shadow-[0px_2px_12px_rgba(26,26,26,0.04)] overflow-hidden flex cursor-pointer active:scale-[0.99] transition-all group"
             >
-              <div className="w-24 h-24 flex-shrink-0 overflow-hidden">
+              <div className="relative w-24 h-24 flex-shrink-0 overflow-hidden">
                 <FoodImage item={item} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                {(item.dietary || item.jain) && (
+                  <div className="absolute top-1.5 right-1.5 rounded-md bg-white/85 p-0.5 shadow-sm backdrop-blur-sm">
+                    <DietaryMark dietary={item.dietary} jain={item.jain} size={16} />
+                  </div>
+                )}
               </div>
               <div className="flex-1 p-3 flex flex-col justify-between">
                 <div>

@@ -98,10 +98,12 @@ erDiagram
         string tenantId FK
         string menuItemId FK
         string name
-        ModifierSelection selection
+        ModifierInputType inputType "single|multiple|toggle|text"
         bool   required
         int    minSelect
         int    maxSelect
+        int    maxLength "text only"
+        string placeholder "text only"
         int    sortOrder
     }
     ModifierOption {
@@ -157,9 +159,11 @@ erDiagram
         string id PK
         string tenantId FK
         string orderItemId FK
-        string optionId FK
+        string optionId FK "null for text"
+        string groupName "snapshot"
         string name "snapshot"
         int    priceDelta "cents"
+        string textValue "text groups"
     }
     Payment {
         string id PK

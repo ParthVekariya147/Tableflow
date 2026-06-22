@@ -45,7 +45,7 @@ export default function MyOrderScreen() {
 
         <div className="flex flex-col gap-3 mt-5">
           {myOrder.map((item) => (
-            <div key={item.id} className="bg-surface-container-lowest rounded-2xl shadow-[0px_2px_12px_rgba(26,26,26,0.04)] overflow-hidden fade-in">
+            <div key={item.lineKey} className="bg-surface-container-lowest rounded-2xl shadow-[0px_2px_12px_rgba(26,26,26,0.04)] overflow-hidden fade-in">
               <div className="flex">
                 <div className="w-20 h-20 flex-shrink-0 overflow-hidden">
                   <FoodImage item={item} className="w-full h-full object-cover" />
@@ -55,26 +55,36 @@ export default function MyOrderScreen() {
                     <h3 className="text-[15px] font-bold text-on-surface">{item.name}</h3>
                     <span className="text-primary font-bold text-[14px]">${(item.price * item.qty).toFixed(2)}</span>
                   </div>
+                  {item.modifiers?.length > 0 && (
+                    <ul className="mt-1 space-y-0.5">
+                      {item.modifiers.map((m, i) => (
+                        <li key={i} className="text-[11px] text-on-surface-variant">
+                          {m.textValue ? `“${m.textValue}”` : m.name}
+                          {m.priceCents > 0 ? ` +$${m.price.toFixed(2)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <p className="text-[12px] text-on-surface-variant mt-0.5">${item.price.toFixed(2)} each</p>
                 </div>
               </div>
               <div className="flex justify-between items-center px-4 py-2.5 border-t border-surface-container">
                 <button
-                  onClick={() => removeFromOrder(item.id)}
+                  onClick={() => removeFromOrder(item.lineKey)}
                   className="flex items-center gap-1 text-on-surface-variant text-[12px] active:text-error transition-colors"
                 >
                   <span className="material-symbols-outlined text-[16px]">delete</span> Remove
                 </button>
                 <div className="flex items-center bg-surface-container rounded-full px-1">
                   <button
-                    onClick={() => updateOrderQty(item.id, -1)}
+                    onClick={() => updateOrderQty(item.lineKey, -1)}
                     className="w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
                   >
                     <span className="material-symbols-outlined text-[18px]">remove</span>
                   </button>
                   <span className="w-6 text-center font-bold text-[15px]">{item.qty}</span>
                   <button
-                    onClick={() => updateOrderQty(item.id, 1)}
+                    onClick={() => updateOrderQty(item.lineKey, 1)}
                     className="w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
                   >
                     <span className="material-symbols-outlined text-[18px] text-primary">add</span>

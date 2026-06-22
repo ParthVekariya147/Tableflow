@@ -22,6 +22,27 @@ export interface Category {
   name: string;
 }
 
+export type ModifierInputType = "single" | "multiple" | "toggle" | "text";
+
+export interface ModifierOption {
+  id?: string;
+  name: string;
+  priceCents: number; // delta; may be negative
+  available?: boolean;
+}
+
+export interface ModifierGroup {
+  id?: string;
+  name: string;
+  inputType: ModifierInputType;
+  required?: boolean;
+  minSelect?: number;
+  maxSelect?: number | null;
+  maxLength?: number | null;
+  placeholder?: string;
+  options: ModifierOption[];
+}
+
 export interface MenuItem {
   id: string;
   categoryId: string;
@@ -29,12 +50,18 @@ export interface MenuItem {
   description: string;
   priceCents: number;
   available: boolean;
+  /** Veg / Non-veg dietary marker (Indian menu convention). null = unmarked. */
+  dietary?: "veg" | "non_veg" | null;
+  /** Jain (no roots/onion/garlic); shown as an extra J badge. */
+  jain?: boolean;
   /** Material Symbols icon name used as the card "photo" stand-in. */
   icon: string;
   /** Tailwind gradient classes for the card photo backdrop. */
   swatch: string;
   /** Optional uploaded photo (data URL). When set, it replaces the icon/swatch stand-in. */
   imageUrl?: string;
+  /** Custom modifier groups (cheese, toppings, spice, notes…). */
+  modifierGroups?: ModifierGroup[];
 }
 
 export interface OrderItem {

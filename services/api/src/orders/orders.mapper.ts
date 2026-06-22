@@ -3,12 +3,15 @@ import type {
   Order as PrismaOrder,
   Round as PrismaRound,
   OrderItem as PrismaOrderItem,
+  OrderItemModifier as PrismaOrderItemModifier,
   Payment as PrismaPayment,
   Table as PrismaTable,
 } from "@prisma/client";
 
 type OrderWithRounds = PrismaOrder & {
-  rounds: (PrismaRound & { items: PrismaOrderItem[] })[];
+  rounds: (PrismaRound & {
+    items: (PrismaOrderItem & { modifiers: PrismaOrderItemModifier[] })[];
+  })[];
 };
 
 /** Map a Prisma order graph to the shared domain Order (dates -> ISO). */
@@ -35,6 +38,14 @@ export function toDomainOrder(row: OrderWithRounds): Order {
         qty: i.qty,
         status: i.status,
         notes: i.notes ?? undefined,
+        modifiers: (i.modifiers ?? []).map((m) => ({
+          id: m.id,
+          optionId: m.optionId,
+          groupName: m.groupName,
+          name: m.name,
+          priceDelta: m.priceDelta,
+          textValue: m.textValue ?? undefined,
+        })),
       })),
     })),
   };

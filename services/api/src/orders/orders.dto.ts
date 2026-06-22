@@ -23,17 +23,38 @@ export const createOrderSchema = z.object({
 });
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
-/** POST /orders/:id/rounds */
+/** A chosen modifier on a round line. The server re-resolves `optionId` and
+ *  recomputes `priceDelta` from the DB — client `name`/`priceDelta` are ignored
+ *  (trust boundary). `optionId` is omitted for free-text groups (use `textValue`). */
+export const roundItemModifierSchema = z.object({
+  optionId: z.string().min(1).optional(),
+  /** Group label (used to resolve text groups + for snapshots). */
+  groupName: z.string().min(1),
+  name: z.string().optional(),
+  priceDelta: z.number().int().optional(),
+  textValue: z.string().optional(),
+});
+
+/** POST /orders/:id/rounds
+ *
+ * The client may supply stable `id`s for the round + each line. They become the
+ * DB primary keys so the customer app, the KDS relay ticket and the persisted
+ * Order all share ONE id space — letting the kitchen's status advance write back
+ * to the right OrderItem (so served/preparing survives a guest refresh/resume).
+ * Optional + length-capped; omit (staff walk-in) to let Prisma mint a cuid. */
 export const addRoundSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
   type: roundTypeSchema,
   items: z
     .array(
       z.object({
+        id: z.string().min(1).max(64).optional(),
         menuItemId: z.string().min(1),
         name: z.string().min(1),
         unitPrice: z.number().int().nonnegative(),
         qty: z.number().int().positive(),
         notes: z.string().optional(),
+        modifiers: z.array(roundItemModifierSchema).optional(),
       }),
     )
     .min(1),

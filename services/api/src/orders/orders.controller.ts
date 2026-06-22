@@ -3,13 +3,17 @@ import {
   Controller,
   Get,
   Headers,
+  type MessageEvent,
   Param,
   Patch,
   Post,
   Query,
+  Sse,
 } from "@nestjs/common";
+import { defer, from, map, merge, type Observable } from "rxjs";
 import type { Order, Payment, Sale, Tenant, OrderStatus } from "@amber/domain";
 import { OrdersService } from "./orders.service.js";
+import { OrdersEvents, type OrderEvent } from "./orders.events.js";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
 import {
   addRoundSchema,
@@ -21,7 +25,31 @@ import {
 
 @Controller("orders")
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly events: OrdersEvents,
+  ) {}
+
+  /**
+   * Live order stream (Server-Sent Events). Every mutation broadcasts here so
+   * admin / customer / KDS reflect changes in real time. Declared before `:id`
+   * so "stream" isn't read as an order id. EventSource can't set headers, so the
+   * tenant is resolved from `?tenant=` by TenantMiddleware. On (re)connect it
+   * first emits a `snapshot` of the live floor so a reconnecting client re-syncs.
+   */
+  @Sse("stream")
+  stream(@CurrentTenant() tenant: Tenant): Observable<MessageEvent> {
+    const snapshot = defer(() =>
+      from(this.orders.list(tenant.id)).pipe(
+        map(
+          (orders): MessageEvent => ({
+            data: { type: "snapshot", orders } satisfies OrderEvent,
+          }),
+        ),
+      ),
+    );
+    return merge(snapshot, this.events.stream(tenant.id));
+  }
 
   /** List sessions (defaults to live: open + billed). Optional ?status=. */
   @Get()

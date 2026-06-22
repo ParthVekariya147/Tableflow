@@ -10,7 +10,9 @@ import { toDomainOrder } from "../orders/orders.mapper.js";
 import { toDomainTable, toFloorTable } from "./tables.mapper.js";
 import type { CreateTableDto, UpdateTableDto } from "./tables.dto.js";
 
-const ROUND_INCLUDE = { rounds: { include: { items: true } } } as const;
+const ROUND_INCLUDE = {
+  rounds: { include: { items: { include: { modifiers: true } } } },
+} as const;
 /** Orders that still "occupy" a table (not yet paid/closed). */
 const LIVE_STATUSES = ["open", "billed"] as const;
 

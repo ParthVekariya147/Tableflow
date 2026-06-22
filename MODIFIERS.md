@@ -1,7 +1,10 @@
 # Menu Item Modifiers — Feature Spec
 
-> **Status:** Draft / design. No code written yet. This document is the agreed
-> scope before implementation, per request.
+> **Status:** ✅ Implemented end-to-end (schema → domain → API → client → admin →
+> customer → seed), per the §11 build order and the §12 decisions. Verified:
+> `GET /menu` serializes groups; admin authors via the full modal; guest selects in
+> `ItemSheet`; rounds persist modifiers; the server re-prices/validates (invalid
+> option → 400, missing required → 400); subtotal/tax include deltas.
 >
 > **Owner:** restaurant-admin (authoring) + customer (ordering) + API (contract).
 > Sibling of `FEATURES.md`; see `CLAUDE.md` for the overall architecture.

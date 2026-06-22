@@ -1,7 +1,5 @@
 import { useSession } from "../context/SessionContext";
 
-const GST_RATE = 0.1;
-
 /**
  * Terminal screen shown once the guest has settled (card captured / cash
  * confirmed) or while awaiting cash at the counter.
@@ -11,13 +9,32 @@ const GST_RATE = 0.1;
  * back into the ordering screens and re-trigger those flows.
  */
 export default function SessionEndScreen() {
-  const { billTotal, tableNumber, sessionStartTime, awaitingCash, paidMethod } = useSession();
+  const { billTotal, taxRate, tableNumber, sessionStartTime, awaitingCash, paidMethod, sessionCancelled } = useSession();
 
-  const gst = billTotal * GST_RATE;
+  const gst = billTotal * taxRate;
   const grandTotal = billTotal + gst;
   const startTime = sessionStartTime
     ? sessionStartTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : "--";
+
+  // Staff cancelled this session — no payment is due. Shown above the router so
+  // the guest can't navigate back into the (now dead) ordering/bill screens.
+  if (sessionCancelled) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center gap-5 fade-in">
+        <div className="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center">
+          <span className="material-symbols-outlined text-[40px] text-on-surface-variant" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
+        </div>
+        <h2 className="text-[26px] font-bold text-on-surface font-serif">Order cancelled</h2>
+        <p className="text-on-surface-variant text-[15px] max-w-xs">
+          This order was cancelled by the restaurant, so no payment is due. If
+          that’s unexpected, please ask a staff member — or scan the QR code
+          again to start a new order.
+        </p>
+        <p className="text-[12px] text-on-surface-variant/70">Table {tableNumber}</p>
+      </div>
+    );
+  }
 
   // Cash chosen — keep the guest here while staff collect & confirm at the counter.
   if (awaitingCash) {

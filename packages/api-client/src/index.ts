@@ -17,6 +17,7 @@ import {
   paymentSchema,
   saleSchema,
   roundTypeSchema,
+  modifierInputTypeSchema,
   type Tenant,
   type Menu,
   type MenuItem,
@@ -54,15 +55,29 @@ export {
 } from "./transports/http-kds.js";
 export { createStaticKdsTransport } from "./transports/static-kds.js";
 
-/** Body for adding a round to an order. */
+/** A chosen modifier on a round line (server re-validates + re-prices). */
+export interface RoundItemModifierInput {
+  /** Omitted for free-text groups (use textValue instead). */
+  optionId?: string;
+  groupName: string;
+  name?: string;
+  priceDelta?: number;
+  textValue?: string;
+}
+
+/** Body for adding a round to an order. Optional `id`s become the DB primary
+ *  keys (shared id space with the KDS ticket → status can be written back). */
 export interface AddRoundInput {
+  id?: string;
   type: z.infer<typeof roundTypeSchema>;
   items: Array<{
+    id?: string;
     menuItemId: string;
     name: string;
     unitPrice: number;
     qty: number;
     notes?: string;
+    modifiers?: RoundItemModifierInput[];
   }>;
 }
 
@@ -72,6 +87,27 @@ export interface CreateTenantInput {
   currency?: string;
   taxRate?: number;
   theme?: Tenant["theme"];
+}
+
+/** A modifier option as authored in the admin (no id — server mints them). */
+export interface ModifierOptionInput {
+  name: string;
+  priceDelta: number; // cents; may be negative
+  available?: boolean;
+  sortOrder?: number;
+}
+
+/** A modifier group as authored in the admin. */
+export interface ModifierGroupInput {
+  name: string;
+  inputType: z.infer<typeof modifierInputTypeSchema>;
+  required?: boolean;
+  minSelect?: number;
+  maxSelect?: number | null;
+  maxLength?: number | null;
+  placeholder?: string;
+  sortOrder?: number;
+  options: ModifierOptionInput[];
 }
 
 /** Body for creating a menu item. */
@@ -85,7 +121,12 @@ export interface CreateItemInput {
   icon?: string;
   swatch?: string;
   available?: boolean;
+  /** Veg / Non-veg marker; null clears it. */
+  dietary?: "veg" | "non_veg" | null;
+  jain?: boolean;
   sortOrder?: number;
+  /** Full modifier set (replace-on-save); omit on PATCH to leave untouched. */
+  modifierGroups?: ModifierGroupInput[];
 }
 export type UpdateItemInput = Partial<CreateItemInput>;
 
@@ -102,6 +143,31 @@ export interface CapturePaymentInput {
   method: PaymentMethod;
   tip?: number;
   tendered?: number;
+}
+
+/**
+ * A live order event from `GET /orders/stream` (SSE). `snapshot` arrives once
+ * per (re)connect with the whole live floor; the rest carry a single mutated
+ * Order. The customer filters to its own `orderId`; admin/KDS use the floor.
+ */
+export type OrderStreamEvent =
+  | { type: "snapshot"; orders: Order[] }
+  | { type: "created" | "updated" | "closed"; orderId: string; order: Order };
+
+/** Validate a raw SSE frame into a typed OrderStreamEvent, or null if bad. */
+function parseOrderStreamEvent(raw: unknown): OrderStreamEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { type?: unknown; orders?: unknown; order?: unknown; orderId?: unknown };
+  if (r.type === "snapshot") {
+    const orders = z.array(orderSchema).safeParse(r.orders);
+    return orders.success ? { type: "snapshot", orders: orders.data } : null;
+  }
+  if (r.type === "created" || r.type === "updated" || r.type === "closed") {
+    const order = orderSchema.safeParse(r.order);
+    if (!order.success || typeof r.orderId !== "string") return null;
+    return { type: r.type, orderId: r.orderId, order: order.data };
+  }
+  return null;
 }
 
 export function createApiClient(config: ApiClientConfig) {
@@ -243,6 +309,29 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/orders/${encodeURIComponent(id)}`, {
           schema: orderSchema,
         }),
+      /**
+       * Subscribe to the tenant's live order stream (SSE). Calls `handler` for
+       * each validated event and returns an unsubscribe fn. EventSource can't
+       * set headers, so the tenant rides as `?tenant=` (TenantMiddleware accepts
+       * it). Mirrors the KDS transport's EventSource handling; auto-reconnects.
+       */
+      stream: (handler: (event: OrderStreamEvent) => void): (() => void) => {
+        const slug = config.tenantSlug;
+        const url = `${config.baseUrl}/orders/stream${
+          slug ? `?tenant=${encodeURIComponent(slug)}` : ""
+        }`;
+        const source = new EventSource(url);
+        source.onmessage = (msg) => {
+          try {
+            const event = parseOrderStreamEvent(JSON.parse(msg.data));
+            if (event) handler(event);
+          } catch {
+            /* ignore malformed frames */
+          }
+        };
+        // EventSource auto-reconnects on error; the server re-sends a snapshot.
+        return () => source.close();
+      },
       /** Open a new dine-in session for a table, optionally with guest contact. */
       createForTable: (
         tableId: string,

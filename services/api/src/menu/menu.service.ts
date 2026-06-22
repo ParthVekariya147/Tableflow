@@ -13,9 +13,45 @@ import type {
   UpdateItemDto,
 } from "./menu.dto.js";
 
+/** Everything an item needs to map to the full domain shape. */
+const ITEM_INCLUDE = {
+  category: true,
+  modifierGroups: {
+    orderBy: { sortOrder: "asc" },
+    include: { options: { orderBy: { sortOrder: "asc" } } },
+  },
+} as const;
+
+type ModifierGroupInput = NonNullable<CreateItemDto["modifierGroups"]>[number];
+
 @Injectable()
 export class MenuService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Build the nested Prisma `create` payload for an item's modifier groups +
+   *  options. `text` groups carry no options. */
+  private modifierGroupsCreate(tenantId: string, groups: ModifierGroupInput[]) {
+    return groups.map((g, gi) => ({
+      tenantId,
+      name: g.name,
+      inputType: g.inputType,
+      required: g.required ?? false,
+      minSelect: g.minSelect ?? 0,
+      maxSelect: g.maxSelect ?? null,
+      maxLength: g.maxLength ?? null,
+      placeholder: g.placeholder,
+      sortOrder: g.sortOrder ?? gi,
+      options: {
+        create: (g.inputType === "text" ? [] : g.options).map((o, oi) => ({
+          tenantId,
+          name: o.name,
+          priceDelta: o.priceDelta,
+          available: o.available ?? true,
+          sortOrder: o.sortOrder ?? oi,
+        })),
+      },
+    }));
+  }
 
   /** Full menu for a tenant. All queries scoped by tenantId. */
   async getMenu(tenantId: string): Promise<Menu> {
@@ -27,7 +63,7 @@ export class MenuService {
       this.prisma.menuItem.findMany({
         where: { tenantId },
         orderBy: [{ categoryId: "asc" }, { sortOrder: "asc" }],
-        include: { category: true },
+        include: ITEM_INCLUDE,
       }),
     ]);
 
@@ -101,9 +137,14 @@ export class MenuService {
         icon: dto.icon,
         swatch: dto.swatch,
         available: dto.available ?? true,
+        dietary: dto.dietary ?? null,
+        jain: dto.jain ?? false,
         sortOrder,
+        modifierGroups: dto.modifierGroups?.length
+          ? { create: this.modifierGroupsCreate(tenantId, dto.modifierGroups) }
+          : undefined,
       },
-      include: { category: true },
+      include: ITEM_INCLUDE,
     });
     return toDomainItem(row);
   }
@@ -128,9 +169,20 @@ export class MenuService {
         icon: dto.icon,
         swatch: dto.swatch,
         available: dto.available,
+        dietary: dto.dietary,
+        jain: dto.jain,
         sortOrder: dto.sortOrder,
+        // Replace-on-save: only when the client sent a modifier set. `deleteMany`
+        // clears the old groups (options cascade); past order snapshots are kept.
+        modifierGroups:
+          dto.modifierGroups !== undefined
+            ? {
+                deleteMany: {},
+                create: this.modifierGroupsCreate(tenantId, dto.modifierGroups),
+              }
+            : undefined,
       },
-      include: { category: true },
+      include: ITEM_INCLUDE,
     });
     return toDomainItem(row);
   }

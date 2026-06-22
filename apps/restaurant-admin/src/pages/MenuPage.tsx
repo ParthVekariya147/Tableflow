@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { Toggle } from "../components/Toggle";
 import { ItemPanel } from "../components/ItemPanel";
+import { DietaryMark } from "../components/DietaryMark";
 import { useAdmin } from "../store/AdminStore";
 import type { Category, MenuItem } from "../data/types";
 
@@ -371,6 +372,11 @@ function ItemCard({ item, onEdit }: { item: MenuItem; onEdit: () => void }) {
         >
           <Icon name="edit" size={18} />
         </button>
+        {(item.dietary || item.jain) && (
+          <div className="absolute bottom-2 right-2 rounded-md bg-surface-container-lowest/90 p-1 backdrop-blur-sm">
+            <DietaryMark dietary={item.dietary} jain={item.jain} size={16} />
+          </div>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-sm p-md">

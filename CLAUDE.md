@@ -58,6 +58,10 @@ All shapes are Zod schemas with inferred types. Key entities:
 - `Tenant` (`tenant.ts`) — `{ id, slug, name, currency, taxRate, theme, active }`.
   `ThemeConfig` = `{ colors (partial token overrides, hex), typography, logoUrl, mode }`.
 - `MenuItem` / `MenuCategory` / `Menu` (`menu.ts`) — price is **minor units (cents)**.
+  `MenuItem.modifierGroups` carries custom modifiers: `ModifierGroup` has an
+  `inputType` (`single` radio · `multiple` checkbox · `toggle` switches · `text`
+  free-text) + `required`/`min`/`maxSelect`/`maxLength`; `ModifierOption` has a
+  `priceDelta` (cents, may be negative). See **`MODIFIERS.md`** for the full feature.
 - `Table` (`table.ts`) — `{ id, tenantId, label, qrToken, seats? }`.
 - `Order` / `Round` / `OrderItem` (`order.ts`) — Order = a table session holding
   Rounds. Round `type`: `instant` ("bring it") | `bundled` ("bring these").
@@ -93,16 +97,31 @@ All shapes are Zod schemas with inferred types. Key entities:
   `menu/` (`GET /menu`, `POST /menu/categories`, `PATCH /menu/categories/:id`
   rename/reorder, `DELETE /menu/categories/:id` (blocked while it holds items),
   `POST /menu/items`, `PATCH /menu/items/:id`, `DELETE /menu/items/:id`,
-  `POST /menu/upload` multipart item-photo upload → `{ url }`),
+  `POST /menu/upload` multipart item-photo upload → `{ url }`; item create/PATCH
+  accept a full `modifierGroups` array — **replace-on-save** (the modal sends the
+  whole set; the service transactionally replaces the item's groups+options)),
   `tables/` (`GET /tables` floor list + status + live session, `GET /tables/qr/:token`,
   `POST /tables`, `PATCH /tables/:id`, `POST /tables/:id/qr` regen, `DELETE /tables/:id`),
   `orders/` (`GET /orders?status=` live list, `GET /orders/sales` (optional
-  `?from=&to=` ISO window for Order History; else recent feed), `GET /orders/:id`,
+  `?from=&to=` ISO window for Order History; else recent feed),
+  `GET /orders/stream` **SSE live event bus** (see below), `GET /orders/:id`,
   `POST /orders`, `/:id/rounds`, `/:id/items` add, `PATCH /:id/items/:itemId` qty/status,
   `/:id/bill`, `/:id/cancel`, `/:id/payment` capture),
   `admin/` (`GET|POST /admin/tenants`). `prisma/` is a global module.
-  Item-status PATCH stamps the per-stage timestamps; payment recomputes
-  subtotal/tax (from `tenant.taxRate`)/total server-side and closes the order.
+  Item-status PATCH stamps the per-stage timestamps; **it 409s if the order is
+  `closed`/`paid`** (terminal) so a stale KDS board can't resurrect a dead order —
+  e.g. mark "preparing" after staff cancelled it, which would wrongly reach the
+  guest. payment recomputes
+  subtotal/tax (from `tenant.taxRate`)/total server-side (cancelled lines excluded)
+  and closes the order. `capturePayment` refuses a non-payable order — 400 if
+  already `paid`, **409 if `closed`** (a cancelled session can't be resurrected
+  into a paid sale by a stale guest client).
+  **Modifiers on rounds:** `POST /:id/rounds` items accept a `modifiers` array;
+  the service re-resolves each `optionId` against the menu item, **recomputes the
+  `priceDelta` from the DB** (client numbers ignored), validates availability +
+  required/min/max + text-group existence (400 on violation), and snapshots
+  group/name/delta onto `OrderItemModifier`. Subtotals (`orderSubtotal`, payment)
+  add modifier deltas per unit (`orderItemUnitPrice` in `@amber/domain`).
   **`POST /orders` enforces single-occupancy**: it 409s if the table already has
   an `open`/`billed` order, so a second guest or a stale client can't spawn a
   duplicate live session on one table (the trust-boundary occupancy guard).
@@ -113,6 +132,18 @@ All shapes are Zod schemas with inferred types. Key entities:
   clients (so it can't be read from the public order list and replayed). Staff
   (restaurant-admin) send no `X-Device-Id`, so their calls are unaffected — full
   auth is still deferred, this just binds a guest session to its origin device.
+  **Real-time order sync (SSE event bus):** `OrdersEvents` (`orders.events.ts`)
+  is an in-process per-tenant pub/sub (rxjs `Subject`). Every order mutation
+  (`createForTable`/`addRound`/`addItem`/`updateItem`/`requestBill`/`cancel`/
+  `capturePayment`) re-loads the fresh `Order` and `emit`s `{ type, orderId, order }`
+  (`created`|`updated`|`closed`) — most funnel through the `refreshAndEmit` helper.
+  `@Sse("stream")` `GET /orders/stream` returns the tenant's stream, prefixed with
+  a one-shot `{ type:"snapshot", orders }` of the live floor so a (re)connecting
+  client re-syncs. **EventSource can't set headers**, so the tenant rides as
+  `?tenant=slug` — `TenantMiddleware` now accepts that query param as a fallback
+  to `X-Tenant-Slug`. Scope is tenant-wide (same exposure as `orders.list`, now
+  pushed); auth still deferred. This drives admin + customer realtime and is the
+  path that will eventually retire the KDS relay.
 - DTO validation via Zod (`*.dto.ts`). Mappers convert Prisma rows ↔ domain types.
 - **Item images** live in **Supabase Storage** (bucket `menu-images`, public read),
   not the DB. `storage/StorageService` uploads with the **service-role key**
@@ -152,6 +183,10 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   the floor (`tables.list/create/update/regenerateQr/remove/byQrToken`), and the full
   session lifecycle (`orders.list/sales/get/createForTable/addRound/addItem/updateItem/
   requestBill/cancel/capturePayment`). `tables.byQrToken` hits `GET /tables/qr/:token`.
+  **Realtime:** `orders.stream(handler)` opens an `EventSource` to `/orders/stream`
+  (tenant via `?tenant=` since EventSource can't set headers), validates each frame
+  (`snapshot`/`created`/`updated`/`closed`) against `orderSchema`, and returns an
+  unsubscribe fn — mirrors `createHttpKdsTransport`'s EventSource handling.
 
 ## Apps
 - **customer** (`apps/customer`) — the guest ordering app, **wired to the live API
@@ -169,7 +204,16 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   the counter" screen and keeps the session alive (`awaitingCash`), polling
   `api.orders.get` until **staff capture the cash in the admin** (BillingPage) and the
   Order flips to `paid`/`closed`, which ends the guest session. (Methods are `cash | card`;
-  no separate online provider.) Session-end is **terminal**: it clears `orderIdRef`,
+  no separate online provider.) Bill totals use the **tenant's `taxRate`** (not a
+  hardcoded 10%) and exclude cancelled lines, so the phone matches the server-captured
+  total. The live Order is watched in **real time via `api.orders.stream`** (SSE,
+  filtered to this session's `orderId`) so **staff/KDS actions reach the phone
+  instantly**: staff **cancel** (Order → `closed`) drives a terminal "Session ended"
+  screen (`sessionCancelled`) instead of a still-payable bill; cash capture (→ `paid`)
+  ends the session; item add/cancel + KDS status rehydrate the bill/status. The
+  former `api.orders.get` polls remain as a **low-frequency self-heal fallback**
+  (covers a dropped stream / 404-deleted order; SSE can drop on a backgrounded tab).
+  Session-end is **terminal**: it clears `orderIdRef`,
   blocks further ordering (`bringIt`/`bringThese`/`addToOrder` no-op once `sessionEnded`
   **or with no live `orderId`** — so a refreshed/settled client can't fire a phantom KDS
   ticket) and hides the BottomNav. The settled/awaiting-cash terminal screen
@@ -187,6 +231,10 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   fresh QR). `SessionProvider` rehydrates `orderId`/`rounds`/`billRequested` from the
   resumed Order via `useBoot().resumeOrder`.
   Seed items have no photos, so `components/FoodImage.jsx` falls back to an icon stand-in.
+  `components/ItemSheet.jsx` renders an item's **modifier groups** (radio / checkbox /
+  switch / text by `inputType`), live-recomputes the price as options are picked, blocks
+  add until required groups are satisfied, and carries the chosen modifiers through the
+  cart → round → `addRound` (effective per-unit price = base + Σ deltas). See `MODIFIERS.md`.
   ⚠️ The live **KDS board still flows through the relay** (`src/kitchen.js` →
   `createHttpKdsTransport` :4001), separate from the persisted API — so KDS status
   changes don't yet write back to the Order. Unifying KDS on the API is the next step.
@@ -217,16 +265,24 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each
   UI action (menu edit, add table, open/run/cancel session, take payment) into the
-  matching `@amber/api-client` call, then refetches. **Background sync** keeps the
+  matching `@amber/api-client` call, then refetches. **Realtime sync** keeps the
   floor live so *external* changes (guest QR reservations, payments, KDS status from
-  other devices) appear without a manual reload: a visible-tab poll (~4s) + refetch on
-  window focus/visibility, skipped while a mutation is in flight; `refresh()` is exposed
-  so `TableSessionPage`/`BillingPage` force a sync on open (avoids rendering a table's
+  other devices) appear without a manual reload: it subscribes to `api.orders.stream`
+  (SSE) and, on any pushed event, does a coalesced **light floor refetch**
+  (`refreshFloor` — tables + sales only, leaving menu untouched), skipped while a
+  local mutation is in flight (`mutatingRef`) so a pushed event can't clobber
+  optimistic state. A visible-tab poll (now ~20s) + refetch on window focus/visibility
+  remain as a **self-heal fallback** behind the stream; `refresh()` is exposed so
+  `TableSessionPage`/`BillingPage` force a sync on open (avoids rendering a table's
   previous session snapshot), and `OPEN_SESSION` is awaited before navigating.
-  ⚠️ Phase 2: replace polling with true realtime (Supabase Realtime / SSE). Pages
+  ⚠️ KDS is still on its relay (Q1=a); folding it onto the order stream + retiring
+  the relay is the remaining Phase-2 step. Pages
   (`MenuPage`, `TablesPage`,
   `TableSessionPage`, `BillingPage`, `DashboardPage`, `AnalyticsPage`) read the same
-  `{ state, dispatch }` from `useAdmin()`. **`OrderHistoryPage`** (`/history`, sidebar
+  `{ state, dispatch }` from `useAdmin()`. `MenuPage`'s item editor (`components/ItemPanel.tsx`)
+  is a **centered full modal** (not the old slide-over) with a **modifier-group builder**
+  (add groups by `inputType`, options with price deltas, required/min/max) — saved with
+  the item (replace-on-save). See **`MODIFIERS.md`**. **`OrderHistoryPage`** (`/history`, sidebar
   "Order History") lists completed/paid sales for a date range (Today default /
   Yesterday / Last 7 days / All) via `api.orders.sales({from,to})`, with revenue/count
   summary and expandable rows that lazy-load each order's items (`api.orders.get`) to
@@ -285,9 +341,10 @@ The whole guest journey is one **Order** (a table session) holding **Rounds**.
 7. **Pay** (`payBill(method)`): **card** → `api.orders.capturePayment` captures
    immediately (Order → `paid`/`closed`, table frees, sale recorded), session ends
    now. **cash** → NOT captured by the guest; enters `awaitingCash` ("pay at the
-   counter") and polls `api.orders.get` until **staff capture the cash** in
-   restaurant-admin `BillingPage`, flipping the Order to `paid`/`closed`, which ends
-   the session. Server recomputes subtotal/tax (`tenant.taxRate`)/total — the client
+   counter") until **staff capture the cash** in restaurant-admin `BillingPage`,
+   flipping the Order to `paid`/`closed`, which ends the session — observed in real
+   time via the order stream (flow 7), with a low-freq `api.orders.get` poll as
+   fallback. Server recomputes subtotal/tax (`tenant.taxRate`)/total — the client
    total is display-only.
 
 ### 2. Device-bound session security (the trust boundary)
@@ -338,9 +395,26 @@ The live board does **not** yet run on the persisted API. Customer rounds publis
 `apps/customer/src/kitchen.js` (`createHttpKdsTransport`, `VITE_KDS_URL` :4001) to the
 relay (`tools/kds-relay.mjs`, in-memory, SSE + JSON POST, starts empty). Both the
 in-shell KDS (`/kds`) and chrome-free `/kds/display` in restaurant-admin
-(`kds/kdsClient.ts`) subscribe to the same relay. ⚠️ KDS stage changes therefore do
-**not** write back to the Order yet (the customer `StatusScreen` reflects the relay,
-not the DB). Unifying KDS onto `orders.list` / an API Orders gateway is the next step.
+(`kds/kdsClient.ts`) subscribe to the same relay. KDS stage advances **do** write
+back to the Order (`useKds.advance` → `api.orders.updateItem`), so served/preparing
+survives a guest refresh. **Cancel/close cleanup:** because the relay is separate from the API, a
+cancelled item or a settled/cancelled order's tickets would otherwise linger on
+the board (kitchen keeps cooking, and any advance is rejected server-side with a
+409). Two relay signals: `POST /kds/cancel-order {orderId}` drops every ticket for
+an order; `POST /kds/remove-ticket {ticketId}` drops ONE ticket (ticket id =
+`roundId::orderItemId`) for a **single cancelled item** while the order keeps
+going. `AdminStore` fires these directly on the action — `CANCEL_ORDER` →
+`cancelOrder`, `CANCEL_ITEM` → `removeTicket(roundId::itemId)` — and also
+`cancelOrder` on any `closed` stream event (covers payment / cross-source).
+**Self-correcting board (the robust guard):** `useKds` also subscribes to the API
+order stream and tracks, per live order, its **active item ids** (order live + item
+not `cancelled`); it renders ONLY tickets whose item is still active — so a stale
+relay ticket (cancelled item, dead order, or one left over from before a relay
+restart) is hidden regardless of relay state, and pulled off the relay via
+`removeTicket` so the guest phone / `/kds/display` converge too. `advance` refuses a
+non-active ticket and, if the status write-through 409s, drops it from board +
+relay. The DB is the source of truth. Unifying KDS onto the order stream / an API
+Orders gateway (retiring the relay) is the next step.
 
 ### 5. LAN / mobile access (testing on a phone)
 Dev servers + API must be reachable from a phone on the same Wi-Fi, and the apps must
@@ -364,6 +438,36 @@ phone itself).
 TheCocktailDB where a dish matches, else keyword-locked LoremFlickr (`flickr()` helper,
 `?lock=` for determinism). Production path: upload real photos per item via the admin
 (`POST /menu/upload` → Supabase Storage), which overwrites `imageUrl`.
+
+### 7. Real-time order sync (SSE event bus) — admin + customer
+The shared table session (one `Order`) used to drift between clients (each on its
+own poll), so e.g. a **cancel from admin didn't reach the phone** live. Now every
+order mutation broadcasts and all clients subscribe over SSE.
+- **Emit** (`services/api/src/orders/orders.events.ts` `OrdersEvents`): an
+  in-process per-tenant rxjs `Subject`. `OrdersService` calls
+  `emit(tenant.id, { type, orderId, order })` after each mutation (via the
+  `refreshAndEmit` helper; `created`/`updated`/`closed`).
+- **Stream** (`orders.controller.ts` `@Sse("stream")` → `GET /orders/stream`):
+  returns the tenant's observable, prefixed with a `{type:"snapshot", orders}` of
+  the live floor so a (re)connecting client re-syncs. EventSource can't set
+  headers → tenant via `?tenant=` (`TenantMiddleware` accepts the query param).
+- **Subscribe** (`@amber/api-client` `orders.stream(handler)`): opens an
+  `EventSource`, validates each frame against `orderSchema`, returns an unsubscribe.
+- **Customer** (`SessionContext.jsx`): filters the stream to its own `orderId` →
+  `closed`/`paid` drive the terminal screens (`closed` = "Order cancelled by the
+  restaurant"), `updated` rehydrates rounds + bill status. A **single** item staff
+  cancel (order stays live) lands as `updated` with that item `status:"cancelled"`;
+  the guest keeps seeing the line **struck-through** ("Cancelled by restaurant" on
+  `StatusScreen`, "Cancelled" on `BillScreen`) and it's excluded from every total.
+  A cancelled item is terminal client-side — a late relay frame can't flip it back.
+  **Admin**
+  (`AdminStore.tsx`): any event → coalesced light floor refetch (`refreshFloor`),
+  skipped while a local mutation is in flight; a `closed` event also pushes
+  `kdsClient.cancelOrder` so the dead order's KDS tickets vanish (see flow 4).
+- **Fallback**: the previous polls remain at a low cadence (customer 12–15s, admin
+  ~20s + focus/visibility) to self-heal a dropped stream (mobile backgrounding).
+- ⚠️ KDS still rides its own relay (flow 4); folding it onto this stream + retiring
+  the relay is the remaining step. Auth still deferred (tenant-scoped, no token).
 
 ## Conventions & gotchas
 - Money is **integer cents** in the domain/API. The legacy customer screens still

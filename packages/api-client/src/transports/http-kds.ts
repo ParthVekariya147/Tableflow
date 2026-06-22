@@ -81,6 +81,12 @@ export function createHttpKdsTransport(
     async setStage(ticketId: string, stage: KdsStage) {
       await postJson("/kds/stage", { ticketId, stage });
     },
+    async cancelOrder(orderId: string) {
+      await postJson("/kds/cancel-order", { orderId });
+    },
+    async removeTicket(ticketId: string) {
+      await postJson("/kds/remove-ticket", { ticketId });
+    },
     close() {
       source?.close();
       source = null;

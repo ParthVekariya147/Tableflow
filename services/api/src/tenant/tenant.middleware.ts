@@ -17,7 +17,12 @@ export class TenantMiddleware implements NestMiddleware {
   constructor(private readonly tenants: TenantService) {}
 
   async use(req: TenantRequest, _res: Response, next: NextFunction) {
-    const slug = req.header("x-tenant-slug");
+    // Header is the norm; the `?tenant=` query param is the fallback for SSE
+    // (EventSource can't set custom headers — see GET /orders/stream).
+    const queryTenant = req.query?.tenant;
+    const slug =
+      req.header("x-tenant-slug") ??
+      (typeof queryTenant === "string" ? queryTenant : undefined);
     if (!slug) {
       throw new BadRequestException("Missing X-Tenant-Slug header");
     }
