@@ -164,8 +164,15 @@ All shapes are Zod schemas with inferred types. Key entities:
   the API typechecks/builds. `/admin/*` still needs an auth guard (TODO). **All
   tenant-scoped routes above are currently unauthenticated** (auth deferred) — they
   rely only on `X-Tenant-Slug`.
-- The DB runs on **Supabase** (cloud Postgres); `services/api/.env` `DATABASE_URL`
-  points at it. Schema is synced with `npx prisma db push` (no `migrations/` dir).
+- The DB runs on **Supabase** (cloud Postgres). The Prisma datasource uses TWO
+  URLs (`services/api/.env`): `DATABASE_URL` = the **pooler** (pgBouncer, IPv4,
+  session mode `aws-1-…pooler.supabase.com:5432`) for runtime — keeps connections
+  warm (~150 ms warm queries vs ~340 ms direct, and no IPv6-only flakiness);
+  `DIRECT_URL` = the direct endpoint (`db.…supabase.co:5432`) used only by
+  `npx prisma db push` / migrations (no `migrations/` dir). ⚠️ If the DB password
+  contains a literal `@`, it MUST be percent-encoded (`@`→`%40`) in both URLs or
+  the connection string mis-parses. After changing `.env`, **restart the API**
+  (nest watch doesn't reload env).
 - ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done), analytics
   aggregates (dashboard/analytics pages still derive from the sales feed client-side),
   menu placements, and review submit. **Build order is vertical per slice:** domain

@@ -17,8 +17,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime connection = Supabase pooler (pgBouncer). `prisma db push` /
+  // migrations use the non-pooled directUrl instead.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Tenant {

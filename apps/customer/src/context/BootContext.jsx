@@ -48,15 +48,18 @@ export function BootProvider({ children }) {
   useEffect(() => {
     let active = true;
 
-    /** Try to resume a persisted order. Returns a boot state or null. */
-    async function tryResume(saved) {
+    /** Try to resume a persisted order. Returns a boot state or null. The boot
+     *  calls run in parallel (they don't depend on each other) to cut latency. */
+    async function tryResume(api, saved) {
       if (!saved?.orderId || !saved?.slug || !saved?.qrToken) return null;
-      const api = createGuestApi(saved.slug);
       try {
-        const tenant = await api.tenant.bySlug(saved.slug);
-        const table = await api.tables.byQrToken(saved.qrToken);
-        // Sends X-Device-Id; 403 if this order belongs to a different device.
-        const order = await api.orders.get(saved.orderId);
+        // tenant / table / order are independent — fetch concurrently.
+        // Sends X-Device-Id on the order; 403 if it belongs to a different device.
+        const [tenant, table, order] = await Promise.all([
+          api.tenant.bySlug(saved.slug),
+          api.tables.byQrToken(saved.qrToken),
+          api.orders.get(saved.orderId),
+        ]);
         if (order.tableId === table.id && LIVE.includes(order.status)) {
           writeSession(saved); // refresh the record
           return { status: "ready", api, tenant, table, resumeOrder: order };
@@ -78,48 +81,59 @@ export function BootProvider({ children }) {
       const parsed = parseEntryPath(window.location.pathname);
       const saved = readSession();
 
-      // ── No QR in the path: refresh / direct visit ─────────────────────────
+      // Lockout: a settled device with no fresh QR is closed out immediately.
+      if (!parsed && saved?.ended) {
+        if (active) setBoot({ status: "closed" });
+        return;
+      }
+
+      // The tenant slug is known up-front (from the QR path, the saved session,
+      // or the dev fallback), so build the client and **start the menu fetch NOW**
+      // — it's the slowest call, and prefetching it overlaps it with the boot
+      // resolution instead of waiting until after the app renders. The promise is
+      // handed to MenuProvider via context so it isn't re-fetched.
+      const slug = parsed?.slug ?? saved?.slug ?? DEFAULT_SLUG;
+      const api = createGuestApi(slug);
+      const menuPromise = api.menu.get();
+      menuPromise.catch(() => {}); // pre-attach so an early reject isn't "unhandled"
+
+      // ── No QR in the path: refresh / direct visit → try resume first ──────
       if (!parsed) {
-        if (saved?.ended) {
-          if (active) setBoot({ status: "closed" });
-          return;
-        }
-        const resumed = await tryResume(saved);
+        const resumed = await tryResume(api, saved);
         if (!active) return;
         if (resumed) {
-          setBoot(resumed);
+          setBoot(resumed.status === "ready" ? { ...resumed, menuPromise } : resumed);
           return;
         }
         // Nothing to resume — dev fallback so the app stays runnable locally.
       }
 
       // ── Fresh QR scan, or dev fallback ────────────────────────────────────
-      const slug = parsed?.slug ?? DEFAULT_SLUG;
-      const api = createGuestApi(slug);
       try {
-        const tenant = await api.tenant.bySlug(slug);
-
-        let table;
-        if (parsed) {
-          table = await api.tables.byQrToken(parsed.qrToken);
-        } else {
-          const floor = await api.tables.list();
-          table = floor.find((t) => t.status === "free") ?? floor[0];
-          if (!table) throw new ApiError(404, "No tables configured");
-        }
+        // tenant, table and the open-order list are independent → run in parallel.
+        const tablePromise = parsed
+          ? api.tables.byQrToken(parsed.qrToken)
+          : api.tables
+              .list()
+              .then((floor) => floor.find((t) => t.status === "free") ?? floor[0]);
+        const [tenant, table, open] = await Promise.all([
+          api.tenant.bySlug(slug),
+          tablePromise,
+          api.orders.list("open"),
+        ]);
+        if (!table) throw new ApiError(404, "No tables configured");
 
         // Occupancy: a free table has no order in the "open"/"billed" set.
-        const open = await api.orders.list("open");
         const occupied = open.some((o) => o.tableId === table.id);
 
         if (occupied) {
           // It might be THIS device's session (e.g. re-scanned after refresh) —
           // resume rather than block. tryResume verifies ownership server-side.
           const resumed =
-            saved?.tableId === table.id ? await tryResume(saved) : null;
+            saved?.tableId === table.id ? await tryResume(api, saved) : null;
           if (!active) return;
           if (resumed?.status === "ready") {
-            setBoot(resumed);
+            setBoot({ ...resumed, menuPromise });
           } else {
             setBoot({ status: "occupied", table });
           }
@@ -129,7 +143,7 @@ export function BootProvider({ children }) {
         // Free table → clean slate for a brand-new session.
         clearSession();
         if (!active) return;
-        setBoot({ status: "ready", api, tenant, table, resumeOrder: null });
+        setBoot({ status: "ready", api, tenant, table, resumeOrder: null, menuPromise });
       } catch (e) {
         if (!active) return;
         const notFound = e instanceof ApiError && e.status === 404;
@@ -159,6 +173,9 @@ export function BootProvider({ children }) {
         tenant: boot.tenant,
         table: boot.table,
         resumeOrder: boot.resumeOrder ?? null,
+        // Menu fetch kicked off during boot (overlaps the boot calls) so the menu
+        // is usually already in flight / resolved by the time MenuProvider mounts.
+        menuPromise: boot.menuPromise ?? null,
       }}
     >
       {children}

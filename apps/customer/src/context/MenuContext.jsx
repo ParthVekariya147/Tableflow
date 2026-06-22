@@ -45,7 +45,7 @@ function toScreenItem(i) {
 }
 
 export function MenuProvider({ children }) {
-  const { api } = useBoot();
+  const { api, menuPromise } = useBoot();
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState(["All"]);
   const [loading, setLoading] = useState(true);
@@ -53,8 +53,9 @@ export function MenuProvider({ children }) {
 
   useEffect(() => {
     let active = true;
-    api.menu
-      .get()
+    // Prefer the prefetch started during boot (already in flight / resolved);
+    // fall back to a fresh fetch only if it wasn't provided.
+    (menuPromise ?? api.menu.get())
       .then((menu) => {
         if (!active) return;
         setItems(menu.items.map(toScreenItem));
@@ -69,7 +70,7 @@ export function MenuProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, menuPromise]);
 
   // Welcome-screen carousels, derived from the live menu (no placements API yet).
   const drinks = items.filter((i) => /drink|beverage/i.test(i.category));
