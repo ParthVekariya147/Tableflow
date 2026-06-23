@@ -1,12 +1,36 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import type { AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
-import { useAdmin, sessionItemCount } from "../store/AdminStore";
+import { useAdmin } from "../store/AdminStore";
+import { api } from "../lib/api";
 import { money, timeAgo } from "../lib/money";
 
 export function DashboardPage() {
   const { state } = useAdmin();
 
-  const todayRevenue = state.sales.reduce((s, sale) => s + sale.totalCents, 0);
+  // Today's revenue + period-over-period delta, from the real analytics endpoint
+  // (genuinely today-scoped, unlike the recent-50 sales feed). Refetched whenever
+  // a new sale closes (state.sales changes via the store's realtime sync).
+  const [today, setToday] = useState<AnalyticsSummary | null>(null);
+  const salesCount = state.sales.length;
+  useEffect(() => {
+    let active = true;
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    api.orders
+      .analytics({ from: start.toISOString(), to: now.toISOString() })
+      .then((d) => active && setToday(d))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [salesCount]);
+
+  const todayRevenue = today?.revenue ?? 0;
+  const revenueDelta = today?.revenueDelta ?? null;
+  const deltaPct = revenueDelta === null ? null : Math.round(revenueDelta * 100);
   const activeTables = state.tables.filter((t) => t.status !== "free");
   const ordersInProgress = state.tables.filter(
     (t) => t.session && t.session.rounds.some((r) => r.items.some((i) => i.status !== "served" && i.status !== "cancelled")),
@@ -57,9 +81,17 @@ export function DashboardPage() {
         <StatCard icon="payments" label="Today's Revenue">
           <div className="flex items-baseline gap-sm">
             <h3 className="font-display-lg text-display-lg text-on-surface">{money(todayRevenue)}</h3>
-            <span className="flex items-center font-body-md text-body-md font-medium text-primary">
-              <Icon name="trending_up" size={16} /> 4.2%
-            </span>
+            {deltaPct !== null && (
+              <span
+                className={`flex items-center font-body-md text-body-md font-medium ${
+                  deltaPct >= 0 ? "text-primary" : "text-error"
+                }`}
+              >
+                <Icon name={deltaPct >= 0 ? "trending_up" : "trending_down"} size={16} />{" "}
+                {deltaPct >= 0 ? "+" : ""}
+                {deltaPct}%
+              </span>
+            )}
           </div>
         </StatCard>
         <StatCard icon="deck" label="Active Tables">

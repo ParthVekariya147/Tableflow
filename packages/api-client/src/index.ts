@@ -16,6 +16,7 @@ import {
   orderSchema,
   paymentSchema,
   saleSchema,
+  analyticsSummarySchema,
   roundTypeSchema,
   modifierInputTypeSchema,
   type Tenant,
@@ -28,6 +29,7 @@ import {
   type OrderStatus,
   type Payment,
   type Sale,
+  type AnalyticsSummary,
   type ItemStatus,
   type PaymentMethod,
 } from "@amber/domain";
@@ -303,6 +305,17 @@ export function createApiClient(config: ApiClientConfig) {
         const q = qs.toString();
         return request(config, q ? `/orders/sales?${q}` : "/orders/sales", {
           schema: z.array(saleSchema),
+        });
+      },
+      /** Aggregated analytics (revenue/orders/avg, trend, top items, categories,
+       *  peak hours, period-over-period deltas) for a `from`/`to` ISO window. */
+      analytics: (range?: { from?: string; to?: string }): Promise<AnalyticsSummary> => {
+        const qs = new URLSearchParams();
+        if (range?.from) qs.set("from", range.from);
+        if (range?.to) qs.set("to", range.to);
+        const q = qs.toString();
+        return request(config, q ? `/orders/analytics?${q}` : "/orders/analytics", {
+          schema: analyticsSummarySchema,
         });
       },
       get: (id: string): Promise<Order> =>

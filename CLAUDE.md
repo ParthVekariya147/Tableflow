@@ -72,6 +72,9 @@ All shapes are Zod schemas with inferred types. Key entities:
   `customerName?` / `customerPhone?` (captured for the bill/receipt). Helpers: `ITEM_STATUS_FLOW`,
   `orderSubtotal`, `formatMoney`.
 - `common.ts` — id/money/timestamp/slug primitives.
+- `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row).
+- `analytics.ts` — `AnalyticsSummary` (revenue/orders/avgTicket + deltas, revenue
+  series, top items, category split, peak hours) for the dashboard/analytics page.
 - See **`FEATURES.md`** (repo root) for the full per-app feature → data-requirement
   inventory that drives the schema.
 
@@ -104,6 +107,9 @@ All shapes are Zod schemas with inferred types. Key entities:
   `POST /tables`, `PATCH /tables/:id`, `POST /tables/:id/qr` regen, `DELETE /tables/:id`),
   `orders/` (`GET /orders?status=` live list, `GET /orders/sales` (optional
   `?from=&to=` ISO window for Order History; else recent feed),
+  `GET /orders/analytics?from=&to=` **aggregated analytics** (revenue/orders/avg
+  ticket + period-over-period deltas, revenue trend series, top items, category
+  split, peak hours — computed from `Payment`+`OrderItem`; defaults to last 24h),
   `GET /orders/stream` **SSE live event bus** (see below), `GET /orders/:id`,
   `POST /orders`, `/:id/rounds`, `/:id/items` add, `PATCH /:id/items/:itemId` qty/status,
   `/:id/bill`, `/:id/cancel`, `/:id/payment` capture),
@@ -173,9 +179,10 @@ All shapes are Zod schemas with inferred types. Key entities:
   contains a literal `@`, it MUST be percent-encoded (`@`→`%40`) in both URLs or
   the connection string mis-parses. After changing `.env`, **restart the API**
   (nest watch doesn't reload env).
-- ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done), analytics
-  aggregates (dashboard/analytics pages still derive from the sales feed client-side),
-  menu placements, and review submit. **Build order is vertical per slice:** domain
+- ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done),
+  menu placements, and review submit. (Analytics aggregates are now a real
+  server-side endpoint — `GET /orders/analytics` — wired into the Dashboard +
+  Analytics page.) **Build order is vertical per slice:** domain
   schema/DTO → Nest controller+service → api-client method → rewire the frontend page.
   Verifying a slice needs the DB reachable (`prisma db push` + `pnpm db:seed`).
 
@@ -189,7 +196,8 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   POST returning `{ url }`; `request()` passes a `FormData` body through untouched),
   the floor (`tables.list/create/update/regenerateQr/remove/byQrToken`), and the full
   session lifecycle (`orders.list/sales/get/createForTable/addRound/addItem/updateItem/
-  requestBill/cancel/capturePayment`). `tables.byQrToken` hits `GET /tables/qr/:token`.
+  requestBill/cancel/capturePayment`, plus `orders.analytics({from,to})` →
+  `AnalyticsSummary`). `tables.byQrToken` hits `GET /tables/qr/:token`.
   **Realtime:** `orders.stream(handler)` opens an `EventSource` to `/orders/stream`
   (tenant via `?tenant=` since EventSource can't set headers), validates each frame
   (`snapshot`/`created`/`updated`/`closed`) against `orderSchema`, and returns an
@@ -198,9 +206,13 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
 ## Apps
 - **customer** (`apps/customer`) — the guest ordering app, **wired to the live API
   with QR-based tenant/table resolution** (see `apps/customer/docs/qr-entry-flow.md`).
-  `context/MenuContext.jsx` (`MenuProvider`) loads `api.menu.get()` and maps it to the
+  `context/MenuContext.jsx` (`MenuProvider`) loads the menu and maps it to the
   screens' shape (cents→dollars, `category` name, `priceCents`+`id` kept for ordering);
-  Welcome carousels are derived from the live menu. `context/SessionContext.jsx` opens a
+  Welcome carousels are derived from the live menu. **Perf:** the menu is the heaviest
+  call, so `BootContext` **prefetches it during boot** (`api.menu.get()` kicked off as
+  soon as the slug is known) and hands the in-flight promise to `MenuProvider` via
+  `useBoot().menuPromise` (it only falls back to its own `api.menu.get()` if absent) —
+  the menu overlaps the boot calls instead of starting after the app mounts. `context/SessionContext.jsx` opens a
   real **Order** on `startSession({ customerName, customerPhone })` for the scanned table
   via `api.orders.createForTable` and **persists each round** via `api.orders.addRound`,
   so guest orders appear in restaurant-admin's floor/sessions. The bill flow is wired
@@ -253,8 +265,11 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   `createGuestApi(slug)`; `DEFAULT_SLUG`/first-free-table is the no-QR dev fallback),
   resolves the tenant via `api.tenant.bySlug` (→ drives the **dynamic**
   `TenantThemeProvider` in `App.jsx`, no longer the static `tenant/defaultTenant.ts`)
-  and the table via `api.tables.byQrToken`, then checks occupancy via
-  `api.orders.list("open")`. Boot renders its own loading / **"Invalid QR"** /
+  and the table via `api.tables.byQrToken`, plus occupancy via
+  `api.orders.list("open")`. **Perf:** these three boot calls (and the menu prefetch)
+  run **in parallel** (`Promise.all`), not as a serial waterfall, to cut first-paint
+  latency — same for the resume path (`tryResume`: tenant + table + order in parallel).
+  Boot renders its own loading / **"Invalid QR"** /
   **"Table in use"** / **"Session closed"** screens (`screens/BootScreens.jsx`); a free
   table renders the app, an occupied table that belongs to *this device* is **resumed**. `screens/SplashScreen.jsx` is the **reserve form**: required name + phone
   (client validation + honeypot) → `startSession` **re-checks occupancy** (race guard)
@@ -302,9 +317,16 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   `REGEN_QR` invalidates any already-printed QR, so it must be reprinted; the modal
   re-renders the new code on confirm). Adding a table mints a fresh `qrToken`
   server-side.
+  **`DashboardPage` + `AnalyticsPage` are now real-data** (no more hardcoded charts):
+  both call `api.orders.analytics({from,to})` (`lib/api`). Analytics has a working
+  range selector (Today / Yesterday / 7 Days / 30 Days) driving a real revenue-trend
+  line, category donut, top-items table, peak-hours bars, and period-over-period KPI
+  deltas. Dashboard's "Today's Revenue" is genuinely today-scoped with a real delta and
+  refetches when a sale closes (keyed on `state.sales` length); the rest of the
+  dashboard (active tables, orders-in-progress, 86'd, awaiting-bill, live feed) is
+  derived from the live store as before.
   ⚠️ The `kds/` board still runs on its own
-  `KdsTransport` seam (not yet pointed at `orders.list`); Dashboard/Analytics totals
-  still derive client-side from the sales feed. The real KDS (`kds/KdsPage`) renders
+  `KdsTransport` seam (not yet pointed at `orders.list`). The real KDS (`kds/KdsPage`) renders
   both in-shell at **`/kds`** (managers) and chrome-free full-screen at **`/kds/display`**
   (kitchen staff — same live board, no sidebar; the in-shell view links to it). The
   KDS relay (`tools/kds-relay.mjs`) starts **empty** (no seeded sample tickets); tickets
@@ -328,7 +350,8 @@ The whole guest journey is one **Order** (a table session) holding **Rounds**.
 2. **Boot** (`apps/customer/src/context/BootContext.jsx`): parse the path →
    `{slug, qrToken}`; build a tenant-bound guest client (`src/api.js`
    `createGuestApi`); resolve tenant (`api.tenant.bySlug` → dynamic theme) + table
-   (`api.tables.byQrToken`); check occupancy (`api.orders.list("open")`). A free
+   (`api.tables.byQrToken`) + occupancy (`api.orders.list("open")`) — all fetched
+   **in parallel**, with the menu prefetched alongside (perf). A free
    table renders the app; otherwise an "Invalid QR" / "Table in use" / "Session
    closed" boot screen (`screens/BootScreens.jsx`).
 3. **Reserve** (`screens/SplashScreen.jsx`): required name + phone (client

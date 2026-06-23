@@ -11,7 +11,14 @@ import {
   Sse,
 } from "@nestjs/common";
 import { defer, from, map, merge, type Observable } from "rxjs";
-import type { Order, Payment, Sale, Tenant, OrderStatus } from "@amber/domain";
+import type {
+  Order,
+  Payment,
+  Sale,
+  Tenant,
+  OrderStatus,
+  AnalyticsSummary,
+} from "@amber/domain";
 import { OrdersService } from "./orders.service.js";
 import { OrdersEvents, type OrderEvent } from "./orders.events.js";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
@@ -69,6 +76,17 @@ export class OrdersController {
     @Query("to") to?: string,
   ): Promise<Sale[]> {
     return this.orders.listSales(tenant.id, { from, to });
+  }
+
+  /** Aggregated analytics for the dashboard + Analytics page. Optional ?from=&to=
+   *  ISO window (defaults to the last 24h). Declared before :id. */
+  @Get("analytics")
+  analytics(
+    @CurrentTenant() tenant: Tenant,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ): Promise<AnalyticsSummary> {
+    return this.orders.getAnalytics(tenant.id, { from, to });
   }
 
   @Get(":id")

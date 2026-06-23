@@ -11,3 +11,4 @@ export * from "./menu.js";
 export * from "./order.js";
 export * from "./table.js";
 export * from "./payment.js";
+export * from "./analytics.js";

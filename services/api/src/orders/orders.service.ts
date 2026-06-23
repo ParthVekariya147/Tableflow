@@ -5,7 +5,15 @@ import {
   ConflictException,
   ForbiddenException,
 } from "@nestjs/common";
-import type { Order, OrderStatus, Payment, Sale, ItemStatus } from "@amber/domain";
+import type {
+  Order,
+  OrderStatus,
+  Payment,
+  Sale,
+  ItemStatus,
+  AnalyticsSummary,
+  AnalyticsBucket,
+} from "@amber/domain";
 import { orderItemUnitPrice } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { OrdersEvents } from "./orders.events.js";
@@ -486,6 +494,150 @@ export class OrdersService {
       include: { order: { include: { table: true } } },
     });
     return rows.map(toSale);
+  }
+
+  /**
+   * Aggregated analytics for the dashboard + Analytics page, computed from
+   * `Payment` (revenue/orders/trend/peak) and `OrderItem` (top items, category
+   * split). Scoped to an ISO `{from,to}` window (defaults to the last 24h).
+   * Deltas compare to the immediately preceding equal-length window.
+   */
+  async getAnalytics(
+    tenantId: string,
+    range?: { from?: string; to?: string },
+  ): Promise<AnalyticsSummary> {
+    const to = range?.to ? new Date(range.to) : new Date();
+    const from = range?.from
+      ? new Date(range.from)
+      : new Date(to.getTime() - 86_400_000);
+    const windowMs = Math.max(1, to.getTime() - from.getTime());
+    const prevFrom = new Date(from.getTime() - windowMs);
+
+    // Current window: payments with full item detail (top items / categories).
+    const payments = await this.prisma.payment.findMany({
+      where: { tenantId, createdAt: { gte: from, lte: to } },
+      include: {
+        order: {
+          include: {
+            rounds: {
+              include: {
+                items: {
+                  include: { modifiers: true, menuItem: { include: { category: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Previous equal-length window: only totals/count, for deltas (cheap).
+    const prev = await this.prisma.payment.aggregate({
+      where: { tenantId, createdAt: { gte: prevFrom, lt: from } },
+      _sum: { total: true },
+      _count: { _all: true },
+    });
+
+    const revenue = payments.reduce((s, p) => s + p.total, 0);
+    const orders = payments.length;
+    const avgTicket = orders ? Math.round(revenue / orders) : 0;
+
+    const prevRevenue = prev._sum.total ?? 0;
+    const prevOrders = prev._count._all ?? 0;
+    const prevAvg = prevOrders ? Math.round(prevRevenue / prevOrders) : 0;
+    const delta = (cur: number, prv: number): number | null =>
+      prv > 0 ? (cur - prv) / prv : null;
+
+    // Item-level aggregation across non-cancelled lines of paid orders.
+    const itemAgg = new Map<string, { name: string; units: number; revenue: number }>();
+    const catAgg = new Map<string, { name: string; units: number; revenue: number }>();
+    let totalItems = 0;
+    let itemRevenueTotal = 0;
+    for (const p of payments) {
+      for (const round of p.order.rounds) {
+        for (const it of round.items) {
+          if (it.status === "cancelled") continue;
+          const unit =
+            it.unitPrice + it.modifiers.reduce((s, m) => s + m.priceDelta, 0);
+          const rev = unit * it.qty;
+          totalItems += it.qty;
+          itemRevenueTotal += rev;
+
+          const item = itemAgg.get(it.name) ?? { name: it.name, units: 0, revenue: 0 };
+          item.units += it.qty;
+          item.revenue += rev;
+          itemAgg.set(it.name, item);
+
+          const cname = it.menuItem?.category?.name ?? "Other";
+          const cat = catAgg.get(cname) ?? { name: cname, units: 0, revenue: 0 };
+          cat.units += it.qty;
+          cat.revenue += rev;
+          catAgg.set(cname, cat);
+        }
+      }
+    }
+
+    const topItems = [...itemAgg.values()]
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 8);
+    const categories = [...catAgg.values()]
+      .sort((a, b) => b.revenue - a.revenue)
+      .map((c) => ({
+        ...c,
+        pct: itemRevenueTotal ? Math.round((c.revenue / itemRevenueTotal) * 100) : 0,
+      }));
+
+    // Orders settled per hour-of-day (server-local; tenant TZ is deferred).
+    const hourCounts = new Array(24).fill(0) as number[];
+    for (const p of payments) {
+      const h = p.createdAt.getHours();
+      hourCounts[h] = (hourCounts[h] ?? 0) + 1;
+    }
+    const peakHours = hourCounts.map((o, hour) => ({ hour, orders: o }));
+
+    return {
+      revenue,
+      orders,
+      avgTicket,
+      totalItems,
+      revenueDelta: delta(revenue, prevRevenue),
+      ordersDelta: delta(orders, prevOrders),
+      avgTicketDelta: delta(avgTicket, prevAvg),
+      revenueSeries: this.bucketRevenue(payments, from, windowMs),
+      topItems,
+      categories,
+      peakHours,
+    };
+  }
+
+  /** Revenue trend buckets: hourly for ≤2-day windows, else daily (capped at 48
+   *  buckets so long ranges stay light). Labels are human-friendly. */
+  private bucketRevenue(
+    payments: { total: number; createdAt: Date }[],
+    from: Date,
+    windowMs: number,
+  ): AnalyticsBucket[] {
+    const DAY = 86_400_000;
+    const hourly = windowMs <= 2 * DAY;
+    let nBuckets = hourly
+      ? Math.ceil(windowMs / 3_600_000)
+      : Math.ceil(windowMs / DAY);
+    nBuckets = Math.min(Math.max(nBuckets, 1), 48);
+    const size = windowMs / nBuckets;
+    const fmt = (d: Date): string =>
+      hourly
+        ? d.toLocaleTimeString("en-US", { hour: "numeric" })
+        : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    const totals = new Array(nBuckets).fill(0) as number[];
+    for (const p of payments) {
+      const idx = Math.floor((p.createdAt.getTime() - from.getTime()) / size);
+      if (idx >= 0 && idx < nBuckets) totals[idx] = (totals[idx] ?? 0) + p.total;
+    }
+    return totals.map((value, i) => ({
+      label: fmt(new Date(from.getTime() + i * size)),
+      value,
+    }));
   }
 
   private async assertOrder(
