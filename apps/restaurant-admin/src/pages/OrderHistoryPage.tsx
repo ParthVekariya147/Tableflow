@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Order, Sale } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
-import { money } from "../lib/money";
+import { useMoney } from "../store/AdminStore";
 
 /** Local day boundary helper (00:00:00 of the given date, local time). */
 function dayStart(d: Date): Date {
@@ -49,6 +49,7 @@ const METHOD_META: Record<string, { label: string; icon: string; chip: string }>
 };
 
 export function OrderHistoryPage() {
+  const money = useMoney();
   const [range, setRange] = useState<RangeKey>("today");
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,6 +164,7 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 }
 
 function SaleRow({ sale }: { sale: Sale }) {
+  const money = useMoney();
   const [open, setOpen] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(false);
@@ -233,6 +235,7 @@ function SaleRow({ sale }: { sale: Sale }) {
 }
 
 function OrderItems({ order }: { order: Order }) {
+  const money = useMoney();
   const lines = order.rounds.flatMap((r) =>
     r.items
       .filter((i) => i.status !== "cancelled")

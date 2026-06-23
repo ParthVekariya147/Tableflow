@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { useAdmin, billTotals } from "../store/AdminStore";
-import { money, elapsed } from "../lib/money";
+import { elapsed } from "../lib/money";
 import type { ItemStatus, Round } from "../data/types";
 
 const ROUND_STATE: Record<string, { label: string; chip: string }> = {
@@ -21,7 +21,7 @@ function roundState(round: Round): keyof typeof ROUND_STATE {
 export function TableSessionPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch, refresh } = useAdmin();
+  const { state, dispatch, refresh, money } = useAdmin();
   const [picker, setPicker] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -290,7 +290,7 @@ function ItemPicker({
   onClose: () => void;
   onPick: (menuItemId: string) => void;
 }) {
-  const { state } = useAdmin();
+  const { state, money } = useAdmin();
   const [query, setQuery] = useState("");
   const items = state.items.filter(
     (i) => i.available && i.name.toLowerCase().includes(query.toLowerCase()),

@@ -1,11 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
+import { useMoney } from "../money";
 import FoodImage from "../components/FoodImage";
 import TopAppBar from "../components/TopAppBar";
 
 export default function MyOrderScreen() {
   const navigate = useNavigate();
   const { myOrder, updateOrderQty, removeFromOrder, myOrderTotal, myOrderCount, bringThese } = useSession();
+  const money = useMoney();
 
   const handleBringThese = () => {
     bringThese();
@@ -53,19 +55,19 @@ export default function MyOrderScreen() {
                 <div className="flex-1 p-3">
                   <div className="flex justify-between items-start">
                     <h3 className="text-[15px] font-bold text-on-surface">{item.name}</h3>
-                    <span className="text-primary font-bold text-[14px]">${(item.price * item.qty).toFixed(2)}</span>
+                    <span className="text-primary font-bold text-[14px]">{money(item.price * item.qty)}</span>
                   </div>
                   {item.modifiers?.length > 0 && (
                     <ul className="mt-1 space-y-0.5">
                       {item.modifiers.map((m, i) => (
                         <li key={i} className="text-[11px] text-on-surface-variant">
                           {m.textValue ? `“${m.textValue}”` : m.name}
-                          {m.priceCents > 0 ? ` +$${m.price.toFixed(2)}` : ""}
+                          {m.priceCents > 0 ? ` +${money(m.price)}` : ""}
                         </li>
                       ))}
                     </ul>
                   )}
-                  <p className="text-[12px] text-on-surface-variant mt-0.5">${item.price.toFixed(2)} each</p>
+                  <p className="text-[12px] text-on-surface-variant mt-0.5">{money(item.price)} each</p>
                 </div>
               </div>
               <div className="flex justify-between items-center px-4 py-2.5 border-t border-surface-container">
@@ -105,7 +107,7 @@ export default function MyOrderScreen() {
         <div className="mt-6 pt-4 border-t border-outline-variant/30">
           <div className="flex justify-between items-center mb-1">
             <span className="text-on-surface-variant text-[14px]">Subtotal ({myOrderCount} items)</span>
-            <span className="font-bold text-on-surface">${myOrderTotal.toFixed(2)}</span>
+            <span className="font-bold text-on-surface">{money(myOrderTotal)}</span>
           </div>
           <p className="text-[11px] text-on-surface-variant/60 mb-5">Taxes calculated at checkout</p>
 

@@ -26,6 +26,7 @@ import type {
 } from "../data/types";
 import { defaultTenant } from "../tenant/defaultTenant";
 import { kdsClient } from "../kds/kdsClient";
+import { createMoneyFormatter, currencySymbolFor } from "../lib/money";
 
 /** View-model modifier groups (priceCents) → api-client input (priceDelta). */
 function toModifierGroupsInput(groups: ModifierGroup[]) {
@@ -80,6 +81,7 @@ type Action =
 
 const EMPTY_STATE: AdminState = {
   taxRate: defaultTenant.taxRate ?? 0,
+  currency: defaultTenant.currency,
   categories: [],
   items: [],
   tables: [],
@@ -130,10 +132,12 @@ function mapState(
   floor: FloorTable[],
   sales: DomainSale[],
   taxRate: number,
+  currency: string,
 ): AdminState {
   const nameToId = new Map(menu.categories.map((c) => [c.name, c.id]));
   return {
     taxRate,
+    currency,
     categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
     items: menu.items.map((i): MenuItem => ({
       id: i.id,
@@ -185,6 +189,10 @@ export interface PendingItem {
 interface AdminContextValue {
   state: AdminState;
   dispatch: (action: Action) => Promise<void>;
+  /** Format integer cents in the tenant's currency (symbol/grouping derived). */
+  money: (cents: number) => string;
+  /** The tenant's bare currency symbol (e.g. "$", "₹") for input prefixes. */
+  currencySymbol: string;
   /** Force an immediate re-sync from the API (used on session-page open). */
   refresh: () => Promise<void>;
   /** Upload an item photo to storage; resolves to its public URL. */
@@ -232,7 +240,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       api.tables.list(),
       api.orders.sales(),
     ]);
-    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0));
+    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency));
     setLoaded(true);
   }, [api]);
 
@@ -496,18 +504,31 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     [api],
   );
 
+  // Currency formatter + symbol, rebuilt only when the tenant's currency changes
+  // (loaded once with the tenant; not re-fetched). All pages share these.
+  const money = useMemo(
+    () => createMoneyFormatter(state.currency),
+    [state.currency],
+  );
+  const currencySymbol = useMemo(
+    () => currencySymbolFor(state.currency),
+    [state.currency],
+  );
+
   const value = useMemo(
     () => ({
       state,
       dispatch,
       refresh,
       uploadImage,
+      money,
+      currencySymbol,
       loading: !loaded,
       mutating: mutateCount > 0,
       pendingItems,
       error,
     }),
-    [state, dispatch, refresh, uploadImage, loaded, mutateCount, pendingItems, error],
+    [state, dispatch, refresh, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error],
   );
 
   if (!loaded) {
@@ -541,6 +562,11 @@ export function useAdmin(): AdminContextValue {
   const ctx = useContext(AdminContext);
   if (!ctx) throw new Error("useAdmin must be used within AdminStoreProvider");
   return ctx;
+}
+
+/** The tenant-aware money formatter — convenience for presentational components. */
+export function useMoney(): (cents: number) => string {
+  return useAdmin().money;
 }
 
 // ── Derived selectors (unchanged contract) ────────────────────────────────

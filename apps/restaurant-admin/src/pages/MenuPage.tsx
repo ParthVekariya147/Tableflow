@@ -324,7 +324,7 @@ function CraftingCard({ name }: { name: string }) {
 }
 
 function ItemCard({ item, onEdit }: { item: MenuItem; onEdit: () => void }) {
-  const { dispatch } = useAdmin();
+  const { dispatch, currencySymbol } = useAdmin();
 
   function commitPrice(value: string) {
     const cents = Math.round((parseFloat(value) || 0) * 100);
@@ -387,7 +387,7 @@ function ItemCard({ item, onEdit }: { item: MenuItem; onEdit: () => void }) {
           className="editable-field w-full truncate border-none bg-transparent p-0 font-title-lg text-title-lg text-on-background focus:ring-0"
         />
         <div className="flex items-center gap-xs font-data-mono text-data-mono text-primary">
-          <span>$</span>
+          <span>{currencySymbol}</span>
           <input
             type="text"
             defaultValue={(item.priceCents / 100).toFixed(2)}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
+import { useMoney } from "../money";
 import FoodImage from "../components/FoodImage";
 import DietaryMark from "../components/DietaryMark";
 import TopAppBar from "../components/TopAppBar";
@@ -10,6 +11,7 @@ export default function MenuScreen() {
   const [activeCategory, setActiveCategory] = useState("All");
   const { setSheetItem, myOrderCount, myOrderTotal, bringThese } = useSession();
   const { items, categories, loading } = useMenu();
+  const money = useMoney();
   const navigate = useNavigate();
 
   const filtered = activeCategory === "All"
@@ -77,7 +79,7 @@ export default function MenuScreen() {
                 <h2 className="text-[18px] font-bold text-on-surface mb-1 font-serif">{featured.name}</h2>
                 <p className="text-on-surface-variant text-[13px] line-clamp-2">{featured.desc}</p>
               </div>
-              <span className="text-[20px] font-bold text-primary">${featured.price.toFixed(2)}</span>
+              <span className="text-[20px] font-bold text-primary">{money(featured.price)}</span>
             </div>
           </article>
         )}
@@ -111,7 +113,7 @@ export default function MenuScreen() {
                   <p className="text-on-surface-variant text-[12px] line-clamp-1 mt-0.5">{item.desc}</p>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-primary font-bold text-[15px]">${item.price.toFixed(2)}</span>
+                  <span className="text-primary font-bold text-[15px]">{money(item.price)}</span>
                   <span className="text-[12px] text-on-surface-variant font-medium flex items-center gap-1">
                     Tap to order <span className="material-symbols-outlined text-[14px]">touch_app</span>
                   </span>
@@ -128,7 +130,7 @@ export default function MenuScreen() {
           <div className="bg-inverse-surface rounded-2xl px-4 py-3 flex items-center justify-between shadow-xl">
             <div>
               <p className="text-inverse-on-surface text-[14px] font-bold">My Order · {myOrderCount} item{myOrderCount !== 1 ? "s" : ""}</p>
-              <p className="text-inverse-on-surface/60 text-[12px]">${myOrderTotal.toFixed(2)} · not sent yet</p>
+              <p className="text-inverse-on-surface/60 text-[12px]">{money(myOrderTotal)} · not sent yet</p>
             </div>
             <div className="flex gap-2">
               <button

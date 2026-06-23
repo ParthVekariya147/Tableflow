@@ -109,6 +109,8 @@ export interface Sale {
 
 export interface AdminState {
   taxRate: number;
+  /** Tenant's ISO-4217 currency code (e.g. "USD", "INR"). Drives money formatting. */
+  currency: string;
   categories: Category[];
   items: MenuItem[];
   tables: Table[];

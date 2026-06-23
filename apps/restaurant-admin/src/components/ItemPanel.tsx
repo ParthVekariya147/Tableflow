@@ -46,7 +46,7 @@ export function ItemPanel({
   defaultCategoryId: string;
   onClose: () => void;
 }) {
-  const { state, dispatch, uploadImage } = useAdmin();
+  const { state, dispatch, uploadImage, currencySymbol } = useAdmin();
   const isEdit = item !== null;
 
   const [name, setName] = useState(item?.name ?? "");
@@ -249,7 +249,7 @@ export function ItemPanel({
               <div className="flex gap-lg">
                 <Field label="Price" className="flex-1">
                   <div className="relative">
-                    <span className="absolute left-sm top-1/2 -translate-y-1/2 font-data-mono text-on-surface-variant">$</span>
+                    <span className="absolute left-sm top-1/2 -translate-y-1/2 font-data-mono text-on-surface-variant">{currencySymbol}</span>
                     <input
                       type="number"
                       step="0.01"
@@ -410,7 +410,7 @@ export function ItemPanel({
                           placeholder="Option e.g. Mozzarella"
                         />
                         <div className="relative w-36 shrink-0">
-                          <span className="absolute left-sm top-1/2 -translate-y-1/2 font-data-mono text-[12px] text-on-surface-variant">+$</span>
+                          <span className="absolute left-sm top-1/2 -translate-y-1/2 font-data-mono text-[12px] text-on-surface-variant">+{currencySymbol}</span>
                           <input
                             type="number"
                             step="0.01"
