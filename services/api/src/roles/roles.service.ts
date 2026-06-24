@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import {
   permissionSchema,
+  type AuthUser,
   type Permission,
   type Role,
 } from "@amber/domain";
@@ -57,10 +59,16 @@ export class RolesService {
 
   async update(
     tenantId: string,
+    actor: AuthUser,
     id: string,
     input: { name?: string; permissions?: Permission[] },
   ): Promise<Role> {
     const role = await this.getOwned(tenantId, id);
+    // The protected (Admin) role defines the top tier — only an Admin may rename
+    // it or change its permissions; a Manager with team.manage can't.
+    if (role.protected && !actor.roleProtected) {
+      throw new ForbiddenException("Only an Admin can edit the Admin role");
+    }
     if (input.name && input.name !== role.name) {
       await this.assertNameFree(tenantId, input.name);
     }

@@ -1,8 +1,7 @@
 import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
-import type { AuthUser, LoginResponse, Tenant } from "@amber/domain";
-import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
+import type { AuthUser, LoginResponse, LoginResult } from "@amber/domain";
 import { AuthService } from "./auth.service.js";
-import { LoginDto } from "./auth.dto.js";
+import { LoginDto, SelectTenantDto } from "./auth.dto.js";
 import { JwtAuthGuard } from "./jwt-auth.guard.js";
 import { CurrentUser } from "./current-user.decorator.js";
 
@@ -11,16 +10,21 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   /**
-   * Sign in to the active tenant (resolved from X-Tenant-Slug). Returns a bearer
-   * token + the resolved current user (identity + role + permissions).
+   * Email-first sign in (no X-Tenant-Slug needed). Returns either a token + user
+   * (single restaurant) or a ticket + tenant list to pick from (several). See
+   * `select` for step two.
    */
   @Post("login")
-  login(
-    @CurrentTenant() tenant: Tenant,
-    @Body() body: unknown,
-  ): Promise<LoginResponse> {
+  login(@Body() body: unknown): Promise<LoginResult> {
     const { email, password } = LoginDto.parse(body);
-    return this.auth.login(tenant.id, email, password);
+    return this.auth.login(email, password);
+  }
+
+  /** Step two of a multi-tenant login: redeem the ticket for the chosen tenant. */
+  @Post("select-tenant")
+  select(@Body() body: unknown): Promise<LoginResponse> {
+    const { ticket, tenantId } = SelectTenantDto.parse(body);
+    return this.auth.selectTenant(ticket, tenantId);
   }
 
   /** The current user behind the bearer token (re-resolved fresh each call). */

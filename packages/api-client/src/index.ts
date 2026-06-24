@@ -20,10 +20,12 @@ import {
   roundTypeSchema,
   modifierInputTypeSchema,
   loginResponseSchema,
+  loginResultSchema,
   authUserSchema,
   roleSchema,
   membershipSchema,
   type LoginResponse,
+  type LoginResult,
   type AuthUser,
   type Role,
   type Membership,
@@ -209,11 +211,22 @@ export function createApiClient(config: ApiClientConfig) {
     config,
 
     auth: {
-      /** Sign in to the active tenant; returns a bearer token + current user. */
-      login: (email: string, password: string): Promise<LoginResponse> =>
+      /**
+       * Email-first sign in (not tenant-scoped). Resolves to either
+       * `{ kind: "authenticated", token, user }` (one restaurant) or
+       * `{ kind: "select_tenant", ticket, tenants }` (several — call `selectTenant`).
+       */
+      login: (email: string, password: string): Promise<LoginResult> =>
         request(config, "/auth/login", {
           method: "POST",
           body: { email, password },
+          schema: loginResultSchema,
+        }),
+      /** Step two of a multi-tenant login: redeem the ticket for the chosen tenant. */
+      selectTenant: (ticket: string, tenantId: string): Promise<LoginResponse> =>
+        request(config, "/auth/select-tenant", {
+          method: "POST",
+          body: { ticket, tenantId },
           schema: loginResponseSchema,
         }),
       /** The current user behind the configured bearer token (getToken). */
@@ -419,7 +432,7 @@ export function createApiClient(config: ApiClientConfig) {
        * it). Mirrors the KDS transport's EventSource handling; auto-reconnects.
        */
       stream: (handler: (event: OrderStreamEvent) => void): (() => void) => {
-        const slug = config.tenantSlug;
+        const slug = config.tenantSlug ?? config.getTenantSlug?.();
         const url = `${config.baseUrl}/orders/stream${
           slug ? `?tenant=${encodeURIComponent(slug)}` : ""
         }`;

@@ -207,6 +207,13 @@ Operational knobs the apps would read:
 - ⚠️ Only an Admin can change permissions, and an Admin **can't strip the last
   Admin's `team.manage`** (lockout guard — Microsoft enforces the same "can't
   remove the last global admin").
+- **Admin-tier guard (hierarchy).** `team.manage` is delegable to a Manager so they
+  run day-to-day staff — but a non-Admin **can't manage the Admin tier**: the API
+  (`members`/`roles` services, via `AuthUser.roleProtected`) 403s if someone not on a
+  `protected` role tries to add/edit/remove a member on a protected role, promote
+  anyone *into* one, or edit the protected Admin role itself. So a Manager manages
+  staff, but only an Admin manages Admins (Microsoft's "only an admin can manage
+  admins" rule). The UI mirrors this (lock chip instead of edit/remove for non-Admins).
 
 **B1. The starter roles (seeded; renamable/editable by the Admin)**
 

@@ -8,8 +8,9 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import type { Membership, Tenant } from "@amber/domain";
+import type { AuthUser, Membership, Tenant } from "@amber/domain";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
+import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import {
   PermissionsGuard,
@@ -31,26 +32,32 @@ export class MembersController {
   }
 
   @Post()
-  add(@CurrentTenant() tenant: Tenant, @Body() body: unknown): Promise<Membership> {
+  add(
+    @CurrentTenant() tenant: Tenant,
+    @CurrentUser() actor: AuthUser,
+    @Body() body: unknown,
+  ): Promise<Membership> {
     const dto = AddMemberDto.parse(body);
-    return this.members.add(tenant.id, dto);
+    return this.members.add(tenant.id, actor, dto);
   }
 
   @Patch(":id")
   update(
     @CurrentTenant() tenant: Tenant,
+    @CurrentUser() actor: AuthUser,
     @Param("id") id: string,
     @Body() body: unknown,
   ): Promise<Membership> {
     const dto = UpdateMemberDto.parse(body);
-    return this.members.update(tenant.id, id, dto);
+    return this.members.update(tenant.id, actor, id, dto);
   }
 
   @Delete(":id")
   remove(
     @CurrentTenant() tenant: Tenant,
+    @CurrentUser() actor: AuthUser,
     @Param("id") id: string,
   ): Promise<{ ok: true }> {
-    return this.members.remove(tenant.id, id);
+    return this.members.remove(tenant.id, actor, id);
   }
 }

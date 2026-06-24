@@ -8,6 +8,7 @@ import {
   type Role,
 } from "@amber/domain";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { Toggle } from "../components/Toggle";
@@ -40,6 +41,10 @@ type Draft = AddDraft | EditDraft;
  * last admin. See SETTINGS.md §B.
  */
 export function TeamPage() {
+  const { user } = useAuth();
+  // Only an Admin (protected role) may manage the Admin tier — mirror the API
+  // guard so a Manager doesn't see controls the server would 403.
+  const amAdmin = !!user?.roleProtected;
   const [members, setMembers] = useState<Membership[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +68,15 @@ export function TeamPage() {
   function roleName(id: string): string {
     return roles.find((r) => r.id === id)?.name ?? "—";
   }
+
+  /** A member sitting on the protected (Admin) role. */
+  function isProtectedMember(m: Membership): boolean {
+    const role = m.role ?? roles.find((r) => r.id === m.roleId);
+    return !!role?.protected;
+  }
+
+  /** Roles this user is allowed to assign — a Manager can't grant the Admin role. */
+  const assignableRoles = amAdmin ? roles : roles.filter((r) => !r.protected);
 
   function effectiveOf(m: Membership): Permission[] {
     const role = m.role ?? roles.find((r) => r.id === m.roleId);
@@ -120,7 +134,7 @@ export function TeamPage() {
         </div>
         <button
           onClick={() =>
-            setDraft({ kind: "add", name: "", email: "", roleId: roles[0]?.id ?? "" })
+            setDraft({ kind: "add", name: "", email: "", roleId: assignableRoles[0]?.id ?? "" })
           }
           className="flex items-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md text-on-primary transition-colors hover:bg-primary-container"
         >
@@ -175,7 +189,13 @@ export function TeamPage() {
                       .join(" · ") || "No access"}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-xs">
+                <div className="flex shrink-0 items-center gap-xs">
+                  {isProtectedMember(m) && !amAdmin ? (
+                    <span className="flex items-center gap-xs rounded-full bg-surface-container-low px-sm py-[2px] font-label-md text-[11px] text-on-surface-variant">
+                      <Icon name="lock" size={14} /> Admin
+                    </span>
+                  ) : (
+                  <>
                   <button
                     onClick={() =>
                       setDraft({
@@ -202,6 +222,8 @@ export function TeamPage() {
                   >
                     <Icon name="delete" size={20} />
                   </button>
+                  </>
+                  )}
                 </div>
               </li>
             ))}
@@ -251,7 +273,7 @@ export function TeamPage() {
                 </Field>
                 <Field label="Role">
                   <RoleSelect
-                    roles={roles}
+                    roles={assignableRoles}
                     value={draft.roleId}
                     onChange={(roleId) => setDraft({ ...draft, roleId })}
                   />
@@ -265,7 +287,7 @@ export function TeamPage() {
               <>
                 <Field label="Role">
                   <RoleSelect
-                    roles={roles}
+                    roles={assignableRoles}
                     value={draft.roleId}
                     onChange={(roleId) => {
                       const rolePerms =

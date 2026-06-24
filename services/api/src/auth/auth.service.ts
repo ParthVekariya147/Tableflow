@@ -9,10 +9,11 @@ import {
   permissionSchema,
   type AuthUser,
   type LoginResponse,
+  type LoginResult,
   type Permission,
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
-import type { JwtPayload } from "./auth.types.js";
+import type { JwtPayload, TicketPayload } from "./auth.types.js";
 
 @Injectable()
 export class AuthService {
@@ -22,16 +23,15 @@ export class AuthService {
   ) {}
 
   /**
-   * Verify email + password against the tenant and issue a token. The user must
-   * have an active membership at this tenant (a valid login elsewhere is still
-   * rejected here). The token carries only ids; permissions are re-resolved on
-   * every request by the guard so a role/permission change takes effect at once.
+   * Email-first login (NOT tenant-scoped). Verify email + password globally, then
+   * resolve which active tenant(s) the user belongs to:
+   * - 0 → 401 (no restaurant access anywhere);
+   * - 1 → issue the token straight away (`authenticated`);
+   * - 2+ → return a short-lived `ticket` + the tenant list so the client can show
+   *   a picker and call `selectTenant` (`select_tenant`). The ticket proves the
+   *   password was already checked, so the second step doesn't resend it.
    */
-  async login(
-    tenantId: string,
-    email: string,
-    password: string,
-  ): Promise<LoginResponse> {
+  async login(email: string, password: string): Promise<LoginResult> {
     const user = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
@@ -43,10 +43,71 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
-    const authUser = await this.resolveAuthUser(tenantId, user.id);
-    const payload: JwtPayload = { sub: user.id, tid: tenantId };
+    const memberships = await this.prisma.membership.findMany({
+      where: { userId: user.id, active: true, tenant: { active: true } },
+      include: { tenant: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (memberships.length === 0) {
+      throw new UnauthorizedException("No restaurant access for this account");
+    }
+
+    const [only] = memberships;
+    if (only && memberships.length === 1) {
+      return {
+        kind: "authenticated",
+        ...(await this.issueToken(only.tenantId, user.id)),
+      };
+    }
+
+    // Multiple restaurants — defer the token until the user picks one.
+    const ticketPayload: TicketPayload = { sub: user.id, scope: "tenant-select" };
+    const ticket = await this.jwt.signAsync(ticketPayload, { expiresIn: "5m" });
+    return {
+      kind: "select_tenant",
+      ticket,
+      tenants: memberships.map((m) => ({
+        id: m.tenant.id,
+        slug: m.tenant.slug,
+        name: m.tenant.name,
+      })),
+    };
+  }
+
+  /**
+   * Second step of a multi-tenant login: redeem the ticket for the chosen tenant.
+   * Verifies the ticket, confirms the user still has active access to that tenant,
+   * then issues the real 12h token.
+   */
+  async selectTenant(ticket: string, tenantId: string): Promise<LoginResponse> {
+    let payload: TicketPayload;
+    try {
+      payload = await this.jwt.verifyAsync<TicketPayload>(ticket);
+    } catch {
+      throw new UnauthorizedException("Login session expired — sign in again");
+    }
+    if (payload.scope !== "tenant-select") {
+      throw new UnauthorizedException("Invalid login ticket");
+    }
+    const membership = await this.prisma.membership.findUnique({
+      where: { tenantId_userId: { tenantId, userId: payload.sub } },
+      include: { tenant: true },
+    });
+    if (!membership || !membership.active || !membership.tenant.active) {
+      throw new UnauthorizedException("No access to this restaurant");
+    }
+    return this.issueToken(tenantId, payload.sub);
+  }
+
+  /** Resolve the user + sign a 12h access token bound to the chosen tenant. */
+  private async issueToken(
+    tenantId: string,
+    userId: string,
+  ): Promise<LoginResponse> {
+    const user = await this.resolveAuthUser(tenantId, userId);
+    const payload: JwtPayload = { sub: userId, tid: tenantId };
     const token = await this.jwt.signAsync(payload);
-    return { token, user: authUser };
+    return { token, user };
   }
 
   /**
@@ -61,7 +122,7 @@ export class AuthService {
     }
     const membership = await this.prisma.membership.findUnique({
       where: { tenantId_userId: { tenantId, userId } },
-      include: { role: true },
+      include: { role: true, tenant: true },
     });
     if (!membership || !membership.active) {
       throw new UnauthorizedException("No access to this restaurant");
@@ -77,8 +138,10 @@ export class AuthService {
       name: user.name,
       isSuperAdmin: user.isSuperAdmin,
       tenantId,
+      tenantSlug: membership.tenant.slug,
       roleId: membership.roleId,
       roleName: membership.role.name,
+      roleProtected: membership.role.protected,
       permissions,
     };
   }

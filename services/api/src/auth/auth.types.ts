@@ -9,6 +9,16 @@ export interface JwtPayload {
   tid: string;
 }
 
+/**
+ * Short-lived token issued between the two login steps when a user belongs to
+ * several tenants. It carries NO tenant id (none chosen yet) and a `scope`
+ * marker so it can't be used as an access token. Redeemed by `selectTenant`.
+ */
+export interface TicketPayload {
+  sub: string;
+  scope: "tenant-select";
+}
+
 /** Express request after JwtAuthGuard has resolved + attached the current user. */
 export interface AuthRequest extends Request {
   authUser: AuthUser;

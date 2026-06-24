@@ -6,6 +6,7 @@ import {
   type Role,
 } from "@amber/domain";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { PermissionChecklist } from "../components/PermissionChecklist";
@@ -26,6 +27,9 @@ const EMPTY: Draft = { name: "", permissions: [], protected: false };
  * SETTINGS.md §B.
  */
 export function RolesPage() {
+  const { user } = useAuth();
+  // Only an Admin may edit the protected (Admin) role — mirror the API guard.
+  const amAdmin = !!user?.roleProtected;
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +138,12 @@ export function RolesPage() {
                           .join(" · ")}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-xs">
+                <div className="flex shrink-0 items-center gap-xs">
+                  {role.protected && !amAdmin ? (
+                    <span className="flex items-center gap-xs rounded-full bg-surface-container-low px-sm py-[2px] font-label-md text-[11px] text-on-surface-variant">
+                      <Icon name="lock" size={14} /> Admin only
+                    </span>
+                  ) : (
                   <button
                     onClick={() =>
                       setDraft({
@@ -149,6 +158,7 @@ export function RolesPage() {
                   >
                     <Icon name="edit" size={20} />
                   </button>
+                  )}
                   {!role.protected && (
                     <button
                       onClick={() => remove(role)}

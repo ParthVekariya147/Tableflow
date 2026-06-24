@@ -105,18 +105,28 @@ All shapes are Zod schemas with inferred types. Key entities:
   attaches it to the request; `@CurrentTenant()` injects it into handlers; services
   scope every query by `tenant.id`. `/admin/*` is excluded (cross-tenant, super-admin).
 - Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`),
-  `auth/` (`POST /auth/login` bcrypt-verify → JWT; `GET /auth/me` → current
-  `AuthUser`; exports `JwtAuthGuard`, `@CurrentUser()`, `@RequirePermission()` +
-  `PermissionsGuard` — login is tenant-scoped via `X-Tenant-Slug` and requires an
-  active `Membership` at that tenant; the guard re-resolves role+permissions on
-  every request so changes apply at once; `JWT_SECRET` in `.env`, 12h tokens),
+  `auth/` (**email-first login, NOT tenant-scoped** — `auth/*` is excluded from
+  `TenantMiddleware`): `POST /auth/login` bcrypt-verifies by email globally, then
+  resolves the user's active tenants → `{ kind:"authenticated", token, user }` if
+  exactly one, or `{ kind:"select_tenant", ticket, tenants[] }` if several (no
+  token yet). `POST /auth/select-tenant {ticket, tenantId}` redeems the short-lived
+  (5 min, `scope:"tenant-select"`, no `tid`) ticket for the chosen tenant → `{token,
+  user}`. `GET /auth/me` → current `AuthUser` (reads tenant from the token's `tid`,
+  so it needs no header). `AuthUser` now carries `tenantSlug` so the client can
+  scope later calls. Exports `JwtAuthGuard`, `@CurrentUser()`, `@RequirePermission()`
+  + `PermissionsGuard`; the guard re-resolves role+permissions on every request so
+  changes apply at once; `JWT_SECRET` in `.env`, 12h access tokens),
   `roles/` (`GET/POST/PATCH/DELETE /roles` — custom-role CRUD, `team.manage`-only;
   protected roles can't be deleted/can't drop `team.manage`; a role with members
-  can't be deleted), `members/` (`GET/POST/PATCH/DELETE /members` — add user
-  (creates the User w/ temp password `changeme123` if new), change role, set
+  can't be deleted; **Admin-tier guard:** editing a `protected` role 403s unless the
+  actor is themselves on a protected role), `members/` (`GET/POST/PATCH/DELETE /members`
+  — add user (creates the User w/ temp password `changeme123` if new), change role, set
   per-user permission override, activate/deactivate; `team.manage`-only;
   **last-admin lockout guard** refuses removing/downgrading the only `team.manage`
-  holder),
+  holder; **Admin-tier guard** (`assertCanManageProtected`): a non-protected actor
+  (e.g. a Manager with `team.manage`) can't add/edit/remove a member on a `protected`
+  (Admin) role, nor promote anyone *into* one — only an Admin manages Admins. The
+  actor's tier rides on `AuthUser.roleProtected`),
   `menu/` (`GET /menu`, `POST /menu/categories`, `PATCH /menu/categories/:id`
   rename/reorder, `DELETE /menu/categories/:id` (blocked while it holds items),
   `POST /menu/items`, `PATCH /menu/items/:id`, `DELETE /menu/items/:id`,
@@ -185,7 +195,10 @@ All shapes are Zod schemas with inferred types. Key entities:
   rooms + tables, menu placements, staff users/memberships, 2 active sessions (one
   bill-requested), 4 paid orders + payments, 2 reviews — so the customer app, KDS,
   dashboard and analytics all have live data. Green Bowl / Bella Pizza get a lean
-  menu + tables to prove multi-tenancy.
+  menu + tables to prove multi-tenancy, **plus their own roles + Admin login**
+  (`admin@greenbowl.com`, `admin@bellapizza.com`). A **cross-tenant owner**
+  (`owner@ambergroup.com`) holds Admin memberships at both Amber & Grain and Green
+  Bowl, so its login triggers the tenant picker.
 - ⚠️ `@prisma/client` types require `pnpm db:generate` (offline, schema-only) before
   the API typechecks/builds. `/admin/*` still needs an auth guard (TODO).
   **Auth/RBAC status:** `auth/`, `roles/`, `members/` are JWT+permission-guarded
@@ -211,14 +224,21 @@ All shapes are Zod schemas with inferred types. Key entities:
   Verifying a slice needs the DB reachable (`prisma db push` + `pnpm db:seed`).
 
 ## The typed client — `@amber/api-client` (`packages/api-client/src/`)
-`createApiClient({ baseUrl, tenantSlug?, getToken?, fetch? })` → resource methods
-(`tenant`, `menu`, `tables`, `orders`, `admin`). Central `request()` (`http.ts`)
-attaches `X-Tenant-Slug` + bearer token and **validates responses against domain
-schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` for non-2xx.
-- **Auth/RBAC:** `auth.login(email,password)` → `{ token, user: AuthUser }`,
-  `auth.me()` → `AuthUser` (uses the `getToken` hook). `roles.list/create/update/
-  remove` (custom roles) and `members.list/add/update/remove` (team management) —
-  all `team.manage`-gated server-side.
+`createApiClient({ baseUrl, tenantSlug?, getTenantSlug?, getToken?, getDeviceId?, fetch? })`
+→ resource methods (`tenant`, `menu`, `tables`, `orders`, `admin`). Central
+`request()` (`http.ts`) attaches `X-Tenant-Slug` + bearer token and **validates
+responses against domain schemas**. The tenant slug resolves as
+`opts.tenantSlug ?? config.tenantSlug ?? config.getTenantSlug?.()` — the
+**`getTenantSlug` hook** (read at call time, like `getToken`) lets a long-lived
+client follow the *logged-in* tenant without being recreated (the admin panel uses
+it; `orders.stream`'s `?tenant=` honors it too). `withTenant(client, slug)` clones
+for a different tenant. `ApiError` for non-2xx.
+- **Auth/RBAC:** `auth.login(email,password)` → `LoginResult` (a discriminated
+  union: `{kind:"authenticated", token, user}` | `{kind:"select_tenant", ticket,
+  tenants[]}`); `auth.selectTenant(ticket, tenantId)` → `{token, user}` (step two of
+  a multi-tenant login); `auth.me()` → `AuthUser` (uses the `getToken` hook).
+  `roles.list/create/update/remove` (custom roles) and `members.list/add/update/
+  remove` (team management) — all `team.manage`-gated server-side.
 - Resource methods now cover menu CRUD (`menu.addCategory/updateCategory/deleteCategory/
   addItem/updateItem/deleteItem`, plus `menu.uploadImage(file)` → multipart `FormData`
   POST returning `{ url }`; `request()` passes a `FormData` body through untouched),
@@ -310,11 +330,22 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   **rate-limit** on order creation; SPA host fallback for deep QR links in production;
   and proper auth (the device-id guard is bypassable by a non-staff actor who simply
   omits the header — same gap as the rest of the deferred-auth surface).
-- **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API.**
-  **Auth + RBAC (Microsoft-style):** `context/AuthContext.tsx` (`useAuth`) owns the
-  session — `login`/`logout`, restores from a persisted bearer token (`lib/auth-token.ts`,
-  read by `lib/api.ts`'s `getToken`), exposes `can(permission)`. `LoginPage` does a
-  real `api.auth.login`. `components/RequirePermission.tsx` guards every route
+- **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API; now
+  multi-tenant.** The panel is **no longer pinned to one tenant** — both api-clients
+  (`lib/api.ts` + `store/AdminStore.tsx`) scope via **`getTenantSlug`** reading the
+  logged-in tenant from `lib/auth-tenant.ts` (`localStorage`, set on login from
+  `AuthUser.tenantSlug`); `defaultTenant.slug` is only a pre-login dev fallback.
+  **Auth + RBAC (Microsoft-style), email-first login:** `context/AuthContext.tsx`
+  (`useAuth`) owns the session — `login`/`selectTenant`/`logout`, restores from a
+  persisted bearer token (`lib/auth-token.ts`, read by `lib/api.ts`'s `getToken`),
+  exposes `can(permission)`. `LoginPage` signs in by **email+password only**; if the
+  account belongs to several restaurants it renders a **tenant picker**
+  (`login` → `{kind:"select_tenant", ticket, tenants}` → `selectTenant(ticket, id)`).
+  `AdminStore` loads/streams **only once `status==="authed"`** and re-fetches when the
+  active tenant changes (logout clears the floor). ⚠️ No tenant *switcher* yet
+  (one tenant per session — log out to switch); theming still uses the static
+  `defaultTenant` (making the theme follow the logged-in tenant is the next step).
+  `components/RequirePermission.tsx` guards every route
   (anon → `/login`; lacking the route's permission → redirected to the user's home
   via `homeRouteFor`, `lib/nav.ts`). `Shell` **filters the sidebar by `can()`**
   (hide, don't grey out — a Kitchen user sees only Kitchen Display) and shows the
@@ -322,10 +353,18 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   landing → **`TeamPage`** (`/settings/team`: add users, assign role, per-user
   permission overrides via `components/PermissionChecklist`, activate/remove) and
   **`RolesPage`** (`/settings/roles`: create/rename custom roles + pick permissions,
-  delete). ⚠️ RBAC is enforced **client-side** for nav/routes here; the API enforces
-  it on `roles`/`members` already, and other routes get gated next. Seeded demo
-  logins (password `demo1234`): `manager@amberandgrain.com` = Admin (all),
-  `kitchen@…` = Kitchen (→ `/kds` only). See **`SETTINGS.md`**.
+  delete). Both pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
+  a non-Admin (e.g. a Manager) sees a "lock/Admin" chip instead of edit/remove on
+  protected (Admin) members + the Admin role, and can't pick the Admin role when
+  adding/assigning. ⚠️ RBAC is enforced **client-side** for nav/routes here; the API enforces
+  it on `roles`/`members` already (incl. the Admin-tier guard), and other routes get
+  gated next. Seeded demo logins (password `demo1234`): `admin@amberandgrain.com`
+  = **Admin** (protected, all perms — the restaurant Owner), `manager@amberandgrain.com`
+  = **Manager** (now holds `team.manage`+`settings.manage` so they run the team, but
+  the Admin-tier guard blocks them touching the Admin), `kitchen@…` = Kitchen (→ `/kds`
+  only). Other tenants now have logins too: `admin@greenbowl.com`, `admin@bellapizza.com`
+  (each their tenant's Admin), and **`owner@ambergroup.com`** belongs to *both*
+  Amber & Grain and Green Bowl → exercises the **tenant picker**. See **`SETTINGS.md`**.
   `store/AdminStore.tsx` is now API-backed: it loads menu + floor (`tables.list`) +
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each

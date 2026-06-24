@@ -30,10 +30,12 @@ import { TenantMiddleware } from "./tenant/tenant.middleware.js";
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     // Resolve the tenant from X-Tenant-Slug on all tenant-scoped routes.
-    // /admin/* (super-admin, cross-tenant) is intentionally excluded.
+    // /admin/* (super-admin, cross-tenant) is excluded; so is /auth/* —
+    // email-first login isn't tenant-scoped (login picks the tenant, and /auth/me
+    // reads it from the bearer token), so it must run without the header.
     consumer
       .apply(TenantMiddleware)
-      .exclude("admin/(.*)")
+      .exclude("admin/(.*)", "auth/(.*)")
       .forRoutes("*");
   }
 }

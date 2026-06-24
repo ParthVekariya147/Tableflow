@@ -8,8 +8,9 @@ import {
   Post,
   UseGuards,
 } from "@nestjs/common";
-import type { Role, Tenant } from "@amber/domain";
+import type { AuthUser, Role, Tenant } from "@amber/domain";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
+import { CurrentUser } from "../auth/current-user.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import {
   PermissionsGuard,
@@ -42,11 +43,12 @@ export class RolesController {
   @Patch(":id")
   update(
     @CurrentTenant() tenant: Tenant,
+    @CurrentUser() actor: AuthUser,
     @Param("id") id: string,
     @Body() body: unknown,
   ): Promise<Role> {
     const dto = UpdateRoleDto.parse(body);
-    return this.roles.update(tenant.id, id, dto);
+    return this.roles.update(tenant.id, actor, id, dto);
   }
 
   @Delete(":id")

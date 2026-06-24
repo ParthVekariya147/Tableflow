@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
@@ -8,6 +9,7 @@ import bcrypt from "bcryptjs";
 import {
   effectivePermissions,
   permissionSchema,
+  type AuthUser,
   type Membership,
   type Permission,
 } from "@amber/domain";
@@ -83,9 +85,13 @@ export class MembersService {
 
   async add(
     tenantId: string,
+    actor: AuthUser,
     input: { email: string; name: string; roleId: string; permissions: Permission[] },
   ): Promise<Membership> {
-    await this.assertRoleOwned(tenantId, input.roleId);
+    const role = await this.assertRoleOwned(tenantId, input.roleId);
+    // Only an Admin can mint another Admin — a Manager can't promote into the
+    // protected tier (would side-step the whole hierarchy).
+    this.assertCanManageProtected(actor, role.protected);
     const email = input.email.toLowerCase();
 
     let user = await this.prisma.user.findUnique({ where: { email } });
@@ -120,12 +126,17 @@ export class MembersService {
 
   async update(
     tenantId: string,
+    actor: AuthUser,
     id: string,
     input: { roleId?: string; permissions?: Permission[]; active?: boolean },
   ): Promise<Membership> {
     const current = await this.getOwned(tenantId, id);
+    // Admin-tier guard: a non-Admin can neither touch a member who is already on
+    // a protected (Admin) role, nor move someone onto one.
+    this.assertCanManageProtected(actor, current.role.protected);
     if (input.roleId && input.roleId !== current.roleId) {
-      await this.assertRoleOwned(tenantId, input.roleId);
+      const nextRole = await this.assertRoleOwned(tenantId, input.roleId);
+      this.assertCanManageProtected(actor, nextRole.protected);
     }
 
     // Predict whether this member would still be a team manager after the change,
@@ -158,8 +169,10 @@ export class MembersService {
     return toDomainMembership(row as MembershipRow);
   }
 
-  async remove(tenantId: string, id: string): Promise<{ ok: true }> {
+  async remove(tenantId: string, actor: AuthUser, id: string): Promise<{ ok: true }> {
     const current = await this.getOwned(tenantId, id);
+    // A non-Admin can't remove a member on the protected (Admin) tier.
+    this.assertCanManageProtected(actor, current.role.protected);
     if (isManager(current)) {
       await this.assertNotLastManager(tenantId, id);
     }
@@ -180,10 +193,22 @@ export class MembersService {
     return row as MembershipRow;
   }
 
-  private async assertRoleOwned(tenantId: string, roleId: string): Promise<void> {
+  private async assertRoleOwned(tenantId: string, roleId: string) {
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role || role.tenantId !== tenantId) {
       throw new NotFoundException("Role not found");
+    }
+    return role;
+  }
+
+  /**
+   * Admin-tier guard: a protected-role member can only be managed by another
+   * protected-role holder. Stops a Manager (with team.manage) from editing,
+   * removing, or promoting into the Admin tier — only an Admin manages Admins.
+   */
+  private assertCanManageProtected(actor: AuthUser, targetProtected: boolean): void {
+    if (targetProtected && !actor.roleProtected) {
+      throw new ForbiddenException("Only an Admin can manage Admin-level members");
     }
   }
 

@@ -46,8 +46,18 @@ export const authUserSchema = z.object({
   name: z.string().min(1),
   isSuperAdmin: z.boolean().default(false),
   tenantId: idSchema,
+  /** The active tenant's slug — lets the client scope every later call (X-Tenant-Slug). */
+  tenantSlug: z.string().min(1),
   roleId: idSchema,
   roleName: z.string(),
+  /**
+   * Whether the user's role is `protected` (the Admin tier). Drives the
+   * Admin-tier guard: only a protected-role holder may add/edit/remove members
+   * on a protected role, promote anyone into one, or edit the protected role
+   * itself — so a Manager with `team.manage` can run the team but can't touch
+   * an Admin. See members/roles services.
+   */
+  roleProtected: z.boolean().default(false),
   permissions: z.array(permissionSchema),
 });
 
