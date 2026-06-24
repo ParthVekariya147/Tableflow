@@ -300,7 +300,13 @@ async function main(): Promise<void> {
           "primary-container": "#e8943a",
           "secondary-container": "#fdcf49",
         },
-        typography: { sans: "Plus Jakarta Sans, sans-serif", serif: "Literata, serif", fontLinks: [] },
+        typography: {
+          sans: "Plus Jakarta Sans, sans-serif",
+          serif: "Literata, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,600;7..72,700&display=swap",
+          ],
+        },
       },
     },
   });
@@ -446,7 +452,13 @@ async function main(): Promise<void> {
       theme: {
         mode: "light",
         colors: { primary: "#1d9e75", "primary-container": "#3fc499", "secondary-container": "#bdf0d8" },
-        typography: { sans: "Inter, sans-serif", serif: "Fraunces, serif", fontLinks: [] },
+        typography: {
+          sans: "Inter, sans-serif",
+          serif: "Fraunces, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap",
+          ],
+        },
       },
     },
   });
@@ -482,10 +494,17 @@ async function main(): Promise<void> {
   const bella = await prisma.tenant.create({
     data: {
       slug: "bella-pizza", name: "Bella Pizza", currency: "USD", taxRate: 0.09,
+      // Italian pizzeria: tomato red primary + warm terracotta + soft basil accent.
       theme: {
         mode: "light",
-        colors: { primary: "#d4537e", "primary-container": "#f08aab", "secondary-container": "#ffd9e3" },
-        typography: { sans: "Poppins, sans-serif", serif: "Playfair Display, serif", fontLinks: [] },
+        colors: { primary: "#c4362f", "primary-container": "#e07a5f", "secondary-container": "#cfe3c4" },
+        typography: {
+          sans: "Poppins, sans-serif",
+          serif: "Playfair Display, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap",
+          ],
+        },
       },
     },
   });

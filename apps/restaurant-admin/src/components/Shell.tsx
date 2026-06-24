@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useTenant } from "@amber/ui";
 import { Icon } from "./Icon";
 import { useAuth } from "../context/AuthContext";
 import { NAV_ITEMS } from "../lib/nav";
@@ -6,6 +7,9 @@ import { NAV_ITEMS } from "../lib/nav";
 function SideNav() {
   const navigate = useNavigate();
   const { user, can, logout } = useAuth();
+  // The active tenant's brand (name + logo) — set by TenantThemeGate.
+  const tenant = useTenant();
+
   // Hide, don't grey out: render only the destinations this user can reach.
   const nav = NAV_ITEMS.filter((item) => can(item.perm));
 
@@ -17,15 +21,23 @@ function SideNav() {
   return (
     <nav className="fixed left-0 top-0 z-50 flex h-full w-[280px] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md">
       <div className="mb-xxl flex items-center gap-sm px-sm">
-        <div className="flex h-10 w-10 items-center justify-center rounded-card bg-primary text-[20px] font-bold text-on-primary">
-          A
-        </div>
-        <div>
-          <h1 className="font-headline-md text-[18px] font-bold leading-tight text-primary">
-            Amber &amp; Grain
+        {tenant.theme.logoUrl ? (
+          <img
+            src={tenant.theme.logoUrl}
+            alt={tenant.name}
+            className="h-10 w-10 rounded-card object-cover"
+          />
+        ) : (
+          <div className="flex h-10 w-10 items-center justify-center rounded-card bg-primary text-[20px] font-bold text-on-primary">
+            {tenant.name.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h1 className="truncate font-headline-md text-[18px] font-bold leading-tight text-primary">
+            {tenant.name}
           </h1>
           <span className="font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
-            Main Kitchen
+            Powered by Amber
           </span>
         </div>
       </div>

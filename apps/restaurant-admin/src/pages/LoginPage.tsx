@@ -73,10 +73,10 @@ export function LoginPage() {
 
         <div className="mb-xl text-center">
           <h1 className="inline-block border-b border-surface-variant pb-base font-headline-md text-headline-md text-primary">
-            Manager Cockpit
+            Amber
           </h1>
           <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
-            {choice ? "Choose your restaurant" : "Sign in to access restaurant controls"}
+            {choice ? "Choose your restaurant" : "Sign in to your restaurant"}
           </p>
         </div>
 

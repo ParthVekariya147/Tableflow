@@ -343,9 +343,16 @@ for a different tenant. `ApiError` for non-2xx.
   (`login` → `{kind:"select_tenant", ticket, tenants}` → `selectTenant(ticket, id)`).
   `AdminStore` loads/streams **only once `status==="authed"`** and re-fetches when the
   active tenant changes (logout clears the floor). ⚠️ No tenant *switcher* yet
-  (one tenant per session — log out to switch); theming still uses the static
-  `defaultTenant` (making the theme follow the logged-in tenant is the next step).
-  `components/RequirePermission.tsx` guards every route
+  (one tenant per session — log out to switch).
+  **Dynamic theming (the SaaS is "Amber"; tenants are named at onboarding):**
+  `context/TenantThemeGate.tsx` sits inside `AuthProvider` and, once authed,
+  fetches `api.tenant.current()` and feeds it to `@amber/ui`'s `TenantThemeProvider`
+  so the logged-in **tenant's** brand (colors/fonts/logo) themes the whole panel;
+  pre-login it falls back to the **Amber platform** default (`tenant/defaultTenant.ts`,
+  `name:"Amber"`). `Shell` reads the active tenant via `useTenant()` — sidebar shows
+  the tenant's name + logo/initial with a "Powered by Amber" subtitle; `LoginPage`
+  is Amber-branded. (Tenant fonts load via each theme's `typography.fontLinks` in
+  the seed.) `components/RequirePermission.tsx` guards every route
   (anon → `/login`; lacking the route's permission → redirected to the user's home
   via `homeRouteFor`, `lib/nav.ts`). `Shell` **filters the sidebar by `can()`**
   (hide, don't grey out — a Kitchen user sees only Kitchen Display) and shows the
