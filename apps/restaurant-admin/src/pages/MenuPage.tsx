@@ -32,70 +32,70 @@ export function MenuPage() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-160px)] gap-xl">
-      {/* Categories rail */}
-      <aside className="flex w-64 shrink-0 flex-col">
-        <h3 className="mb-lg flex items-center justify-between font-title-lg text-title-lg text-on-background">
-          Categories
-          <span className="rounded-full bg-surface-variant px-2 py-1 font-label-md text-label-md text-on-surface-variant">
-            {state.categories.length}
-          </span>
-        </h3>
-        <ul className="mb-lg flex flex-col gap-xs">
-          {state.categories.map((c) => {
-            const isActive = c.id === activeCat;
-            return (
-              <li key={c.id} className="group/cat relative">
-                <button
-                  onClick={() => setActiveCat(c.id)}
-                  className={`flex w-full items-center justify-between rounded-lg px-md py-sm font-label-md text-label-md transition-all ${
-                    isActive
-                      ? "border border-primary/20 bg-surface-container-high text-primary"
-                      : "border border-transparent text-on-surface-variant hover:border-outline-variant/30 hover:bg-surface-container-low"
-                  }`}
-                >
-                  <span className="truncate pr-12">{c.name}</span>
-                  <span className="text-[10px] text-on-surface-variant group-hover/cat:opacity-0">
-                    {countFor(c.id)}
-                  </span>
-                </button>
-                {/* Hover actions — rename / delete this category. */}
-                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover/cat:opacity-100">
-                  <button
-                    onClick={() => setEditCat(c)}
-                    title="Rename category"
-                    className="flex h-6 w-6 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
-                  >
-                    <Icon name="edit" size={15} />
-                  </button>
-                  <button
-                    onClick={() => setDeleteCat(c)}
-                    title="Delete category"
-                    className="flex h-6 w-6 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-error-container hover:text-error"
-                  >
-                    <Icon name="delete" size={15} />
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+    <div className="flex min-h-[calc(100vh-160px)] flex-col gap-lg">
+      {/* Categories navbar — horizontal tabs */}
+      <nav className="flex items-center gap-sm overflow-x-auto border-b border-outline-variant pb-md">
+        {state.categories.map((c) => {
+          const isActive = c.id === activeCat;
+          return (
+            <button
+              key={c.id}
+              onClick={() => setActiveCat(c.id)}
+              className={`flex shrink-0 items-center gap-xs rounded-full px-md py-sm font-label-md text-label-md transition-all ${
+                isActive
+                  ? "bg-primary text-on-primary shadow-sm"
+                  : "text-on-surface-variant hover:bg-surface-container-low"
+              }`}
+            >
+              <span className="whitespace-nowrap">{c.name}</span>
+              <span
+                className={`rounded-full px-1.5 text-[10px] ${
+                  isActive
+                    ? "bg-on-primary/20 text-on-primary"
+                    : "bg-surface-variant text-on-surface-variant"
+                }`}
+              >
+                {countFor(c.id)}
+              </span>
+            </button>
+          );
+        })}
         <button
           onClick={() => setCatModal(true)}
-          className="mt-auto flex w-full items-center justify-center gap-xs rounded-full border border-primary bg-transparent px-md py-sm font-label-md text-label-md text-primary transition-colors hover:bg-primary-container/5"
+          className="flex shrink-0 items-center gap-xs rounded-full border border-dashed border-outline px-md py-sm font-label-md text-label-md text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
         >
-          <Icon name="add" size={18} />
+          <Icon name="add" size={16} />
           Add Category
         </button>
-      </aside>
-
-      <div className="hidden w-px bg-outline-variant lg:block" />
+      </nav>
 
       {/* Items grid */}
       <section className="flex flex-1 flex-col">
         <div className="mb-lg flex items-center justify-between border-b border-outline-variant pb-md">
           <div>
-            <h2 className="font-headline-md text-headline-md text-on-background">{category?.name}</h2>
+            <div className="flex items-center gap-xs">
+              <h2 className="font-headline-md text-headline-md text-on-background">
+                {category?.name ?? "Menu"}
+              </h2>
+              {category && (
+                <>
+                  <button
+                    onClick={() => setEditCat(category)}
+                    title="Rename category"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary"
+                  >
+                    <Icon name="edit" size={17} />
+                  </button>
+                  <button
+                    onClick={() => setDeleteCat(category)}
+                    title="Delete category"
+                    className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-error-container hover:text-error"
+                  >
+                    <Icon name="delete" size={17} />
+                  </button>
+                </>
+              )}
+            </div>
             <p className="mt-1 font-body-md text-body-md text-on-surface-variant">
               Manage items, pricing, and availability.
             </p>

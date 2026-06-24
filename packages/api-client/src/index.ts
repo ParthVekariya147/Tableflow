@@ -31,6 +31,7 @@ import {
   type Membership,
   type Permission,
   type Tenant,
+  type UpdateTenantRequest,
   type Menu,
   type MenuItem,
   type MenuCategory,
@@ -289,6 +290,13 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/tenants/${encodeURIComponent(slug)}`, {
           schema: tenantSchema,
           tenantSlug: slug,
+        }),
+      /** Update the active tenant's own settings (Branding / Profile). */
+      update: (input: UpdateTenantRequest): Promise<Tenant> =>
+        request(config, "/tenant", {
+          method: "PATCH",
+          body: input,
+          schema: tenantSchema,
         }),
     },
 

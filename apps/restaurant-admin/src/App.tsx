@@ -12,6 +12,7 @@ import { OrderHistoryPage } from "./pages/OrderHistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TeamPage } from "./pages/TeamPage";
 import { RolesPage } from "./pages/RolesPage";
+import { BrandingPage } from "./pages/BrandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { KdsPage } from "./kds/KdsPage";
 
@@ -135,6 +136,14 @@ export default function App() {
           element={
             <RequirePermission permission="team.manage">
               <RolesPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/settings/branding"
+          element={
+            <RequirePermission permission="settings.manage">
+              <BrandingPage />
             </RequirePermission>
           }
         />

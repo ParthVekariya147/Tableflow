@@ -104,7 +104,9 @@ All shapes are Zod schemas with inferred types. Key entities:
 - **Tenant scoping:** `TenantMiddleware` reads `X-Tenant-Slug`, resolves the tenant,
   attaches it to the request; `@CurrentTenant()` injects it into handlers; services
   scope every query by `tenant.id`. `/admin/*` is excluded (cross-tenant, super-admin).
-- Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`),
+- Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`; `PATCH /tenant`
+  updates the active tenant's own settings — Branding `theme` / Restaurant Profile
+  name·currency·taxRate — `settings.manage`-gated, scoped to the caller's tenant),
   `auth/` (**email-first login, NOT tenant-scoped** — `auth/*` is excluded from
   `TenantMiddleware`): `POST /auth/login` bcrypt-verifies by email globally, then
   resolves the user's active tenants → `{ kind:"authenticated", token, user }` if
@@ -212,10 +214,17 @@ All shapes are Zod schemas with inferred types. Key entities:
   session mode `aws-1-…pooler.supabase.com:5432`) for runtime — keeps connections
   warm (~150 ms warm queries vs ~340 ms direct, and no IPv6-only flakiness);
   `DIRECT_URL` = the direct endpoint (`db.…supabase.co:5432`) used only by
-  `npx prisma db push` / migrations (no `migrations/` dir). ⚠️ If the DB password
+  `npx prisma db push` / migrations (no `migrations/` dir). ⚠️ The pooler is
+  **session mode, capped at 15 clients** — Prisma's *default* pool
+  (`cpus×2+1`, ~17) exceeds that on its own → `FATAL: max clients reached
+  (EMAXCONNSESSION)`. So `DATABASE_URL` MUST carry **`?connection_limit=5&pool_timeout=20`**
+  (cap Prisma well under 15; leaves room for `nest --watch` restart overlap). Don't
+  spawn extra long-lived API instances against the pooler. ⚠️ If the DB password
   contains a literal `@`, it MUST be percent-encoded (`@`→`%40`) in both URLs or
-  the connection string mis-parses. After changing `.env`, **restart the API**
-  (nest watch doesn't reload env).
+  the connection string mis-parses. ⚠️ The schema must be pushed before first use /
+  after schema changes: `pnpm --filter @amber/api exec prisma db push` then
+  `pnpm db:seed` (the `prisma-erd-generator: not found` line is harmless). After
+  changing `.env`, **restart the API** (nest watch doesn't reload env).
 - ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done),
   menu placements, and review submit. (Analytics aggregates are now a real
   server-side endpoint — `GET /orders/analytics` — wired into the Dashboard +
@@ -360,7 +369,12 @@ for a different tenant. `ApiError` for non-2xx.
   landing → **`TeamPage`** (`/settings/team`: add users, assign role, per-user
   permission overrides via `components/PermissionChecklist`, activate/remove) and
   **`RolesPage`** (`/settings/roles`: create/rename custom roles + pick permissions,
-  delete). Both pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
+  delete), and **`BrandingPage`** (`/settings/branding`: edit the tenant's theme —
+  brand colors, font pairing, logo upload — with a **live whole-app preview** via
+  `useTenantBrand().applyTenant` from `TenantThemeGate`; Save persists via
+  `api.tenant.update({theme})`, leaving without saving reverts). Team & Roles &
+  Branding are live; Restaurant Profile + Payments are still placeholder cards.
+  Both Team/Roles pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
   a non-Admin (e.g. a Manager) sees a "lock/Admin" chip instead of edit/remove on
   protected (Admin) members + the Admin role, and can't pick the Admin role when
   adding/assigning. ⚠️ RBAC is enforced **client-side** for nav/routes here; the API enforces

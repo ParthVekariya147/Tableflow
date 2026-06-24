@@ -1,10 +1,13 @@
+import { useCallback, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTenant } from "@amber/ui";
 import { Icon } from "./Icon";
 import { useAuth } from "../context/AuthContext";
 import { NAV_ITEMS } from "../lib/nav";
 
-function SideNav() {
+const NAV_PREF_KEY = "amber-admin-nav";
+
+function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const navigate = useNavigate();
   const { user, can, logout } = useAuth();
   // The active tenant's brand (name + logo) — set by TenantThemeGate.
@@ -19,7 +22,11 @@ function SideNav() {
   }
 
   return (
-    <nav className="fixed left-0 top-0 z-50 flex h-full w-[280px] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md">
+    <nav
+      className={`fixed left-0 top-0 z-50 flex h-full w-[280px] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md transition-transform duration-300 ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       <div className="mb-xxl flex items-center gap-sm px-sm">
         {tenant.theme.logoUrl ? (
           <img
@@ -48,6 +55,7 @@ function SideNav() {
             <NavLink
               to={item.to}
               end={item.end}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 `flex items-center gap-sm rounded-lg px-md py-sm transition-colors duration-200 ${
                   isActive
@@ -71,6 +79,7 @@ function SideNav() {
         {can("settings.manage") && (
           <NavLink
             to="/settings"
+            onClick={onNavigate}
             className={({ isActive }) =>
               `flex items-center gap-sm rounded-lg px-md py-sm transition-colors duration-200 ${
                 isActive
@@ -106,11 +115,29 @@ function SideNav() {
   );
 }
 
-function TopBar() {
+function TopBar({
+  navOpen,
+  onToggleNav,
+}: {
+  navOpen: boolean;
+  onToggleNav: () => void;
+}) {
   const { user } = useAuth();
   return (
-    <header className="fixed right-0 top-0 z-40 ml-[280px] flex h-20 w-[calc(100%-280px)] items-center justify-between border-b border-outline-variant bg-surface px-xl">
-      <div className="flex items-center gap-lg">
+    <header
+      className={`fixed right-0 top-0 z-40 flex h-20 items-center justify-between border-b border-outline-variant bg-surface px-md transition-all duration-300 md:px-xl ${
+        navOpen ? "ml-0 w-full lg:ml-[280px] lg:w-[calc(100%-280px)]" : "ml-0 w-full"
+      }`}
+    >
+      <div className="flex items-center gap-sm md:gap-lg">
+        <button
+          onClick={onToggleNav}
+          title={navOpen ? "Hide sidebar" : "Show sidebar"}
+          aria-label="Toggle sidebar"
+          className="rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10"
+        >
+          <Icon name={navOpen ? "menu_open" : "menu"} />
+        </button>
         <button className="rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10">
           <Icon name="search" />
         </button>
@@ -157,13 +184,63 @@ function TopBar() {
   );
 }
 
-/** App shell: fixed sidebar + top bar, with routed pages in the main canvas. */
+const isDesktop = () =>
+  typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
+
+/** App shell: responsive sidebar + top bar, with routed pages in the main canvas. */
 export function Shell() {
+  // On desktop the sidebar pushes content and remembers your last on/off choice.
+  // On tablet/phone it's an overlay drawer that defaults closed (so content gets
+  // the full width) and we ignore the persisted desktop preference.
+  const [navOpen, setNavOpen] = useState(() => {
+    if (!isDesktop()) return false;
+    try {
+      return localStorage.getItem(NAV_PREF_KEY) !== "closed";
+    } catch {
+      return true;
+    }
+  });
+
+  // Persist only on an explicit toggle, and only for the desktop layout, so the
+  // mobile drawer never clobbers the desktop preference.
+  const toggleNav = useCallback(() => {
+    setNavOpen((open) => {
+      const next = !open;
+      if (isDesktop()) {
+        try {
+          localStorage.setItem(NAV_PREF_KEY, next ? "open" : "closed");
+        } catch {
+          /* storage unavailable — keep in-memory only */
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  // After navigating on a small screen, close the overlay drawer.
+  const closeOnMobile = useCallback(() => {
+    if (!isDesktop()) setNavOpen(false);
+  }, []);
+
   return (
     <div className="min-h-screen bg-background text-on-background">
-      <SideNav />
-      <TopBar />
-      <main className="ml-[280px] mt-20 min-h-[calc(100vh-80px)] p-xl">
+      <SideNav open={navOpen} onNavigate={closeOnMobile} />
+
+      {/* Scrim behind the overlay drawer on small screens (tap to close). */}
+      {navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
+          className="fixed inset-0 z-[45] bg-on-background/40 backdrop-blur-sm lg:hidden"
+          aria-hidden
+        />
+      )}
+
+      <TopBar navOpen={navOpen} onToggleNav={toggleNav} />
+      <main
+        className={`mt-20 min-h-[calc(100vh-80px)] p-md transition-[margin] duration-300 md:p-xl ${
+          navOpen ? "ml-0 lg:ml-[280px]" : "ml-0"
+        }`}
+      >
         <div className="mx-auto max-w-container-max">
           <Outlet />
         </div>

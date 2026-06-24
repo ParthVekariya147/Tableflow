@@ -1,9 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
+import { useBoot } from "../context/BootContext";
 
-export default function TopAppBar({ showBack = false, title = "Amber & Grain" }) {
+export default function TopAppBar({ showBack = false, title }) {
   const navigate = useNavigate();
   const { tableNumber } = useSession();
+  const { tenant } = useBoot();
+  // Default the title to the scanned tenant's name (not a hardcoded brand).
+  const heading = title ?? tenant?.name ?? "Menu";
 
   return (
     <header className="sticky top-0 z-50 bg-surface/90 backdrop-blur-md border-b border-outline-variant/30">
@@ -19,7 +23,7 @@ export default function TopAppBar({ showBack = false, title = "Amber & Grain" })
           </span>
         </button>
 
-        <h1 className="text-[18px] font-semibold text-primary font-serif">{title}</h1>
+        <h1 className="text-[18px] font-semibold text-primary font-serif">{heading}</h1>
 
         <div className="flex items-center gap-1 bg-primary-container/30 px-3 py-1 rounded-full">
           <span className="material-symbols-outlined text-primary text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>

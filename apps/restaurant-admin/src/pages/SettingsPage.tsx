@@ -32,10 +32,11 @@ const CARDS: Card[] = [
     desc: "Name, contact, currency, tax — coming soon.",
   },
   {
-    to: "/settings",
+    to: "/settings/branding",
     icon: "palette",
     title: "Branding",
-    desc: "Colors, fonts, logo — coming soon.",
+    desc: "Colors, fonts, and logo for your restaurant.",
+    ready: true,
   },
   {
     to: "/settings",

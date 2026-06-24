@@ -74,7 +74,22 @@ export const tenantSchema = z.object({
   active: z.boolean().default(true),
 });
 
+/**
+ * Admin update to a tenant's own settings (Branding / Restaurant Profile pages).
+ * All fields optional — Branding sends `theme`; Profile sends name/currency/tax.
+ * Slug + active are NOT editable here (platform/super-admin concerns).
+ */
+export const updateTenantRequestSchema = z
+  .object({
+    name: z.string().min(1),
+    currency: z.string().length(3),
+    taxRate: z.number().min(0).max(1),
+    theme: themeConfigSchema,
+  })
+  .partial();
+
 export type HexColor = z.infer<typeof hexColorSchema>;
+export type UpdateTenantRequest = z.infer<typeof updateTenantRequestSchema>;
 export type ThemeColors = z.infer<typeof themeColorsSchema>;
 export type ThemeTypography = z.infer<typeof themeTypographySchema>;
 export type ThemeConfig = z.infer<typeof themeConfigSchema>;

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import type { Tenant } from "@amber/domain";
+import type { Prisma } from "@prisma/client";
+import type { Tenant, UpdateTenantRequest } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { toDomainTenant } from "./tenant.mapper.js";
 
@@ -13,6 +14,20 @@ export class TenantService {
     if (!row || !row.active) {
       throw new NotFoundException(`Unknown tenant: ${slug}`);
     }
+    return toDomainTenant(row);
+  }
+
+  /**
+   * Update a tenant's own settings (Branding theme / Restaurant Profile). Only
+   * the provided fields change; `theme` is stored as JSON.
+   */
+  async update(tenantId: string, input: UpdateTenantRequest): Promise<Tenant> {
+    const data: Prisma.TenantUpdateInput = {};
+    if (input.name !== undefined) data.name = input.name;
+    if (input.currency !== undefined) data.currency = input.currency;
+    if (input.taxRate !== undefined) data.taxRate = input.taxRate;
+    if (input.theme !== undefined) data.theme = input.theme as Prisma.InputJsonValue;
+    const row = await this.prisma.tenant.update({ where: { id: tenantId }, data });
     return toDomainTenant(row);
   }
 

@@ -1,9 +1,30 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { TenantThemeProvider } from "@amber/ui";
 import type { Tenant } from "@amber/domain";
 import { api } from "../lib/api";
 import { useAuth } from "./AuthContext";
 import { defaultTenant } from "../tenant/defaultTenant";
+
+interface TenantBrandValue {
+  /** Apply a tenant brand to the whole app at runtime (live theme preview/save). */
+  applyTenant: (tenant: Tenant) => void;
+}
+
+const TenantBrandContext = createContext<TenantBrandValue | null>(null);
+
+/** Push a new tenant brand live across the app (used by the Branding page). */
+export function useTenantBrand(): TenantBrandValue {
+  const ctx = useContext(TenantBrandContext);
+  if (!ctx) throw new Error("useTenantBrand must be used within <TenantThemeGate>");
+  return ctx;
+}
 
 /**
  * Applies the **logged-in tenant's** brand (colors, fonts, name, logo) to the
@@ -38,5 +59,11 @@ export function TenantThemeGate({ children }: { children: ReactNode }) {
     // Re-fetch when the active tenant changes (a login to a different restaurant).
   }, [status, user?.tenantId]);
 
-  return <TenantThemeProvider tenant={tenant}>{children}</TenantThemeProvider>;
+  const brand = useMemo<TenantBrandValue>(() => ({ applyTenant: setTenant }), []);
+
+  return (
+    <TenantBrandContext.Provider value={brand}>
+      <TenantThemeProvider tenant={tenant}>{children}</TenantThemeProvider>
+    </TenantBrandContext.Provider>
+  );
 }
