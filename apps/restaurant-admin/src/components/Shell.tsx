@@ -1,17 +1,19 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
-
-const NAV = [
-  { to: "/", label: "Dashboard", icon: "dashboard", end: true },
-  { to: "/menu", label: "Menu Management", icon: "restaurant_menu" },
-  { to: "/tables", label: "Tables", icon: "table_restaurant" },
-  { to: "/kds", label: "Kitchen Display", icon: "skillet" },
-  { to: "/history", label: "Order History", icon: "history" },
-  { to: "/analytics", label: "Sales Analytics", icon: "analytics" },
-];
+import { useAuth } from "../context/AuthContext";
+import { NAV_ITEMS } from "../lib/nav";
 
 function SideNav() {
   const navigate = useNavigate();
+  const { user, can, logout } = useAuth();
+  // Hide, don't grey out: render only the destinations this user can reach.
+  const nav = NAV_ITEMS.filter((item) => can(item.perm));
+
+  function signOut() {
+    logout();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <nav className="fixed left-0 top-0 z-50 flex h-full w-[280px] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md">
       <div className="mb-xxl flex items-center gap-sm px-sm">
@@ -29,7 +31,7 @@ function SideNav() {
       </div>
 
       <ul className="flex flex-1 flex-col gap-xs">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <li key={item.to}>
             <NavLink
               to={item.to}
@@ -54,13 +56,25 @@ function SideNav() {
       </ul>
 
       <div className="mt-auto flex flex-col gap-xs border-t border-outline-variant pt-md">
-        <a
-          href="#"
-          className="flex items-center gap-sm rounded-lg px-md py-sm text-on-surface-variant transition-colors duration-200 hover:bg-surface-container-low hover:text-primary"
-        >
-          <Icon name="settings" />
-          <span className="font-label-md text-label-md">Settings</span>
-        </a>
+        {can("settings.manage") && (
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-sm rounded-lg px-md py-sm transition-colors duration-200 ${
+                isActive
+                  ? "border-r-4 border-primary bg-surface-container-low font-bold text-primary"
+                  : "text-on-surface-variant hover:bg-surface-container-low hover:text-primary"
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <Icon name="settings" fill={isActive} />
+                <span className="font-label-md text-label-md">Settings</span>
+              </>
+            )}
+          </NavLink>
+        )}
         <a
           href="#"
           className="flex items-center gap-sm rounded-lg px-md py-sm text-on-surface-variant transition-colors duration-200 hover:bg-surface-container-low hover:text-primary"
@@ -69,7 +83,7 @@ function SideNav() {
           <span className="font-label-md text-label-md">Support</span>
         </a>
         <button
-          onClick={() => navigate("/login")}
+          onClick={signOut}
           className="mt-sm flex items-center gap-sm rounded-lg px-md py-sm text-error transition-colors duration-200 hover:bg-error-container hover:text-on-error-container"
         >
           <Icon name="logout" />
@@ -81,6 +95,7 @@ function SideNav() {
 }
 
 function TopBar() {
+  const { user } = useAuth();
   return (
     <header className="fixed right-0 top-0 z-40 ml-[280px] flex h-20 w-[calc(100%-280px)] items-center justify-between border-b border-outline-variant bg-surface px-xl">
       <div className="flex items-center gap-lg">
@@ -115,10 +130,10 @@ function TopBar() {
         <div className="flex cursor-pointer items-center gap-sm transition-opacity hover:opacity-80">
           <div className="text-right">
             <span className="block font-label-md text-label-md leading-tight text-on-surface">
-              Manager On Duty
+              {user?.name ?? "Signed in"}
             </span>
             <span className="block font-body-md text-[11px] leading-tight text-on-surface-variant">
-              Active Shift
+              {user?.roleName ?? "Active Shift"}
             </span>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant bg-secondary-container text-primary">

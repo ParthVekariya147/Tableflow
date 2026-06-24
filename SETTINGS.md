@@ -1,5 +1,18 @@
 # Settings — Research & Design Gathering
 
+> **✅ Implemented so far (auth + RBAC foundation + Team/Roles):**
+> Email+password login → JWT → role/permission resolution (`auth/` module);
+> custom per-tenant **Role** table + per-user permission overrides; **Team** and
+> **Roles** management pages under `/settings` (Admin-only); nav/route gating
+> (hide-not-grey-out). Seeded logins use password `demo1234`
+> (`manager@amberandgrain.com` = Admin, `kitchen@…` = Kitchen-only).
+> **Run `cd services/api && npx prisma db push && pnpm db:seed` to apply the
+> schema** (the enum→table change). Still TODO: gate `menu/tables/orders` API
+> routes with `@RequirePermission`; the other Settings modules (profile/branding/
+> payments); online pay.
+
+
+
 > **Status: DRAFT for review.** This is an information-gathering doc, *not* an
 > implementation plan. It catalogs what a restaurant-admin **Settings** area
 > could contain, draws the worth-stealing patterns from how Microsoft structures

@@ -19,6 +19,15 @@ import {
   analyticsSummarySchema,
   roundTypeSchema,
   modifierInputTypeSchema,
+  loginResponseSchema,
+  authUserSchema,
+  roleSchema,
+  membershipSchema,
+  type LoginResponse,
+  type AuthUser,
+  type Role,
+  type Membership,
+  type Permission,
   type Tenant,
   type Menu,
   type MenuItem,
@@ -89,6 +98,28 @@ export interface CreateTenantInput {
   currency?: string;
   taxRate?: number;
   theme?: Tenant["theme"];
+}
+
+/** Body for creating/editing a custom role. */
+export interface CreateRoleInput {
+  name: string;
+  permissions: Permission[];
+}
+export type UpdateRoleInput = Partial<CreateRoleInput>;
+
+/** Body for adding a team member (creates the user if new). */
+export interface AddMemberInput {
+  email: string;
+  name: string;
+  roleId: string;
+  permissions?: Permission[];
+}
+
+/** Body for editing a member (role, per-user permission override, active). */
+export interface UpdateMemberInput {
+  roleId?: string;
+  permissions?: Permission[];
+  active?: boolean;
 }
 
 /** A modifier option as authored in the admin (no id — server mints them). */
@@ -176,6 +207,65 @@ export function createApiClient(config: ApiClientConfig) {
   return {
     /** Raw config (useful for cloning with a different tenant). */
     config,
+
+    auth: {
+      /** Sign in to the active tenant; returns a bearer token + current user. */
+      login: (email: string, password: string): Promise<LoginResponse> =>
+        request(config, "/auth/login", {
+          method: "POST",
+          body: { email, password },
+          schema: loginResponseSchema,
+        }),
+      /** The current user behind the configured bearer token (getToken). */
+      me: (): Promise<AuthUser> =>
+        request(config, "/auth/me", { schema: authUserSchema }),
+    },
+
+    /** Custom-role management (Admin-only; requires team.manage). */
+    roles: {
+      list: (): Promise<Role[]> =>
+        request(config, "/roles", { schema: z.array(roleSchema) }),
+      create: (input: CreateRoleInput): Promise<Role> =>
+        request(config, "/roles", {
+          method: "POST",
+          body: input,
+          schema: roleSchema,
+        }),
+      update: (id: string, input: UpdateRoleInput): Promise<Role> =>
+        request(config, `/roles/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: roleSchema,
+        }),
+      remove: (id: string): Promise<{ ok: true }> =>
+        request(config, `/roles/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
+    },
+
+    /** Team/user management (Admin-only; requires team.manage). */
+    members: {
+      list: (): Promise<Membership[]> =>
+        request(config, "/members", { schema: z.array(membershipSchema) }),
+      add: (input: AddMemberInput): Promise<Membership> =>
+        request(config, "/members", {
+          method: "POST",
+          body: input,
+          schema: membershipSchema,
+        }),
+      update: (id: string, input: UpdateMemberInput): Promise<Membership> =>
+        request(config, `/members/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: membershipSchema,
+        }),
+      remove: (id: string): Promise<{ ok: true }> =>
+        request(config, `/members/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
+    },
 
     tenant: {
       /** Load the active tenant (resolved from the X-Tenant-Slug header). */

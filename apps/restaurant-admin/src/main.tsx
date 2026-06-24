@@ -9,15 +9,18 @@ import "./index.css";
 import App from "./App";
 import { defaultTenant } from "./tenant/defaultTenant";
 import { AdminStoreProvider } from "./store/AdminStore";
+import { AuthProvider } from "./context/AuthContext";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <TenantThemeProvider tenant={defaultTenant}>
-      <AdminStoreProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </AdminStoreProvider>
+      <AuthProvider>
+        <AdminStoreProvider>
+          <BrowserRouter>
+            <App />
+          </BrowserRouter>
+        </AdminStoreProvider>
+      </AuthProvider>
     </TenantThemeProvider>
   </React.StrictMode>,
 );

@@ -13,6 +13,8 @@
  * so `pnpm db:seed` can be run repeatedly.
  */
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { PERMISSIONS } from "@amber/domain";
 
 const prisma = new PrismaClient();
 
@@ -20,8 +22,10 @@ const MIN = 60_000;
 const now = Date.now();
 const ago = (ms: number) => new Date(now - ms);
 
-// Auth is a backend TODO; staff rows carry a clearly-fake hash until it lands.
-const PLACEHOLDER_HASH = "$2b$10$seedplaceholderseedplaceholderseedplaceholders";
+// Demo credentials: every seeded staff user logs in with this password.
+// (Real password reset / invites land with the full auth layer — see SETTINGS.md.)
+const DEMO_PASSWORD = "demo1234";
+const DEMO_HASH = bcrypt.hashSync(DEMO_PASSWORD, 10);
 
 type ItemStatus = "placed" | "preparing" | "ready" | "served" | "cancelled";
 
@@ -88,8 +92,41 @@ async function wipe(): Promise<void> {
   await prisma.table.deleteMany();
   await prisma.room.deleteMany();
   await prisma.membership.deleteMany();
+  await prisma.role.deleteMany();
   await prisma.user.deleteMany();
   await prisma.tenant.deleteMany();
+}
+
+/**
+ * Seed the starter roles for a tenant (Admin/Manager/Kitchen/Server). These are
+ * just defaults the Admin can rename/edit/delete in the app — the Admin role is
+ * `protected` (can't be deleted, must keep team.manage) as the lockout guard.
+ * Returns a name → id map so memberships can reference a role.
+ */
+async function seedRoles(tenantId: string): Promise<Map<string, string>> {
+  const all = [...PERMISSIONS];
+  const defs: Array<{ name: string; permissions: string[]; protected?: boolean }> = [
+    { name: "Admin", permissions: all, protected: true },
+    {
+      name: "Manager",
+      permissions: ["dashboard.view", "menu.manage", "tables.manage", "orders.history"],
+    },
+    { name: "Kitchen", permissions: ["kds.use"] },
+    { name: "Server", permissions: ["tables.manage"] },
+  ];
+  const map = new Map<string, string>();
+  for (const def of defs) {
+    const row = await prisma.role.create({
+      data: {
+        tenantId,
+        name: def.name,
+        permissions: def.permissions,
+        protected: def.protected ?? false,
+      },
+    });
+    map.set(def.name, row.id);
+  }
+  return map;
 }
 
 /** Create a tenant's categories + items. Returns a name → {id, price} lookup. */
@@ -282,18 +319,19 @@ async function main(): Promise<void> {
     }
   }
 
-  // Staff (auth deferred — placeholder hashes).
+  // Roles + staff. Every staff user logs in with DEMO_PASSWORD ("demo1234").
+  const roles = await seedRoles(tenantId);
   const manager = await prisma.user.create({
-    data: { email: "manager@amberandgrain.com", name: "Morgan Ellis", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "owner" } } },
+    data: { email: "manager@amberandgrain.com", name: "Morgan Ellis", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Admin")! } } },
   });
   const server = await prisma.user.create({
-    data: { email: "server@amberandgrain.com", name: "Sam Rivera", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "server" } } },
+    data: { email: "server@amberandgrain.com", name: "Sam Rivera", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Server")! } } },
   });
   await prisma.user.create({
-    data: { email: "kitchen@amberandgrain.com", name: "Kit Tanaka", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "kitchen" } } },
+    data: { email: "kitchen@amberandgrain.com", name: "Kit Tanaka", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Kitchen")! } } },
   });
   await prisma.user.create({
-    data: { email: "ops@amber.platform", name: "Platform Ops", passwordHash: PLACEHOLDER_HASH, isSuperAdmin: true },
+    data: { email: "ops@amber.platform", name: "Platform Ops", passwordHash: DEMO_HASH, isSuperAdmin: true },
   });
 
   // Helper to build one order-item create (snapshots name + price).

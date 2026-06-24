@@ -5,6 +5,9 @@ import {
 } from "@nestjs/common";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { TenantModule } from "./tenant/tenant.module.js";
+import { AuthModule } from "./auth/auth.module.js";
+import { RolesModule } from "./roles/roles.module.js";
+import { MembersModule } from "./members/members.module.js";
 import { MenuModule } from "./menu/menu.module.js";
 import { TablesModule } from "./tables/tables.module.js";
 import { OrdersModule } from "./orders/orders.module.js";
@@ -15,6 +18,9 @@ import { TenantMiddleware } from "./tenant/tenant.middleware.js";
   imports: [
     PrismaModule,
     TenantModule,
+    AuthModule,
+    RolesModule,
+    MembersModule,
     MenuModule,
     TablesModule,
     OrdersModule,

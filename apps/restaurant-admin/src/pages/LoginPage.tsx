@@ -1,16 +1,30 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
+import { useAuth } from "../context/AuthContext";
+import { homeRouteFor } from "../lib/nav";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [username, setUsername] = useState("manager@amberandgrain.com");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  function signIn(e: React.FormEvent) {
+  async function signIn(e: React.FormEvent) {
     e.preventDefault();
-    // Auth is a backend TODO; this front door just enters the panel.
-    navigate("/");
+    setError(null);
+    setBusy(true);
+    try {
+      const user = await login(username.trim(), password);
+      // Land on the user's highest-priority allowed page (KDS-only → /kds).
+      navigate(homeRouteFor(user.permissions) || "/", { replace: true });
+    } catch {
+      setError("Invalid email or password, or no access to this restaurant.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -83,11 +97,21 @@ export function LoginPage() {
             </div>
           </div>
 
+          {error && (
+            <p
+              role="alert"
+              className="rounded-lg bg-error-container px-md py-sm font-body-md text-body-md text-on-error-container"
+            >
+              {error}
+            </p>
+          )}
+
           <button
             type="submit"
-            className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container"
+            disabled={busy}
+            className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign In
+            {busy ? "Signing in…" : "Sign In"}
             <Icon name="arrow_forward" size={18} />
           </button>
         </form>

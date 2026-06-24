@@ -50,16 +50,32 @@ model Tenant {
   payments        Payment[]
   reviews         Review[]
   menuPlacements  MenuPlacement[]
+  roles           Role[]
 }
 
 // ── Identity & access ──────────────────────────────────────────────────────
 
-/** Per-tenant role on a Membership. Platform super-admins use User.isSuperAdmin. */
-enum Role {
-  owner
-  manager
-  server
-  kitchen
+/**
+ * A custom, Admin-named role: a label + a bundle of permission keys, scoped to
+ * one tenant. NOT a fixed enum — the Admin creates/renames/edits roles freely
+ * (Microsoft-style). `permissions` holds the permission-key strings from
+ * @amber/domain's PERMISSIONS catalog. `protected` roles can't be deleted (the
+ * last-Admin lockout guard). See SETTINGS.md §B.
+ */
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  permissions String[]
+  protected   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  memberships Membership[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 /**
@@ -83,20 +99,29 @@ model User {
   paymentsTaken Payment[]    @relation("PaymentTakenBy")
 }
 
-/** Join of a User to a Tenant, carrying that user's role at that restaurant. */
+/**
+ * Join of a User to a Tenant, carrying that user's role at that restaurant plus
+ * optional per-user permission overrides. A non-empty `permissions` array is the
+ * user's COMPLETE effective set (Admin tuned them individually — supports grant
+ * AND revoke vs. the role); empty = inherit the role. See @amber/domain
+ * `effectivePermissions`.
+ */
 model Membership {
-  id        String   @id @default(cuid())
-  tenantId  String
-  userId    String
-  role      Role
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  roleId      String
+  permissions String[] @default([])
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, userId])
   @@index([tenantId])
   @@index([userId])
+  @@index([roleId])
 }
 
 // ── Floor layout ───────────────────────────────────────────────────────────

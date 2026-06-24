@@ -6,6 +6,10 @@
  * origin of every TypeScript type (via z.infer).
  */
 export * from "./common.js";
+export * from "./permission.js";
+export * from "./role.js";
+export * from "./user.js";
+export * from "./auth.js";
 export * from "./tenant.js";
 export * from "./menu.js";
 export * from "./order.js";

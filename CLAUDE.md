@@ -80,8 +80,14 @@ All shapes are Zod schemas with inferred types. Key entities:
 
 ## API — `services/api` (NestJS + Prisma)
 - `prisma/schema.prisma` — root `Tenant` (theme as JSON) + identity (`User`,
-  `Membership` w/ `Role` owner|manager|server|kitchen; platform staff are
-  `User.isSuperAdmin`), floor (`Room`, `Table` w/ `sortOrder`), menu
+  `Membership`, `Role`; platform staff are `User.isSuperAdmin`). **RBAC:** `Role`
+  is now a **per-tenant table** (`{ name, permissions String[], protected }`), NOT
+  a fixed enum — Admins create/rename/edit custom roles. `Membership` carries
+  `roleId` + an optional per-user `permissions String[]` override (non-empty =
+  the member's COMPLETE effective set; else inherit the role — see
+  `effectivePermissions`). The permission keys are the fixed catalog in
+  `@amber/domain`'s `PERMISSIONS`. See **`SETTINGS.md`** §B. Then floor (`Room`,
+  `Table` w/ `sortOrder`), menu
   (`MenuCategory`, `MenuItem`, optional `ModifierGroup`/`ModifierOption`),
   curated `MenuPlacement` (`PlacementKind` featured|welcome — fast lookup for the
   customer Welcome carousels + Menu hero), session (`Order`, `Round`, `OrderItem`
@@ -90,13 +96,27 @@ All shapes are Zod schemas with inferred types. Key entities:
   subtotal/tax/tip/total, `tendered`), and `Review` (guest stars + comment).
   Every non-tenant row carries `tenantId` (RLS-ready). `Order.billRequestedAt`
   powers the bill-request flow; `Order.customerName/customerPhone` (both optional)
-  hold guest contact for the bill/receipt. ⚠️ Auth tokens, online-pay provider fields,
+  hold guest contact for the bill/receipt. ⚠️ Online-pay provider fields,
   kitchen-station routing, audit log, notifications and SaaS billing are
-  **deliberately deferred** (see `FEATURES.md` §5).
+  **deliberately deferred** (see `FEATURES.md` §5). **Auth is now implemented**
+  (was deferred): email+password login → JWT → role/permission resolution; see
+  the `auth/` module below.
 - **Tenant scoping:** `TenantMiddleware` reads `X-Tenant-Slug`, resolves the tenant,
   attaches it to the request; `@CurrentTenant()` injects it into handlers; services
   scope every query by `tenant.id`. `/admin/*` is excluded (cross-tenant, super-admin).
 - Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`),
+  `auth/` (`POST /auth/login` bcrypt-verify → JWT; `GET /auth/me` → current
+  `AuthUser`; exports `JwtAuthGuard`, `@CurrentUser()`, `@RequirePermission()` +
+  `PermissionsGuard` — login is tenant-scoped via `X-Tenant-Slug` and requires an
+  active `Membership` at that tenant; the guard re-resolves role+permissions on
+  every request so changes apply at once; `JWT_SECRET` in `.env`, 12h tokens),
+  `roles/` (`GET/POST/PATCH/DELETE /roles` — custom-role CRUD, `team.manage`-only;
+  protected roles can't be deleted/can't drop `team.manage`; a role with members
+  can't be deleted), `members/` (`GET/POST/PATCH/DELETE /members` — add user
+  (creates the User w/ temp password `changeme123` if new), change role, set
+  per-user permission override, activate/deactivate; `team.manage`-only;
+  **last-admin lockout guard** refuses removing/downgrading the only `team.manage`
+  holder),
   `menu/` (`GET /menu`, `POST /menu/categories`, `PATCH /menu/categories/:id`
   rename/reorder, `DELETE /menu/categories/:id` (blocked while it holds items),
   `POST /menu/items`, `PATCH /menu/items/:id`, `DELETE /menu/items/:id`,
@@ -167,9 +187,13 @@ All shapes are Zod schemas with inferred types. Key entities:
   dashboard and analytics all have live data. Green Bowl / Bella Pizza get a lean
   menu + tables to prove multi-tenancy.
 - ⚠️ `@prisma/client` types require `pnpm db:generate` (offline, schema-only) before
-  the API typechecks/builds. `/admin/*` still needs an auth guard (TODO). **All
-  tenant-scoped routes above are currently unauthenticated** (auth deferred) — they
-  rely only on `X-Tenant-Slug`.
+  the API typechecks/builds. `/admin/*` still needs an auth guard (TODO).
+  **Auth/RBAC status:** `auth/`, `roles/`, `members/` are JWT+permission-guarded
+  (`@RequirePermission("team.manage")`). The other tenant-scoped routes
+  (`menu/`, `tables/`, `orders/`) are **not yet gated** — they still rely only on
+  `X-Tenant-Slug`. Annotating them with `@RequirePermission(...)` is the next
+  hardening step (the guards + decorators already exist). Customer (guest) routes
+  stay unauthenticated by design (device-id bound).
 - The DB runs on **Supabase** (cloud Postgres). The Prisma datasource uses TWO
   URLs (`services/api/.env`): `DATABASE_URL` = the **pooler** (pgBouncer, IPv4,
   session mode `aws-1-…pooler.supabase.com:5432`) for runtime — keeps connections
@@ -191,6 +215,10 @@ All shapes are Zod schemas with inferred types. Key entities:
 (`tenant`, `menu`, `tables`, `orders`, `admin`). Central `request()` (`http.ts`)
 attaches `X-Tenant-Slug` + bearer token and **validates responses against domain
 schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` for non-2xx.
+- **Auth/RBAC:** `auth.login(email,password)` → `{ token, user: AuthUser }`,
+  `auth.me()` → `AuthUser` (uses the `getToken` hook). `roles.list/create/update/
+  remove` (custom roles) and `members.list/add/update/remove` (team management) —
+  all `team.manage`-gated server-side.
 - Resource methods now cover menu CRUD (`menu.addCategory/updateCategory/deleteCategory/
   addItem/updateItem/deleteItem`, plus `menu.uploadImage(file)` → multipart `FormData`
   POST returning `{ url }`; `request()` passes a `FormData` body through untouched),
@@ -283,6 +311,21 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   and proper auth (the device-id guard is bypassable by a non-staff actor who simply
   omits the header — same gap as the rest of the deferred-auth surface).
 - **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API.**
+  **Auth + RBAC (Microsoft-style):** `context/AuthContext.tsx` (`useAuth`) owns the
+  session — `login`/`logout`, restores from a persisted bearer token (`lib/auth-token.ts`,
+  read by `lib/api.ts`'s `getToken`), exposes `can(permission)`. `LoginPage` does a
+  real `api.auth.login`. `components/RequirePermission.tsx` guards every route
+  (anon → `/login`; lacking the route's permission → redirected to the user's home
+  via `homeRouteFor`, `lib/nav.ts`). `Shell` **filters the sidebar by `can()`**
+  (hide, don't grey out — a Kitchen user sees only Kitchen Display) and shows the
+  signed-in user. **Settings** (`/settings`, `settings.manage`-gated) is a card
+  landing → **`TeamPage`** (`/settings/team`: add users, assign role, per-user
+  permission overrides via `components/PermissionChecklist`, activate/remove) and
+  **`RolesPage`** (`/settings/roles`: create/rename custom roles + pick permissions,
+  delete). ⚠️ RBAC is enforced **client-side** for nav/routes here; the API enforces
+  it on `roles`/`members` already, and other routes get gated next. Seeded demo
+  logins (password `demo1234`): `manager@amberandgrain.com` = Admin (all),
+  `kitchen@…` = Kitchen (→ `/kds` only). See **`SETTINGS.md`**.
   `store/AdminStore.tsx` is now API-backed: it loads menu + floor (`tables.list`) +
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each
