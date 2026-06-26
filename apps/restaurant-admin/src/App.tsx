@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Shell } from "./components/Shell";
 import { RequirePermission } from "./components/RequirePermission";
+import { Spinner } from "./components/Skeleton";
 
 // Eagerly loaded — always needed on first paint
 import { LoginPage } from "./pages/LoginPage";
@@ -43,14 +44,22 @@ const RolesPage = lazy(() =>
 const BrandingPage = lazy(() =>
   import("./pages/BrandingPage").then((m) => ({ default: m.BrandingPage })),
 );
+const PaymentsPage = lazy(() =>
+  import("./pages/PaymentsPage").then((m) => ({ default: m.PaymentsPage })),
+);
+const RestaurantProfilePage = lazy(() =>
+  import("./pages/RestaurantProfilePage").then((m) => ({
+    default: m.RestaurantProfilePage,
+  })),
+);
 const KdsPage = lazy(() =>
   import("./kds/KdsPage").then((m) => ({ default: m.KdsPage })),
 );
 
 function PageFallback() {
   return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      Loading…
+    <div className="flex min-h-screen items-center justify-center">
+      <Spinner size={36} />
     </div>
   );
 }
@@ -184,6 +193,22 @@ export default function App() {
             element={
               <RequirePermission permission="settings.manage">
                 <BrandingPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/payments"
+            element={
+              <RequirePermission permission="settings.manage">
+                <PaymentsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/profile"
+            element={
+              <RequirePermission permission="settings.manage">
+                <RestaurantProfilePage />
               </RequirePermission>
             }
           />

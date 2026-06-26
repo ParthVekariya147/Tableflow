@@ -76,6 +76,7 @@ export function BrandingPage() {
   const [colors, setColors] = useState<ThemeColors>({ ...liveTenant.theme.colors });
   const [fontId, setFontId] = useState<string>(presetIdFor(liveTenant.theme.typography));
   const [logoUrl, setLogoUrl] = useState(liveTenant.theme.logoUrl ?? "");
+  const [reviewLink, setReviewLink] = useState(liveTenant.theme.reviewLink ?? "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,8 +94,9 @@ export function BrandingPage() {
       typography,
       logoUrl: logoUrl.trim() || undefined,
       mode: committedRef.current.theme.mode,
+      reviewLink: reviewLink.trim() || undefined,
     }),
-    [colors, typography, logoUrl],
+    [colors, typography, logoUrl, reviewLink],
   );
 
   // Live preview: apply the draft brand to the whole app as it changes.
@@ -147,6 +149,7 @@ export function BrandingPage() {
     setColors({ ...t.theme.colors });
     setFontId(presetIdFor(t.theme.typography));
     setLogoUrl(t.theme.logoUrl ?? "");
+    setReviewLink(t.theme.reviewLink ?? "");
   }
 
   return (
@@ -267,6 +270,33 @@ export function BrandingPage() {
                   )}
                 </div>
               </div>
+            </div>
+          </Section>
+
+          <Section title="Review Link">
+            <p className="mb-md font-body-md text-body-md text-on-surface-variant">
+              Paste your Google Reviews, Zomato, or TripAdvisor link. Guests will
+              see a tap-to-rate prompt on their payment confirmation screen.
+            </p>
+            <div className="space-y-sm">
+              <input
+                value={reviewLink}
+                onChange={(e) => setReviewLink(e.target.value)}
+                placeholder="https://g.page/r/your-google-review-link"
+                type="url"
+                className="w-full rounded-md border border-outline-variant bg-surface-container-lowest px-sm py-2 font-body-md text-[13px] text-on-surface focus:border-primary focus:outline-none"
+              />
+              {reviewLink.trim() && (
+                <a
+                  href={reviewLink.trim()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-xs font-label-md text-label-md text-primary hover:underline"
+                >
+                  <Icon name="open_in_new" size={14} />
+                  Preview link
+                </a>
+              )}
             </div>
           </Section>
 

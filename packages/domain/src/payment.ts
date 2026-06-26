@@ -2,7 +2,7 @@ import { z } from "zod";
 import { idSchema, moneyMinorSchema, isoTimestampSchema } from "./common.js";
 
 /** How a bill was settled. */
-export const paymentMethodSchema = z.enum(["cash", "card"]);
+export const paymentMethodSchema = z.enum(["cash", "card", "upi"]);
 
 /**
  * One Payment per Order. Money fields snapshot the bill at capture time so the

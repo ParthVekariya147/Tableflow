@@ -59,6 +59,12 @@ export const themeConfigSchema = z.object({
   logoUrl: z.string().url().optional(),
   /** Light or dark baseline the overrides sit on top of. */
   mode: z.enum(["light", "dark"]).default("light"),
+  /**
+   * Optional external review URL (e.g. Google Reviews, Zomato, TripAdvisor).
+   * When set, the customer's post-payment "Rate your experience" taps out to
+   * this link. Managed by the admin on the Branding settings page.
+   */
+  reviewLink: z.string().url().optional(),
 });
 
 export const tenantSchema = z.object({
@@ -70,6 +76,12 @@ export const tenantSchema = z.object({
   currency: z.string().length(3).default("USD"),
   /** Tax rate applied to bills, as a fraction (0.10 = 10%). */
   taxRate: z.number().min(0).max(1).default(0),
+  /** GST registration number shown on bills/receipts (e.g. "22AAAAA0000A1Z5"). */
+  gstNumber: z.string().optional(),
+  /** UPI VPA / address for digital payments (e.g. "restaurant@okicici"). */
+  upiId: z.string().optional(),
+  /** Mobile number registered with UPI (digits only, no country code prefix needed). */
+  upiMobile: z.string().optional(),
   theme: themeConfigSchema,
   active: z.boolean().default(true),
 });
@@ -84,6 +96,9 @@ export const updateTenantRequestSchema = z
     name: z.string().min(1),
     currency: z.string().length(3),
     taxRate: z.number().min(0).max(1),
+    gstNumber: z.string().optional(),
+    upiId: z.string().optional(),
+    upiMobile: z.string().optional(),
     theme: themeConfigSchema,
   })
   .partial();

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { Sk } from "../components/Skeleton";
 import { useAdmin } from "../store/AdminStore";
 import { api } from "../lib/api";
 import { timeAgo } from "../lib/money";
@@ -78,7 +79,7 @@ export function DashboardPage() {
 
       {/* Stat cards */}
       <div className="col-span-12 mb-sm grid grid-cols-1 gap-lg md:grid-cols-3">
-        <StatCard icon="payments" label="Today's Revenue">
+        <StatCard icon="payments" label="Today's Revenue" loading={today === null}>
           <div className="flex items-baseline gap-sm">
             <h3 className="font-display-lg text-display-lg text-on-surface">{money(todayRevenue)}</h3>
             {deltaPct !== null && (
@@ -211,10 +212,12 @@ function StatCard({
   icon,
   label,
   children,
+  loading = false,
 }: {
   icon: string;
   label: string;
   children: React.ReactNode;
+  loading?: boolean;
 }) {
   return (
     <div className="group relative overflow-hidden rounded-card border border-surface-variant bg-surface-container-lowest p-lg shadow-card">
@@ -225,7 +228,14 @@ function StatCard({
         <span className="mb-base block font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
           {label}
         </span>
-        {children}
+        {loading ? (
+          <div className="flex flex-col gap-sm pt-xs">
+            <Sk style={{ height: 40, width: "65%" }} />
+            <Sk style={{ height: 16, width: "40%" }} />
+          </div>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

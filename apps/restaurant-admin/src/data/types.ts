@@ -15,7 +15,7 @@ export type ItemStatus =
   | "cancelled";
 export type RoundType = "instant" | "bundled";
 export type TableStatus = "free" | "seated" | "ordering" | "bill";
-export type PaymentMethod = "cash" | "card";
+export type PaymentMethod = "cash" | "card" | "upi";
 
 export interface Category {
   id: string;
@@ -111,6 +111,14 @@ export interface AdminState {
   taxRate: number;
   /** Tenant's ISO-4217 currency code (e.g. "USD", "INR"). Drives money formatting. */
   currency: string;
+  /** GST registration number shown on bills/receipts. */
+  gstNumber?: string;
+  /** UPI VPA for QR / deep-link payments (e.g. "restaurant@okicici"). */
+  upiId?: string;
+  /** Mobile number registered with UPI shown alongside the QR. */
+  upiMobile?: string;
+  /** Tenant's display name (used in UPI QR payer name field). */
+  tenantName?: string;
   categories: Category[];
   items: MenuItem[];
   tables: Table[];

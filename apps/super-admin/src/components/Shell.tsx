@@ -8,6 +8,7 @@ import { api } from "../api";
 const NAV = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
   { to: "/tenants", label: "Tenants", icon: "apartment" },
+  { to: "/credentials", label: "Credentials", icon: "key" },
   { to: "/plans", label: "Plans", icon: "sell" },
   { to: "/subscriptions", label: "Subscriptions", icon: "sync" },
   { to: "/audit-log", label: "Audit log", icon: "history" },

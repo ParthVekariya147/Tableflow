@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { AnalyticsSkeleton, PinnerLoader } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { useMoney } from "../store/AdminStore";
 
@@ -97,7 +98,6 @@ export function AnalyticsPage() {
           </p>
         </div>
         <div className="flex items-center gap-md self-start">
-          {loading && <Icon name="progress_activity" size={18} className="ag-spin text-on-surface-variant" />}
           <div className="flex rounded-full border border-outline-variant bg-surface-container-highest p-base shadow-sm">
             {RANGES.map((r) => (
               <button
@@ -121,6 +121,11 @@ export function AnalyticsPage() {
         </div>
       )}
 
+      {loading && <PinnerLoader />}
+
+      {loading ? (
+        <AnalyticsSkeleton />
+      ) : (
       <div className="grid grid-cols-12 gap-lg">
         {/* KPIs */}
         <Kpi
@@ -215,6 +220,7 @@ export function AnalyticsPage() {
           <PeakHours hours={data?.peakHours ?? []} />
         </div>
       </div>
+      )}
     </>
   );
 }

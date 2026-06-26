@@ -11,6 +11,7 @@ import { PlansPage } from "./pages/PlansPage";
 import { SubscriptionsPage } from "./pages/SubscriptionsPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { CredentialsPage } from "./pages/CredentialsPage";
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="tenants/:id/edit" element={<TenantEditPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
+          <Route path="credentials" element={<CredentialsPage />} />
           <Route path="audit-log" element={<AuditLogPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

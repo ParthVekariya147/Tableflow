@@ -411,8 +411,10 @@ export function SessionProvider({ children }) {
   //    once the Order is marked paid.
   // Throws on API failure so the caller can keep the guest on the bill screen.
   const payBill = useCallback(async (method) => {
-    if (method === "cash") {
-      setPaidMethod("cash");
+    if (method === "cash" || method === "upi") {
+      // Cash/UPI: don't capture here — staff confirm at the counter or verify
+      // the UPI receipt in the admin panel. Session stays alive until they do.
+      setPaidMethod(method);
       setAwaitingCash(true);
       return true;
     }

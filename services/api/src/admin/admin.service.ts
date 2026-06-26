@@ -6,6 +6,17 @@ import { toDomainTenant } from "../tenant/tenant.mapper.js";
 import type { CreateTenantDto, UpdateTenantDto } from "./admin.dto.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 
+export interface TenantCredential {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  tenantActive: boolean;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  ownerUserId: string | null;
+  hasPassword: boolean;
+}
+
 export interface AuditLogEntry {
   id: string;
   type: string;
@@ -239,6 +250,46 @@ export class AdminService {
       method: p.method,
       createdAt: p.createdAt.toISOString(),
     }));
+  }
+
+  /** List all tenants with their primary Admin member's credentials. */
+  async getCredentials(): Promise<TenantCredential[]> {
+    const tenants = await this.prisma.tenant.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        memberships: {
+          where: { active: true, role: { protected: true } },
+          include: { user: true },
+          take: 1,
+        },
+      },
+    });
+
+    return tenants.map((t) => {
+      const m = t.memberships[0] ?? null;
+      return {
+        tenantId: t.id,
+        tenantName: t.name,
+        tenantSlug: t.slug,
+        tenantActive: t.active,
+        ownerEmail: m?.user.email ?? null,
+        ownerName: m?.user.name ?? null,
+        ownerUserId: m?.user.id ?? null,
+        hasPassword: !!m?.user.passwordHash,
+      };
+    });
+  }
+
+  /** Set a new password for a tenant's Admin user (identified by userId). */
+  async resetOwnerPassword(tenantId: string, userId: string, newPassword: string): Promise<void> {
+    // Verify the user is actually an active protected-role member of this tenant.
+    const membership = await this.prisma.membership.findFirst({
+      where: { tenantId, userId, active: true, role: { protected: true } },
+    });
+    if (!membership) throw new NotFoundException("No Admin member found for this tenant");
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
   }
 
   /** Write an impersonation event to the audit log (fire-and-forget safe). */

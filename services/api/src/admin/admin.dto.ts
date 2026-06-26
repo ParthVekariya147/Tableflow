@@ -16,6 +16,13 @@ export const createTenantSchema = z.object({
 });
 export type CreateTenantDto = z.infer<typeof createTenantSchema>;
 
+/** POST /admin/tenants/:id/reset-owner-password */
+export const resetOwnerPasswordSchema = z.object({
+  userId: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+export type ResetOwnerPasswordDto = z.infer<typeof resetOwnerPasswordSchema>;
+
 /** PATCH /admin/tenants/:id — update tenant fields. */
 export const updateTenantSchema = z.object({
   name: z.string().min(1).optional(),

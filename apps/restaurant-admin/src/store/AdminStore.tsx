@@ -30,6 +30,7 @@ import { getStoredToken } from "../lib/auth-token";
 import { getStoredTenantSlug } from "../lib/auth-tenant";
 import { kdsClient } from "../kds/kdsClient";
 import { createMoneyFormatter, currencySymbolFor } from "../lib/money";
+import { AppShellSkeleton } from "../components/Skeleton";
 
 /** View-model modifier groups (priceCents) → api-client input (priceDelta). */
 function toModifierGroupsInput(groups: ModifierGroup[]) {
@@ -85,6 +86,10 @@ type Action =
 const EMPTY_STATE: AdminState = {
   taxRate: defaultTenant.taxRate ?? 0,
   currency: defaultTenant.currency,
+  gstNumber: undefined,
+  upiId: undefined,
+  upiMobile: undefined,
+  tenantName: undefined,
   categories: [],
   items: [],
   tables: [],
@@ -136,11 +141,19 @@ function mapState(
   sales: DomainSale[],
   taxRate: number,
   currency: string,
+  gstNumber?: string,
+  upiId?: string,
+  upiMobile?: string,
+  tenantName?: string,
 ): AdminState {
   const nameToId = new Map(menu.categories.map((c) => [c.name, c.id]));
   return {
     taxRate,
     currency,
+    gstNumber,
+    upiId,
+    upiMobile,
+    tenantName,
     categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
     items: menu.items.map((i): MenuItem => ({
       id: i.id,
@@ -246,7 +259,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       api.tables.list(),
       api.orders.sales(),
     ]);
-    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency));
+    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency, tenant.gstNumber, tenant.upiId, tenant.upiMobile, tenant.name));
     setLoaded(true);
   }, [api]);
 
@@ -551,11 +564,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // the LoginPage + route guards can show — otherwise the login screen never
   // appears (the store can't load without a tenant/token).
   if (status === "authed" && !loaded) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background font-body-md text-body-md text-on-surface-variant">
-        {error ? `Failed to load: ${error}` : "Loading…"}
-      </div>
-    );
+    if (error) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-background font-body-md text-body-md text-on-surface-variant">
+          Failed to load: {error}
+        </div>
+      );
+    }
+    return <AppShellSkeleton />;
   }
 
   return (

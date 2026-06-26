@@ -26,6 +26,9 @@ export class TenantService {
     if (input.name !== undefined) data.name = input.name;
     if (input.currency !== undefined) data.currency = input.currency;
     if (input.taxRate !== undefined) data.taxRate = input.taxRate;
+    if (input.gstNumber !== undefined) data.gstNumber = input.gstNumber || null;
+    if (input.upiId !== undefined) data.upiId = input.upiId || null;
+    if (input.upiMobile !== undefined) data.upiMobile = input.upiMobile || null;
     if (input.theme !== undefined) data.theme = input.theme as Prisma.InputJsonValue;
     const row = await this.prisma.tenant.update({ where: { id: tenantId }, data });
     return toDomainTenant(row);

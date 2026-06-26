@@ -135,7 +135,8 @@ export function BootProvider({ children }) {
           if (resumed?.status === "ready") {
             setBoot({ ...resumed, menuPromise });
           } else {
-            setBoot({ status: "occupied", table });
+            // Carry api/tenant/menuPromise so TableInUse can offer phone re-join.
+            setBoot({ status: "occupied", table, api, tenant, menuPromise });
           }
           return;
         }
@@ -163,7 +164,29 @@ export function BootProvider({ children }) {
 
   if (boot.status === "loading") return <BootSplash />;
   if (boot.status === "invalid") return <InvalidQr reason={boot.reason} />;
-  if (boot.status === "occupied") return <TableInUse table={boot.table} />;
+  if (boot.status === "occupied")
+    return (
+      <TableInUse
+        table={boot.table}
+        api={boot.api}
+        onReclaimed={(order) => {
+          writeSession({
+            slug: boot.tenant.slug,
+            qrToken: boot.table.qrToken,
+            tableId: boot.table.id,
+            orderId: order.id,
+          });
+          setBoot({
+            status: "ready",
+            api: boot.api,
+            tenant: boot.tenant,
+            table: boot.table,
+            resumeOrder: order,
+            menuPromise: boot.menuPromise,
+          });
+        }}
+      />
+    );
   if (boot.status === "closed") return <SessionClosed />;
 
   return (

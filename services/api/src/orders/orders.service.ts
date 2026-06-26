@@ -24,6 +24,7 @@ import type {
   AddItemDto,
   UpdateItemDto,
   CapturePaymentDto,
+  ReclaimSessionDto,
 } from "./orders.dto.js";
 
 const ROUND_INCLUDE = {
@@ -638,6 +639,42 @@ export class OrdersService {
       label: fmt(new Date(from.getTime() + i * size)),
       value,
     }));
+  }
+
+  /**
+   * Re-bind an existing open session to a new device by verifying the guest's
+   * phone number. Used when a customer re-scans the QR after clearing their
+   * browser state or switching devices. Phone is normalised to the last 10
+   * digits on both sides so `+91 9876543210` matches `9876543210`.
+   */
+  async reclaimSession(
+    tenantId: string,
+    dto: ReclaimSessionDto,
+    deviceId?: string,
+  ): Promise<Order> {
+    const live = await this.prisma.order.findFirst({
+      where: {
+        tenantId,
+        tableId: dto.tableId,
+        status: { in: ["open", "billed"] },
+      },
+      select: { id: true, customerPhone: true },
+    });
+    if (!live)
+      throw new NotFoundException("No active session on this table.");
+    if (!live.customerPhone)
+      throw new ForbiddenException(
+        "This session cannot be reclaimed — no phone on record.",
+      );
+    const normalize = (p: string) => p.replace(/\D/g, "").slice(-10);
+    if (normalize(live.customerPhone) !== normalize(dto.customerPhone))
+      throw new ForbiddenException("Phone number does not match.");
+
+    await this.prisma.order.update({
+      where: { id: live.id },
+      data: { deviceId: deviceId ?? null },
+    });
+    return this.refreshAndEmit(tenantId, live.id, "updated");
   }
 
   private async assertOrder(

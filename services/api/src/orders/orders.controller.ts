@@ -29,6 +29,7 @@ import {
   addItemSchema,
   updateItemSchema,
   capturePaymentSchema,
+  reclaimSessionSchema,
 } from "./orders.dto.js";
 
 @Controller("orders")
@@ -99,6 +100,23 @@ export class OrdersController {
     @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
     return this.orders.get(tenant.id, id, deviceId);
+  }
+
+  /**
+   * Re-bind an open session to a new device using phone-number ownership proof.
+   * Declared before ":id" routes so "reclaim" is never mistaken for an order id.
+   */
+  @Post("reclaim")
+  reclaim(
+    @CurrentTenant() tenant: Tenant,
+    @Body() body: unknown,
+    @Headers("x-device-id") deviceId?: string,
+  ): Promise<Order> {
+    return this.orders.reclaimSession(
+      tenant.id,
+      reclaimSessionSchema.parse(body),
+      deviceId,
+    );
   }
 
   @Post()

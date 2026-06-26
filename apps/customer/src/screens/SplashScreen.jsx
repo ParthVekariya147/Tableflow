@@ -3,9 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useBoot } from "../context/BootContext";
 
-/** Lenient phone check — at least 7 digits, allowing +, spaces, (), -. */
-function isValidPhone(phone) {
-  return /^[0-9+()\-\s]+$/.test(phone) && phone.replace(/\D/g, "").length >= 7;
+/** Indian mobile number — 10 digits starting with 6–9, optional +91/0 prefix. */
+function isValidPhone(raw) {
+  let digits = raw.replace(/[\s\-().]/g, "");
+  if (digits.startsWith("+91")) digits = digits.slice(3);
+  else if (digits.startsWith("91") && digits.length === 12) digits = digits.slice(2);
+  else if (digits.startsWith("0") && digits.length === 11) digits = digits.slice(1);
+  return /^[6-9]\d{9}$/.test(digits);
 }
 
 export default function SplashScreen() {
@@ -27,7 +31,7 @@ export default function SplashScreen() {
     e.preventDefault();
     if (company) return; // bot tripped the honeypot — silently drop
     if (!canSubmit) {
-      setError("Please enter your name and a valid phone number.");
+      setError("Please enter your name and a valid 10-digit Indian mobile number.");
       return;
     }
     setSubmitting(true);
@@ -94,22 +98,31 @@ export default function SplashScreen() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Alex Morgan"
+              placeholder="e.g. Rahul Sharma"
               autoComplete="name"
               className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[13px] font-semibold text-on-surface-variant">Phone number</span>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="e.g. (555) 123-4567"
-              type="tel"
-              autoComplete="tel"
-              inputMode="tel"
-              className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
+            <span className="text-[13px] font-semibold text-on-surface-variant">
+              Phone number
+              <span className="ml-1.5 text-[11px] font-normal text-on-surface-variant/60">Indian mobile</span>
+            </span>
+            <div className="relative flex items-center">
+              <span className="absolute left-4 text-[15px] font-medium text-on-surface-variant select-none pointer-events-none">
+                +91
+              </span>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="98765 43210"
+                type="tel"
+                autoComplete="tel"
+                inputMode="numeric"
+                maxLength={13}
+                className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest pl-14 pr-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            </div>
           </label>
 
           {/* Honeypot: hidden from humans; bots that fill it are dropped. */}

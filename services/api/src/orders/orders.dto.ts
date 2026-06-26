@@ -86,3 +86,15 @@ export const capturePaymentSchema = z.object({
   tendered: z.number().int().nonnegative().optional(),
 });
 export type CapturePaymentDto = z.infer<typeof capturePaymentSchema>;
+
+/**
+ * POST /orders/reclaim — re-bind an existing open session to a new device when
+ * the customer lost their browser state (cleared storage / new device) but the
+ * table still has their live order. Phone number is the ownership proof; the
+ * server normalises both sides to the last 10 digits before comparing.
+ */
+export const reclaimSessionSchema = z.object({
+  tableId: z.string().min(1),
+  customerPhone: z.string().trim().min(7).max(32),
+});
+export type ReclaimSessionDto = z.infer<typeof reclaimSessionSchema>;

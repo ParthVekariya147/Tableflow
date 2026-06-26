@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Order, Sale } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { OrderHistorySkeleton, PinnerLoader } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { useMoney } from "../store/AdminStore";
 
@@ -110,40 +111,50 @@ export function OrderHistoryPage() {
         </div>
       </div>
 
-      <div className="mb-lg grid grid-cols-1 gap-md sm:grid-cols-3">
-        <StatCard label="Orders" value={String(totals.count)} icon="receipt_long" />
-        <StatCard label="Revenue" value={money(totals.revenue)} icon="payments" />
-        <StatCard label="Average order" value={money(totals.avg)} icon="trending_up" />
-      </div>
-
       {loading ? (
-        <div className="flex flex-col items-center gap-sm py-xxl text-on-surface-variant">
-          <Icon name="progress_activity" size={36} className="ag-spin" />
-          <p className="font-body-md text-body-md">Loading orders…</p>
-        </div>
+        <>
+          <PinnerLoader />
+          <OrderHistorySkeleton />
+        </>
       ) : error ? (
-        <div className="flex flex-col items-center gap-sm py-xxl text-error">
-          <Icon name="error" size={36} />
-          <p className="font-body-md text-body-md">Couldn’t load history: {error}</p>
-        </div>
-      ) : sales.length === 0 ? (
-        <div className="flex flex-col items-center gap-sm rounded-card border border-dashed border-outline-variant bg-surface-container-lowest py-xxl text-on-surface-variant">
-          <Icon name="history" size={40} />
-          <p className="font-body-md text-body-md">No completed orders in this period.</p>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest shadow-card">
-          <div className="hidden grid-cols-[1fr_1fr_1fr_1fr_auto] gap-md border-b border-outline-variant bg-surface-container-low px-lg py-sm font-label-md text-label-md uppercase text-on-surface-variant md:grid">
-            <span>Time</span>
-            <span>Table</span>
-            <span>Payment</span>
-            <span className="text-right">Total</span>
-            <span className="w-6" />
+        <>
+          <div className="mb-lg grid grid-cols-1 gap-md sm:grid-cols-3">
+            <StatCard label="Orders" value={String(totals.count)} icon="receipt_long" />
+            <StatCard label="Revenue" value={money(totals.revenue)} icon="payments" />
+            <StatCard label="Average order" value={money(totals.avg)} icon="trending_up" />
           </div>
-          {sales.map((sale) => (
-            <SaleRow key={sale.id} sale={sale} />
-          ))}
-        </div>
+          <div className="flex flex-col items-center gap-sm py-xxl text-error">
+            <Icon name="error" size={36} />
+            <p className="font-body-md text-body-md">Couldn’t load history: {error}</p>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="mb-lg grid grid-cols-1 gap-md sm:grid-cols-3">
+            <StatCard label="Orders" value={String(totals.count)} icon="receipt_long" />
+            <StatCard label="Revenue" value={money(totals.revenue)} icon="payments" />
+            <StatCard label="Average order" value={money(totals.avg)} icon="trending_up" />
+          </div>
+          {sales.length === 0 ? (
+            <div className="flex flex-col items-center gap-sm rounded-card border border-dashed border-outline-variant bg-surface-container-lowest py-xxl text-on-surface-variant">
+              <Icon name="history" size={40} />
+              <p className="font-body-md text-body-md">No completed orders in this period.</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest shadow-card">
+              <div className="hidden grid-cols-[1fr_1fr_1fr_1fr_auto] gap-md border-b border-outline-variant bg-surface-container-low px-lg py-sm font-label-md text-label-md uppercase text-on-surface-variant md:grid">
+                <span>Time</span>
+                <span>Table</span>
+                <span>Payment</span>
+                <span className="text-right">Total</span>
+                <span className="w-6" />
+              </div>
+              {sales.map((sale) => (
+                <SaleRow key={sale.id} sale={sale} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </>
   );

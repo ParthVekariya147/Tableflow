@@ -26,10 +26,11 @@ const CARDS: Card[] = [
     ready: true,
   },
   {
-    to: "/settings",
+    to: "/settings/profile",
     icon: "storefront",
     title: "Restaurant Profile",
-    desc: "Name, contact, currency, tax — coming soon.",
+    desc: "Name, currency, tax rate, and GST number.",
+    ready: true,
   },
   {
     to: "/settings/branding",
@@ -39,10 +40,11 @@ const CARDS: Card[] = [
     ready: true,
   },
   {
-    to: "/settings",
+    to: "/settings/payments",
     icon: "payments",
     title: "Payments",
-    desc: "Payment methods & online provider — coming soon.",
+    desc: "Configure UPI for instant QR-code billing at checkout.",
+    ready: true,
   },
 ];
 

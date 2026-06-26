@@ -5,13 +5,53 @@ import {
   type KdsStage,
   type KdsTicket,
 } from "@amber/api-client";
-import type { Order } from "@amber/domain";
+import type { Order, ItemStatus } from "@amber/domain";
 import { kdsClient } from "./kdsClient";
 import { api } from "../lib/api";
 
 /** An order is "live" (kitchen-relevant) while it's open or awaiting the bill. */
 function isLiveStatus(status: string): boolean {
   return status === "open" || status === "billed";
+}
+
+/** Map a DB item status to a KDS stage. Returns null for served/cancelled (off-board). */
+function itemStatusToStage(status: ItemStatus): KdsStage | null {
+  if (status === "placed" || status === "preparing" || status === "ready")
+    return status;
+  return null;
+}
+
+/**
+ * Build KDS tickets from live DB orders when the relay has no data (e.g. after
+ * a relay restart). One ticket per in-progress item; id = "roundId::itemId".
+ */
+function ordersToKdsTickets(
+  orders: Order[],
+  tableLabels: Map<string, string>,
+): KdsTicket[] {
+  const tickets: KdsTicket[] = [];
+  for (const order of orders) {
+    const label = tableLabels.get(order.tableId) ?? order.tableId.slice(-4);
+    for (const round of order.rounds) {
+      for (const item of round.items) {
+        const stage = itemStatusToStage(item.status);
+        if (!stage) continue;
+        const modSummary = item.modifiers?.length
+          ? ` (${item.modifiers.map((m) => m.textValue ?? m.name).filter(Boolean).join(", ")})`
+          : "";
+        tickets.push({
+          id: `${round.id}::${item.id}`,
+          orderId: order.id,
+          tableLabel: `Table ${label}`,
+          type: round.type,
+          stage,
+          createdAt: round.createdAt,
+          items: [{ id: item.id, name: item.name + modSummary, qty: item.qty }],
+        });
+      }
+    }
+  }
+  return tickets;
 }
 
 /** Add the ids of an order's explicitly-cancelled items to `into`. */
@@ -48,16 +88,33 @@ export function useKds() {
     () => new Set(),
   );
 
-  // --- KDS relay (live board) ---
+  // --- KDS relay (live board) with DB fallback ---
   useEffect(() => {
     let active = true;
 
     kdsClient
       .list()
-      .then((initial) => {
+      .then(async (initial) => {
         if (!active) return;
-        setTickets(initial);
-        setConnected(true);
+        if (initial.length > 0) {
+          setTickets(initial);
+          setConnected(true);
+          return;
+        }
+        // Relay is empty (restarted or cold start) — synthesize from live DB orders
+        // so the kitchen sees in-progress items without waiting for new rounds.
+        try {
+          const [orders, tables] = await Promise.all([
+            api.orders.list("open"),
+            api.tables.list(),
+          ]);
+          if (!active) return;
+          const labelMap = new Map(tables.map((t) => [t.id, t.label]));
+          setTickets(ordersToKdsTickets(orders, labelMap));
+        } catch {
+          // DB unreachable — board stays empty; relay events will populate it.
+        }
+        if (active) setConnected(true);
       })
       .catch(() => active && setConnected(false));
 

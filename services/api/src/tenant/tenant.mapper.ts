@@ -9,6 +9,9 @@ export function toDomainTenant(row: PrismaTenant): DomainTenant {
     name: row.name,
     currency: row.currency,
     taxRate: row.taxRate,
+    gstNumber: row.gstNumber ?? undefined,
+    upiId: row.upiId ?? undefined,
+    upiMobile: row.upiMobile ?? undefined,
     active: row.active,
     // theme is stored as JSON; validate/normalize through the domain schema.
     theme: themeConfigSchema.parse(row.theme),

@@ -71,6 +71,18 @@ export interface TenantPayment {
   createdAt: string;
 }
 
+/** Tenant credential row from `GET /admin/credentials`. */
+export interface TenantCredential {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  tenantActive: boolean;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  ownerUserId: string | null;
+  hasPassword: boolean;
+}
+
 /** A single entry in the platform audit log. */
 export interface AuditLogEntry {
   id: string;
@@ -560,6 +572,17 @@ export function createApiClient(config: ApiClientConfig) {
           `/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(itemId)}`,
           { method: "PATCH", body: input, schema: orderSchema },
         ),
+      /**
+       * Re-bind an open session to the current device by verifying the guest's
+       * phone number. Use when the customer re-scanned the QR after losing their
+       * browser state (cleared storage / new device) and the table shows "in use".
+       */
+      reclaimSession: (tableId: string, customerPhone: string): Promise<Order> =>
+        request(config, "/orders/reclaim", {
+          method: "POST",
+          body: { tableId, customerPhone },
+          schema: orderSchema,
+        }),
       /** Request the bill for an order. */
       requestBill: (orderId: string): Promise<Order> =>
         request(config, `/orders/${encodeURIComponent(orderId)}/bill`, {
@@ -614,6 +637,25 @@ export function createApiClient(config: ApiClientConfig) {
             method: z.string(),
             createdAt: z.string(),
           })),
+        }),
+      getCredentials: (): Promise<TenantCredential[]> =>
+        request(config, "/admin/credentials", {
+          schema: z.array(z.object({
+            tenantId: z.string(),
+            tenantName: z.string(),
+            tenantSlug: z.string(),
+            tenantActive: z.boolean(),
+            ownerEmail: z.string().nullable(),
+            ownerName: z.string().nullable(),
+            ownerUserId: z.string().nullable(),
+            hasPassword: z.boolean(),
+          })),
+        }),
+      resetOwnerPassword: (tenantId: string, userId: string, newPassword: string): Promise<{ ok: true }> =>
+        request(config, `/admin/tenants/${encodeURIComponent(tenantId)}/reset-owner-password`, {
+          method: "POST",
+          body: { userId, newPassword },
+          schema: z.object({ ok: z.literal(true) }),
         }),
       listPlans: (): Promise<Plan[]> =>
         request(config, "/admin/plans", { schema: z.array(planSchema) }),

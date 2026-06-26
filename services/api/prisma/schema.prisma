@@ -30,6 +30,11 @@ model Tenant {
   name      String
   currency  String   @default("USD")
   taxRate   Float    @default(0)
+  gstNumber String?
+  /** UPI VPA used for QR-code / deep-link payments (e.g. "restaurant@okicici"). */
+  upiId     String?
+  /** Mobile number registered with UPI shown alongside the QR code. */
+  upiMobile String?
   active    Boolean  @default(true)
   // ThemeConfig (colors/typography/logo/mode) as JSON — see @amber/domain.
   theme     Json
@@ -424,6 +429,7 @@ model OrderItemModifier {
 enum PaymentMethod {
   cash
   card
+  upi
 }
 
 /**

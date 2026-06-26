@@ -4,13 +4,15 @@ import type { Tenant, TenantWithSubscription } from "@amber/domain";
 import { AuthService } from "../auth/auth.service.js";
 import { BillingService } from "../billing/billing.service.js";
 import { AdminService } from "./admin.service.js";
-import type { AuditLogEntry, TenantPayment } from "./admin.service.js";
+import type { AuditLogEntry, TenantCredential, TenantPayment } from "./admin.service.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 import {
   createTenantSchema,
   updateTenantSchema,
+  resetOwnerPasswordSchema,
   type CreateTenantDto,
   type UpdateTenantDto,
+  type ResetOwnerPasswordDto,
 } from "./admin.dto.js";
 
 const impersonateSchema = z.object({
@@ -47,14 +49,32 @@ export class AdminController {
   }
 
   @Patch("tenants/:id")
-  update(@Param("id") id: string, @Body() body: unknown): Promise<Tenant> {
+  async update(@Param("id") id: string, @Body() body: unknown): Promise<TenantWithSubscription> {
     const dto: UpdateTenantDto = updateTenantSchema.parse(body);
-    return this.admin.updateTenant(id, dto);
+    await this.admin.updateTenant(id, dto);
+    return this.billing.getTenantWithSubscription(id);
   }
 
   @Get("tenants/:id/payments")
   getTenantPayments(@Param("id") id: string): Promise<TenantPayment[]> {
     return this.admin.getTenantPayments(id);
+  }
+
+  /** List all tenants with their Admin member's email + password status. */
+  @Get("credentials")
+  getCredentials(): Promise<TenantCredential[]> {
+    return this.admin.getCredentials();
+  }
+
+  /** Reset the password for a tenant's Admin member. */
+  @Post("tenants/:id/reset-owner-password")
+  async resetOwnerPassword(
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    const dto: ResetOwnerPasswordDto = resetOwnerPasswordSchema.parse(body);
+    await this.admin.resetOwnerPassword(id, dto.userId, dto.newPassword);
+    return { ok: true };
   }
 
   /**
