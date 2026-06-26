@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSession } from "../context/SessionContext";
+import { useMoney } from "../money";
 import FoodImage from "./FoodImage";
 import DietaryMark from "./DietaryMark";
 
@@ -14,6 +15,7 @@ function initSelections(groups) {
 
 export default function ItemSheet() {
   const { sheetItem, setSheetItem, bringIt, addToOrder } = useSession();
+  const money = useMoney();
   const [qty, setQty] = useState(1);
   const [sel, setSel] = useState({});
 
@@ -100,7 +102,7 @@ export default function ItemSheet() {
           <div className="p-5 overflow-y-auto">
             <div className="flex justify-between items-start mb-1">
               <h2 className="text-[22px] font-bold text-on-surface font-serif flex-1 pr-4">{item.name}</h2>
-              <span className="text-[22px] font-bold text-primary">${unitPrice.toFixed(2)}</span>
+              <span className="text-[22px] font-bold text-primary">{money(unitPrice)}</span>
             </div>
             {(item.dietary || item.jain) && (
               <div className="mb-2">
@@ -154,7 +156,7 @@ export default function ItemSheet() {
                             <span className="text-[14px] text-on-surface">{o.name}</span>
                           </span>
                           <span className="text-[13px] text-on-surface-variant">
-                            {o.priceCents > 0 ? `+$${o.price.toFixed(2)}` : o.priceCents < 0 ? `-$${Math.abs(o.price).toFixed(2)}` : ""}
+                            {o.priceCents > 0 ? `+${money(o.price)}` : o.priceCents < 0 ? money(o.price) : ""}
                           </span>
                         </button>
                       );
@@ -188,7 +190,7 @@ export default function ItemSheet() {
                 className="flex-1 bg-primary text-on-primary font-bold py-3.5 rounded-full flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md disabled:opacity-50"
               >
                 <span className="material-symbols-outlined text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>local_shipping</span>
-                Bring it · ${(unitPrice * qty).toFixed(2)}
+                Bring it · {money(unitPrice * qty)}
               </button>
               <button
                 onClick={handleAddToOrder}

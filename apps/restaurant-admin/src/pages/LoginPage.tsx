@@ -1,16 +1,59 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { AuthUser, TenantOption } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { useAuth } from "../context/AuthContext";
+import { homeRouteFor } from "../lib/nav";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("manager@amberandgrain.com");
+  const { login, selectTenant } = useAuth();
+  const [username, setUsername] = useState("admin@amberandgrain.com");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // When the account belongs to several restaurants, we hold the ticket + the
+  // choices and render a picker instead of navigating.
+  const [choice, setChoice] = useState<{ ticket: string; tenants: TenantOption[] } | null>(
+    null,
+  );
 
-  function signIn(e: React.FormEvent) {
+  function goHome(user: AuthUser) {
+    // Land on the user's highest-priority allowed page (KDS-only → /kds).
+    navigate(homeRouteFor(user.permissions) || "/", { replace: true });
+  }
+
+  async function signIn(e: React.FormEvent) {
     e.preventDefault();
-    // Auth is a backend TODO; this front door just enters the panel.
-    navigate("/");
+    setError(null);
+    setBusy(true);
+    try {
+      const outcome = await login(username.trim(), password);
+      if (outcome.kind === "authenticated") {
+        goHome(outcome.user);
+      } else {
+        setChoice({ ticket: outcome.ticket, tenants: outcome.tenants });
+      }
+    } catch {
+      setError("Invalid email or password, or no access to any restaurant.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickTenant(tenantId: string) {
+    if (!choice) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const user = await selectTenant(choice.ticket, tenantId);
+      goHome(user);
+    } catch {
+      setError("That sign-in session expired — please sign in again.");
+      setChoice(null);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -30,13 +73,57 @@ export function LoginPage() {
 
         <div className="mb-xl text-center">
           <h1 className="inline-block border-b border-surface-variant pb-base font-headline-md text-headline-md text-primary">
-            Manager Cockpit
+            Amber
           </h1>
           <p className="mt-sm font-body-md text-body-md text-on-surface-variant">
-            Sign in to access restaurant controls
+            {choice ? "Choose your restaurant" : "Sign in to your restaurant"}
           </p>
         </div>
 
+        {choice ? (
+          <div className="space-y-md">
+            <ul className="space-y-sm">
+              {choice.tenants.map((t) => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => pickTenant(t.id)}
+                    className="flex w-full items-center justify-between rounded-lg border border-outline-variant bg-surface-container-lowest px-md py-sm text-left transition-colors hover:border-primary hover:bg-surface-container-low disabled:opacity-60"
+                  >
+                    <span className="flex items-center gap-sm">
+                      <Icon name="storefront" className="text-primary" />
+                      <span className="font-label-md text-label-md text-on-surface">
+                        {t.name}
+                      </span>
+                    </span>
+                    <Icon name="arrow_forward" size={18} className="text-on-surface-variant" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg bg-error-container px-md py-sm font-body-md text-body-md text-on-error-container"
+              >
+                {error}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setChoice(null);
+                setError(null);
+              }}
+              className="font-label-md text-label-md text-on-surface-variant transition-colors hover:text-primary"
+            >
+              ← Use a different account
+            </button>
+          </div>
+        ) : (
         <form className="space-y-lg" onSubmit={signIn}>
           <div>
             <label
@@ -83,14 +170,25 @@ export function LoginPage() {
             </div>
           </div>
 
+          {error && (
+            <p
+              role="alert"
+              className="rounded-lg bg-error-container px-md py-sm font-body-md text-body-md text-on-error-container"
+            >
+              {error}
+            </p>
+          )}
+
           <button
             type="submit"
-            className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container"
+            disabled={busy}
+            className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign In
+            {busy ? "Signing in…" : "Sign In"}
             <Icon name="arrow_forward" size={18} />
           </button>
         </form>
+        )}
 
         <div className="mt-xl flex items-center justify-between border-t border-outline-variant/30 pt-lg">
           <a href="#" className="font-label-md text-label-md text-on-surface-variant transition-colors hover:text-primary">

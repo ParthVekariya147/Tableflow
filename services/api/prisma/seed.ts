@@ -13,6 +13,8 @@
  * so `pnpm db:seed` can be run repeatedly.
  */
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { PERMISSIONS } from "@amber/domain";
 
 const prisma = new PrismaClient();
 
@@ -20,8 +22,10 @@ const MIN = 60_000;
 const now = Date.now();
 const ago = (ms: number) => new Date(now - ms);
 
-// Auth is a backend TODO; staff rows carry a clearly-fake hash until it lands.
-const PLACEHOLDER_HASH = "$2b$10$seedplaceholderseedplaceholderseedplaceholders";
+// Demo credentials: every seeded staff user logs in with this password.
+// (Real password reset / invites land with the full auth layer — see SETTINGS.md.)
+const DEMO_PASSWORD = "demo1234";
+const DEMO_HASH = bcrypt.hashSync(DEMO_PASSWORD, 10);
 
 type ItemStatus = "placed" | "preparing" | "ready" | "served" | "cancelled";
 
@@ -87,9 +91,55 @@ async function wipe(): Promise<void> {
   await prisma.menuCategory.deleteMany();
   await prisma.table.deleteMany();
   await prisma.room.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.subscription.deleteMany();
   await prisma.membership.deleteMany();
+  await prisma.role.deleteMany();
   await prisma.user.deleteMany();
   await prisma.tenant.deleteMany();
+  await prisma.plan.deleteMany();
+}
+
+/**
+ * Seed the starter roles for a tenant (Admin/Manager/Kitchen/Server). These are
+ * just defaults the Admin can rename/edit/delete in the app — the Admin role is
+ * `protected` (can't be deleted, must keep team.manage) as the lockout guard.
+ * Returns a name → id map so memberships can reference a role.
+ */
+async function seedRoles(tenantId: string): Promise<Map<string, string>> {
+  const all = [...PERMISSIONS];
+  const defs: Array<{ name: string; permissions: string[]; protected?: boolean }> = [
+    { name: "Admin", permissions: all, protected: true },
+    {
+      // A Manager runs day-to-day ops AND the team (team.manage + settings.manage)
+      // — but the Admin-tier guard stops them touching the protected Admin role or
+      // any Admin member, so they can't escalate to or edit an Admin.
+      name: "Manager",
+      permissions: [
+        "dashboard.view",
+        "menu.manage",
+        "tables.manage",
+        "orders.history",
+        "settings.manage",
+        "team.manage",
+      ],
+    },
+    { name: "Kitchen", permissions: ["kds.use"] },
+    { name: "Server", permissions: ["tables.manage"] },
+  ];
+  const map = new Map<string, string>();
+  for (const def of defs) {
+    const row = await prisma.role.create({
+      data: {
+        tenantId,
+        name: def.name,
+        permissions: def.permissions,
+        protected: def.protected ?? false,
+      },
+    });
+    map.set(def.name, row.id);
+  }
+  return map;
 }
 
 /** Create a tenant's categories + items. Returns a name → {id, price} lookup. */
@@ -253,7 +303,13 @@ async function main(): Promise<void> {
           "primary-container": "#e8943a",
           "secondary-container": "#fdcf49",
         },
-        typography: { sans: "Plus Jakarta Sans, sans-serif", serif: "Literata, serif", fontLinks: [] },
+        typography: {
+          sans: "Plus Jakarta Sans, sans-serif",
+          serif: "Literata, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,600;7..72,700&display=swap",
+          ],
+        },
       },
     },
   });
@@ -282,18 +338,24 @@ async function main(): Promise<void> {
     }
   }
 
-  // Staff (auth deferred — placeholder hashes).
+  // Roles + staff. Every staff user logs in with DEMO_PASSWORD ("demo1234").
+  const roles = await seedRoles(tenantId);
+  // The restaurant Admin/Owner — the only account on the protected Admin role.
+  await prisma.user.create({
+    data: { email: "admin@amberandgrain.com", name: "Avery Stone", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Admin")! } } },
+  });
+  // Morgan is a Manager (team.manage) — can run the team but NOT touch the Admin.
   const manager = await prisma.user.create({
-    data: { email: "manager@amberandgrain.com", name: "Morgan Ellis", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "owner" } } },
+    data: { email: "manager@amberandgrain.com", name: "Morgan Ellis", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Manager")! } } },
   });
   const server = await prisma.user.create({
-    data: { email: "server@amberandgrain.com", name: "Sam Rivera", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "server" } } },
+    data: { email: "server@amberandgrain.com", name: "Sam Rivera", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Server")! } } },
   });
   await prisma.user.create({
-    data: { email: "kitchen@amberandgrain.com", name: "Kit Tanaka", passwordHash: PLACEHOLDER_HASH, memberships: { create: { tenantId, role: "kitchen" } } },
+    data: { email: "kitchen@amberandgrain.com", name: "Kit Tanaka", passwordHash: DEMO_HASH, memberships: { create: { tenantId, roleId: roles.get("Kitchen")! } } },
   });
   await prisma.user.create({
-    data: { email: "ops@amber.platform", name: "Platform Ops", passwordHash: PLACEHOLDER_HASH, isSuperAdmin: true },
+    data: { email: "ops@amber.platform", name: "Platform Ops", passwordHash: DEMO_HASH, isSuperAdmin: true },
   });
 
   // Helper to build one order-item create (snapshots name + price).
@@ -393,7 +455,13 @@ async function main(): Promise<void> {
       theme: {
         mode: "light",
         colors: { primary: "#1d9e75", "primary-container": "#3fc499", "secondary-container": "#bdf0d8" },
-        typography: { sans: "Inter, sans-serif", serif: "Fraunces, serif", fontLinks: [] },
+        typography: {
+          sans: "Inter, sans-serif",
+          serif: "Fraunces, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap",
+          ],
+        },
       },
     },
   });
@@ -408,15 +476,38 @@ async function main(): Promise<void> {
     { label: "1", room: "Dining", seats: 2 }, { label: "2", room: "Dining", seats: 2 },
     { label: "3", room: "Dining", seats: 4 }, { label: "4", room: "Window", seats: 4 },
   ]);
+  // Green Bowl gets its own roles + Admin login so it's usable in the admin panel.
+  const greenRoles = await seedRoles(green.id);
+  await prisma.user.create({
+    data: { email: "admin@greenbowl.com", name: "Dana Cho", passwordHash: DEMO_HASH, memberships: { create: { tenantId: green.id, roleId: greenRoles.get("Admin")! } } },
+  });
+  // A cross-tenant owner — belongs to BOTH Amber & Grain and Green Bowl, so login
+  // returns the tenant picker (the multi-tenant path). `roles` is Amber's role map.
+  await prisma.user.create({
+    data: {
+      email: "owner@ambergroup.com", name: "Riya Kapoor", passwordHash: DEMO_HASH,
+      memberships: { create: [
+        { tenantId, roleId: roles.get("Admin")! },
+        { tenantId: green.id, roleId: greenRoles.get("Admin")! },
+      ] },
+    },
+  });
 
   // ── Bella Pizza (rosso/pink) ──────────────────────────────────────────────
   const bella = await prisma.tenant.create({
     data: {
       slug: "bella-pizza", name: "Bella Pizza", currency: "USD", taxRate: 0.09,
+      // Italian pizzeria: tomato red primary + warm terracotta + soft basil accent.
       theme: {
         mode: "light",
-        colors: { primary: "#d4537e", "primary-container": "#f08aab", "secondary-container": "#ffd9e3" },
-        typography: { sans: "Poppins, sans-serif", serif: "Playfair Display, serif", fontLinks: [] },
+        colors: { primary: "#c4362f", "primary-container": "#e07a5f", "secondary-container": "#cfe3c4" },
+        typography: {
+          sans: "Poppins, sans-serif",
+          serif: "Playfair Display, serif",
+          fontLinks: [
+            "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap",
+          ],
+        },
       },
     },
   });
@@ -438,6 +529,11 @@ async function main(): Promise<void> {
     { label: "1", room: "Trattoria", seats: 2 }, { label: "2", room: "Trattoria", seats: 4 },
     { label: "3", room: "Terrace", seats: 4 }, { label: "4", room: "Terrace", seats: 6 },
   ]);
+  // Bella Pizza gets its own roles + Admin login too.
+  const bellaRoles = await seedRoles(bella.id);
+  await prisma.user.create({
+    data: { email: "admin@bellapizza.com", name: "Marco Bruno", passwordHash: DEMO_HASH, memberships: { create: { tenantId: bella.id, roleId: bellaRoles.get("Admin")! } } },
+  });
 
   // eslint-disable-next-line no-console
   console.log("Seeded tenants: amber-grain (full demo), green-bowl, bella-pizza");

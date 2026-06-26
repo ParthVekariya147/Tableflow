@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
-import { money } from "../lib/money";
+import { useMoney } from "../store/AdminStore";
 import type { PaymentMethod } from "../data/types";
 
 interface CompleteState {
@@ -11,6 +11,7 @@ interface CompleteState {
 
 export function PaymentCompletePage() {
   const navigate = useNavigate();
+  const money = useMoney();
   const { state } = useLocation();
   const data = (state as CompleteState | null) ?? {
     method: "card",

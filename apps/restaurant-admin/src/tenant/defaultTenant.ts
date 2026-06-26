@@ -1,14 +1,16 @@
 import type { Tenant } from "@amber/domain";
 
 /**
- * Fallback tenant so the KDS runs standalone (no backend yet). Mirrors the
- * customer app's defaultTenant so both adopt the same brand. In production this
- * is replaced by the staff member's tenant via @amber/api-client.
+ * The **Amber platform** default brand — shown before a tenant is loaded (the
+ * login screen) and as the theme fallback. "Amber" is the SaaS product name;
+ * once a user signs in, the logged-in *tenant's* brand (name + theme) takes over
+ * (see TenantThemeGate). The slug is only a dev fallback for tenant-scoped API
+ * calls when nobody is signed in.
  */
 export const defaultTenant: Tenant = {
-  id: "local-amber-grain",
+  id: "amber-platform",
   slug: "amber-grain",
-  name: "Amber & Grain",
+  name: "Amber",
   currency: "USD",
   taxRate: 0.1,
   active: true,

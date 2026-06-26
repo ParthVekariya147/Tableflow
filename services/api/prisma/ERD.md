@@ -7,6 +7,8 @@ to keep the diagram readable — assume every entity also points back to `Tenant
 ```mermaid
 erDiagram
     Tenant ||--o{ Membership : has
+    Tenant ||--o{ Role : defines
+    Role   ||--o{ Membership : grants
     Tenant ||--o{ Room : has
     Tenant ||--o{ Table : has
     Tenant ||--o{ MenuCategory : has
@@ -51,12 +53,20 @@ erDiagram
         bool   isSuperAdmin
         bool   active
     }
+    Role {
+        string   id PK
+        string   tenantId FK
+        string   name "UK per tenant"
+        string[] permissions "permission keys"
+        bool     protected "lockout guard"
+    }
     Membership {
-        string id PK
-        string tenantId FK
-        string userId FK
-        Role   role
-        bool   active
+        string   id PK
+        string   tenantId FK
+        string   userId FK
+        string   roleId FK
+        string[] permissions "per-user override"
+        bool     active
     }
     Room {
         string id PK
@@ -186,8 +196,15 @@ erDiagram
     }
 ```
 
+## RBAC
+- **Role** is now a **per-tenant table** (not an enum) — Admins create/rename
+  custom roles. `Role.permissions` + the per-user `Membership.permissions`
+  override are arrays of **permission keys** (the fixed catalog in `@amber/domain`
+  `PERMISSIONS`): `dashboard.view · menu.manage · tables.manage · kds.use ·
+  orders.history · analytics.view · settings.manage · team.manage`.
+  Effective access = `Membership.permissions` if non-empty, else `Role.permissions`.
+
 ## Enums
-- **Role**: owner · manager · server · kitchen
 - **ModifierSelection**: single · multiple
 - **PlacementKind**: featured · welcome
 - **OrderStatus**: open · billed · paid · closed

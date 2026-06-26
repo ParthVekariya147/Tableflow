@@ -13,6 +13,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { syncLanEnv } from "./sync-lan-env.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const relayScript = join(here, "kds-relay.mjs");
@@ -20,8 +21,8 @@ const relayScript = join(here, "kds-relay.mjs");
 const children = [];
 
 /** Spawn a child, prefixing each of its log lines so output stays readable. */
-function run(label, command, args) {
-  const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"], shell: false });
+function run(label, command, args, { shell = false } = {}) {
+  const child = spawn(command, args, { stdio: ["inherit", "pipe", "pipe"], shell });
   const prefix = (line) => `[${label}] ${line}`;
   const pipe = (stream, out) => {
     let buf = "";
@@ -55,7 +56,13 @@ function shutdown(code) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+// Sync LAN IP into .env files so phones on the same Wi-Fi reach the API.
+syncLanEnv();
+
 // KDS relay first so it's listening before the apps connect.
 run("kds-relay", process.execPath, [relayScript]);
 // Turbo dev servers (customer, restaurant-admin, super-admin) in streaming mode.
-run("turbo", "pnpm", ["exec", "turbo", "run", "dev", "--ui=stream"]);
+// shell:true is required on Windows Node 24 to spawn .cmd shims (pnpm.cmd).
+run("turbo", "pnpm", ["exec", "turbo", "run", "dev", "--ui=stream"], {
+  shell: process.platform === "win32",
+});

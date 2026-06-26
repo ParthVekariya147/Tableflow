@@ -1,4 +1,5 @@
 import { useSession } from "../context/SessionContext";
+import { useMoney } from "../money";
 import TopAppBar from "../components/TopAppBar";
 
 const STATUS_ORDER = ["placed", "preparing", "ready", "served"];
@@ -28,6 +29,7 @@ function StatusPill({ status, stage }) {
 }
 
 function RoundCard({ round }) {
+  const money = useMoney();
   // "Done" = served OR cancelled, so a round of served+cancelled items still
   // reads as finished (cancelled lines aren't pending kitchen work).
   const allServed =
@@ -70,7 +72,7 @@ function RoundCard({ round }) {
                   )}
                   <p className="text-[12px] text-on-surface-variant">Qty {item.qty}</p>
                 </div>
-                <span className={`font-bold text-[14px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>${(item.price * item.qty).toFixed(2)}</span>
+                <span className={`font-bold text-[14px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{money(item.price * item.qty)}</span>
               </div>
               {cancelled ? (
                 <div className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2.5 text-red-700">
@@ -94,6 +96,7 @@ function RoundCard({ round }) {
 
 export default function StatusScreen() {
   const { rounds } = useSession();
+  const money = useMoney();
 
   // Amount accrued onto the session so far — items the kitchen has marked served.
   const servedTotal = rounds.reduce(
@@ -120,7 +123,7 @@ export default function StatusScreen() {
               <span className="material-symbols-outlined text-[18px] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>room_service</span>
               Served so far
             </span>
-            <span className="text-[16px] font-bold text-on-surface">${servedTotal.toFixed(2)}</span>
+            <span className="text-[16px] font-bold text-on-surface">{money(servedTotal)}</span>
           </div>
         )}
 

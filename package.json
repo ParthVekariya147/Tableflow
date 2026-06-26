@@ -18,7 +18,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "db:generate": "pnpm --filter @amber/api prisma:generate",
     "db:migrate": "pnpm --filter @amber/api prisma:migrate",
-    "db:seed": "pnpm --filter @amber/api prisma:seed"
+    "db:seed": "pnpm --filter @amber/api prisma:seed",
+    "db:seed:super-admin": "pnpm --filter @amber/api prisma:seed:super-admin"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

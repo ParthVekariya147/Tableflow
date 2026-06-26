@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
+import { useBoot } from "../context/BootContext";
+import { useMoney } from "../money";
 import FoodImage from "../components/FoodImage";
 
-function StarterCard({ item, onBringIt, onAdd, selected }) {
+function StarterCard({ item, onBringIt, onAdd, selected, money }) {
   return (
     <div className={`min-w-[140px] bg-surface-container-lowest rounded-2xl shadow-[0px_4px_16px_rgba(26,26,26,0.06)] overflow-hidden flex-shrink-0 transition-all ${selected ? "ring-2 ring-primary" : ""}`}>
       <div className="h-24 overflow-hidden">
@@ -12,7 +14,7 @@ function StarterCard({ item, onBringIt, onAdd, selected }) {
       </div>
       <div className="p-3 flex flex-col gap-2">
         <p className="text-[13px] font-semibold text-on-surface leading-tight truncate">{item.name}</p>
-        <p className="text-[13px] font-bold text-primary">{item.price === 0 ? "Free" : `$${item.price}`}</p>
+        <p className="text-[13px] font-bold text-primary">{item.price === 0 ? "Free" : money(item.price)}</p>
         <div className="flex gap-1.5">
           <button
             onClick={() => onBringIt(item)}
@@ -38,6 +40,8 @@ export default function WelcomeScreen() {
   const navigate = useNavigate();
   const { tableNumber, bringIt, addToOrder, myOrderCount } = useSession();
   const { welcome } = useMenu();
+  const { tenant } = useBoot();
+  const money = useMoney();
   const [added, setAdded] = useState(new Set());
 
   const handleBringIt = (item) => {
@@ -64,7 +68,7 @@ export default function WelcomeScreen() {
           <span className="font-semibold text-[13px]">Table {tableNumber}</span>
         </div>
         <h1 className="text-[30px] font-bold text-on-surface font-serif leading-tight mb-2">
-          Welcome to Amber & Grain
+          Welcome to {tenant?.name ?? "our restaurant"}
         </h1>
         <p className="text-on-surface-variant text-[16px]">
           Can we start you off with something while you settle in?
@@ -84,6 +88,7 @@ export default function WelcomeScreen() {
                   selected={added.has(item.id)}
                   onBringIt={handleBringIt}
                   onAdd={handleAdd}
+                  money={money}
                 />
               ))}
             </div>

@@ -10,6 +10,7 @@ import {
   Query,
   Sse,
 } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
 import { defer, from, map, merge, type Observable } from "rxjs";
 import type {
   Order,
@@ -43,7 +44,9 @@ export class OrdersController {
    * so "stream" isn't read as an order id. EventSource can't set headers, so the
    * tenant is resolved from `?tenant=` by TenantMiddleware. On (re)connect it
    * first emits a `snapshot` of the live floor so a reconnecting client re-syncs.
+   * @SkipThrottle — single long-lived connection, not a request burst.
    */
+  @SkipThrottle()
   @Sse("stream")
   stream(@CurrentTenant() tenant: Tenant): Observable<MessageEvent> {
     const snapshot = defer(() =>

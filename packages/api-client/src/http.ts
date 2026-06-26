@@ -20,6 +20,13 @@ export interface ApiClientConfig {
    * every query. Super-admin calls may omit this.
    */
   tenantSlug?: string;
+  /**
+   * Dynamic alternative to `tenantSlug`, read at call time. Lets a long-lived
+   * client follow the *logged-in* tenant (e.g. the admin panel reads the chosen
+   * tenant from storage after an email-first login) without being recreated.
+   * Used only when a static `tenantSlug` isn't set.
+   */
+  getTenantSlug?: () => string | null | undefined;
   /** Returns a bearer token for authenticated (admin) calls, if any. */
   getToken?: () => string | null | undefined;
   /**
@@ -64,7 +71,8 @@ export async function request<S extends z.ZodTypeAny>(
   const doFetch = config.fetch ?? globalThis.fetch;
   const headers: Record<string, string> = { Accept: "application/json" };
 
-  const tenant = opts.tenantSlug ?? config.tenantSlug;
+  const tenant =
+    opts.tenantSlug ?? config.tenantSlug ?? config.getTenantSlug?.();
   if (tenant) headers["X-Tenant-Slug"] = tenant;
 
   const token = config.getToken?.();

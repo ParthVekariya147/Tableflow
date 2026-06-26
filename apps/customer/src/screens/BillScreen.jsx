@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useSession } from "../context/SessionContext";
+import { useMoney } from "../money";
 import TopAppBar from "../components/TopAppBar";
 
 export default function BillScreen() {
   const { rounds, billTotal, taxRate, tableNumber, sessionStartTime, billRequested, requestBill, payBill, showToast } = useSession();
+  const money = useMoney();
   const [payMethod, setPayMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
 
@@ -91,14 +93,14 @@ export default function BillScreen() {
                           {cancelled ? (
                             <p className="text-[11px] font-bold uppercase tracking-wide text-red-700">Cancelled</p>
                           ) : (
-                            <p className="text-[14px] font-semibold text-on-surface">${(item.price * item.qty).toFixed(2)}</p>
+                            <p className="text-[14px] font-semibold text-on-surface">{money(item.price * item.qty)}</p>
                           )}
                         </div>
                       );
                     })}
                     <div className="flex justify-between mt-2 pt-2 border-t border-surface-container/60">
                       <span className="text-[12px] text-on-surface-variant">Round total</span>
-                      <span className="text-[12px] font-semibold text-on-surface-variant">${roundTotal.toFixed(2)}</span>
+                      <span className="text-[12px] font-semibold text-on-surface-variant">{money(roundTotal)}</span>
                     </div>
                   </div>
                 );
@@ -112,13 +114,13 @@ export default function BillScreen() {
           {/* Totals */}
           <div className="p-4 space-y-2">
             <div className="flex justify-between text-on-surface-variant text-[14px]">
-              <span>Subtotal</span><span>${billTotal.toFixed(2)}</span>
+              <span>Subtotal</span><span>{money(billTotal)}</span>
             </div>
             <div className="flex justify-between text-on-surface-variant text-[14px]">
-              <span>GST ({taxPct}%)</span><span>${gst.toFixed(2)}</span>
+              <span>GST ({taxPct}%)</span><span>{money(gst)}</span>
             </div>
             <div className="flex justify-between text-primary font-bold text-[22px] pt-1">
-              <span>Total</span><span>${grandTotal.toFixed(2)}</span>
+              <span>Total</span><span>{money(grandTotal)}</span>
             </div>
           </div>
         </div>

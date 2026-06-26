@@ -19,7 +19,22 @@ import {
   analyticsSummarySchema,
   roundTypeSchema,
   modifierInputTypeSchema,
+  loginResponseSchema,
+  loginResultSchema,
+  authUserSchema,
+  roleSchema,
+  membershipSchema,
+  planSchema,
+  tenantWithSubscriptionSchema,
+  subscriptionWithPlanSchema,
+  type LoginResponse,
+  type LoginResult,
+  type AuthUser,
+  type Role,
+  type Membership,
+  type Permission,
   type Tenant,
+  type UpdateTenantRequest,
   type Menu,
   type MenuItem,
   type MenuCategory,
@@ -32,11 +47,53 @@ import {
   type AnalyticsSummary,
   type ItemStatus,
   type PaymentMethod,
+  type Plan,
+  type SubscriptionWithPlan,
+  type TenantWithSubscription,
+  type CreatePlanInput,
+  type UpdatePlanInput,
+  type SetSubscriptionInput,
+  type UpdateSubscriptionStatusInput,
 } from "@amber/domain";
 import { request, ApiError, type ApiClientConfig } from "./http.js";
 
 export { ApiError } from "./http.js";
 export type { ApiClientConfig } from "./http.js";
+export type { Plan, SubscriptionWithPlan, TenantWithSubscription, CreatePlanInput, UpdatePlanInput, SetSubscriptionInput, UpdateSubscriptionStatusInput } from "@amber/domain";
+
+/** A payment row as returned from `GET /admin/tenants/:id/payments`. */
+export interface TenantPayment {
+  id: string;
+  tableLabel: string;
+  customerName: string | null;
+  total: number;
+  method: string;
+  createdAt: string;
+}
+
+/** A single entry in the platform audit log. */
+export interface AuditLogEntry {
+  id: string;
+  type: string;
+  actor: { id: string; name: string; email: string } | null;
+  tenant: { id: string; name: string; slug: string } | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+/** Cross-tenant platform analytics for the super-admin dashboard. */
+export interface PlatformAnalytics {
+  totalGmvCents: number;
+  gmv30dCents: number;
+  gmv30dDeltaPct: number;
+  mrrCents: number;
+  activeSubscriptions: number;
+  orders30d: number;
+  orders30dDeltaPct: number;
+  revenueSeries: Array<{ date: string; cents: number }>;
+  topTenants: Array<{ tenantId: string; name: string; totalCents: number }>;
+  methodSplit: { cash: number; card: number };
+}
 
 // KDS realtime seam — the customer publishes rounds, the KDS renders/advances
 // them, both through KdsTransport. See ./kds.ts for the swap-the-backend story.
@@ -89,6 +146,31 @@ export interface CreateTenantInput {
   currency?: string;
   taxRate?: number;
   theme?: Tenant["theme"];
+  ownerEmail?: string;
+  ownerName?: string;
+  ownerPassword?: string;
+}
+
+/** Body for creating/editing a custom role. */
+export interface CreateRoleInput {
+  name: string;
+  permissions: Permission[];
+}
+export type UpdateRoleInput = Partial<CreateRoleInput>;
+
+/** Body for adding a team member (creates the user if new). */
+export interface AddMemberInput {
+  email: string;
+  name: string;
+  roleId: string;
+  permissions?: Permission[];
+}
+
+/** Body for editing a member (role, per-user permission override, active). */
+export interface UpdateMemberInput {
+  roleId?: string;
+  permissions?: Permission[];
+  active?: boolean;
 }
 
 /** A modifier option as authored in the admin (no id — server mints them). */
@@ -177,6 +259,94 @@ export function createApiClient(config: ApiClientConfig) {
     /** Raw config (useful for cloning with a different tenant). */
     config,
 
+    auth: {
+      /**
+       * Email-first sign in (not tenant-scoped). Resolves to either
+       * `{ kind: "authenticated", token, user }` (one restaurant) or
+       * `{ kind: "select_tenant", ticket, tenants }` (several — call `selectTenant`).
+       */
+      login: (email: string, password: string): Promise<LoginResult> =>
+        request(config, "/auth/login", {
+          method: "POST",
+          body: { email, password },
+          schema: loginResultSchema,
+        }),
+      /** Step two of a multi-tenant login: redeem the ticket for the chosen tenant. */
+      selectTenant: (ticket: string, tenantId: string): Promise<LoginResponse> =>
+        request(config, "/auth/select-tenant", {
+          method: "POST",
+          body: { ticket, tenantId },
+          schema: loginResponseSchema,
+        }),
+      /** The current user behind the configured bearer token (getToken). */
+      me: (): Promise<AuthUser> =>
+        request(config, "/auth/me", { schema: authUserSchema }),
+      /**
+       * First-request profile bootstrap (Supabase path only). After a Supabase
+       * session is established, the frontend calls this once so the API creates
+       * the matching Prisma User row keyed by auth.uid().
+       */
+      syncProfile: (): Promise<AuthUser> =>
+        request(config, "/auth/sync-profile", {
+          method: "POST",
+          schema: authUserSchema,
+        }),
+    },
+
+    /** Tenant-scoped, read-only billing info (restaurant-admin plan page). */
+    billing: {
+      me: (): Promise<SubscriptionWithPlan | null> =>
+        request(config, "/billing/me", {
+          schema: subscriptionWithPlanSchema.nullable(),
+        }),
+    },
+
+    /** Custom-role management (Admin-only; requires team.manage). */
+    roles: {
+      list: (): Promise<Role[]> =>
+        request(config, "/roles", { schema: z.array(roleSchema) }),
+      create: (input: CreateRoleInput): Promise<Role> =>
+        request(config, "/roles", {
+          method: "POST",
+          body: input,
+          schema: roleSchema,
+        }),
+      update: (id: string, input: UpdateRoleInput): Promise<Role> =>
+        request(config, `/roles/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: roleSchema,
+        }),
+      remove: (id: string): Promise<{ ok: true }> =>
+        request(config, `/roles/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
+    },
+
+    /** Team/user management (Admin-only; requires team.manage). */
+    members: {
+      list: (): Promise<Membership[]> =>
+        request(config, "/members", { schema: z.array(membershipSchema) }),
+      add: (input: AddMemberInput): Promise<Membership> =>
+        request(config, "/members", {
+          method: "POST",
+          body: input,
+          schema: membershipSchema,
+        }),
+      update: (id: string, input: UpdateMemberInput): Promise<Membership> =>
+        request(config, `/members/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: membershipSchema,
+        }),
+      remove: (id: string): Promise<{ ok: true }> =>
+        request(config, `/members/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          schema: z.object({ ok: z.literal(true) }),
+        }),
+    },
+
     tenant: {
       /** Load the active tenant (resolved from the X-Tenant-Slug header). */
       current: (): Promise<Tenant> =>
@@ -186,6 +356,13 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/tenants/${encodeURIComponent(slug)}`, {
           schema: tenantSchema,
           tenantSlug: slug,
+        }),
+      /** Update the active tenant's own settings (Branding / Profile). */
+      update: (input: UpdateTenantRequest): Promise<Tenant> =>
+        request(config, "/tenant", {
+          method: "PATCH",
+          body: input,
+          schema: tenantSchema,
         }),
     },
 
@@ -329,7 +506,7 @@ export function createApiClient(config: ApiClientConfig) {
        * it). Mirrors the KDS transport's EventSource handling; auto-reconnects.
        */
       stream: (handler: (event: OrderStreamEvent) => void): (() => void) => {
-        const slug = config.tenantSlug;
+        const slug = config.tenantSlug ?? config.getTenantSlug?.();
         const url = `${config.baseUrl}/orders/stream${
           slug ? `?tenant=${encodeURIComponent(slug)}` : ""
         }`;
@@ -409,14 +586,104 @@ export function createApiClient(config: ApiClientConfig) {
 
     /** Cross-tenant operations (super-admin only). */
     admin: {
-      listTenants: (): Promise<Tenant[]> =>
-        request(config, "/admin/tenants", { schema: z.array(tenantSchema) }),
+      listTenants: (): Promise<TenantWithSubscription[]> =>
+        request(config, "/admin/tenants", { schema: z.array(tenantWithSubscriptionSchema) }),
       createTenant: (input: CreateTenantInput): Promise<Tenant> =>
         request(config, "/admin/tenants", {
           method: "POST",
           body: input,
           schema: tenantSchema,
         }),
+      getTenant: (id: string): Promise<TenantWithSubscription> =>
+        request(config, `/admin/tenants/${encodeURIComponent(id)}`, {
+          schema: tenantWithSubscriptionSchema,
+        }),
+      updateTenant: (id: string, input: Partial<CreateTenantInput> & { active?: boolean }): Promise<TenantWithSubscription> =>
+        request(config, `/admin/tenants/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: tenantWithSubscriptionSchema,
+        }),
+      getTenantPayments: (tenantId: string): Promise<TenantPayment[]> =>
+        request(config, `/admin/tenants/${encodeURIComponent(tenantId)}/payments`, {
+          schema: z.array(z.object({
+            id: z.string(),
+            tableLabel: z.string(),
+            customerName: z.string().nullable(),
+            total: z.number(),
+            method: z.string(),
+            createdAt: z.string(),
+          })),
+        }),
+      listPlans: (): Promise<Plan[]> =>
+        request(config, "/admin/plans", { schema: z.array(planSchema) }),
+      createPlan: (input: CreatePlanInput): Promise<Plan> =>
+        request(config, "/admin/plans", {
+          method: "POST",
+          body: input,
+          schema: planSchema,
+        }),
+      updatePlan: (id: string, input: UpdatePlanInput): Promise<Plan> =>
+        request(config, `/admin/plans/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: input,
+          schema: planSchema,
+        }),
+      setSubscription: (tenantId: string, input: SetSubscriptionInput): Promise<SubscriptionWithPlan> =>
+        request(config, `/admin/tenants/${encodeURIComponent(tenantId)}/subscription`, {
+          method: "POST",
+          body: input,
+          schema: subscriptionWithPlanSchema,
+        }),
+      updateSubscriptionStatus: (tenantId: string, input: UpdateSubscriptionStatusInput): Promise<SubscriptionWithPlan> =>
+        request(config, `/admin/tenants/${encodeURIComponent(tenantId)}/subscription`, {
+          method: "PATCH",
+          body: input,
+          schema: subscriptionWithPlanSchema,
+        }),
+      impersonate: (input: { tenantSlug: string; masterPassword?: string }): Promise<{ token: string }> =>
+        request(config, "/admin/impersonate", {
+          method: "POST",
+          body: input,
+          schema: z.object({ token: z.string() }),
+        }),
+      getPlatformAnalytics: (): Promise<PlatformAnalytics> =>
+        request(config, "/admin/analytics", {
+          schema: z.object({
+            totalGmvCents: z.number(),
+            gmv30dCents: z.number(),
+            gmv30dDeltaPct: z.number(),
+            mrrCents: z.number(),
+            activeSubscriptions: z.number(),
+            orders30d: z.number(),
+            orders30dDeltaPct: z.number(),
+            revenueSeries: z.array(z.object({ date: z.string(), cents: z.number() })),
+            topTenants: z.array(z.object({ tenantId: z.string(), name: z.string(), totalCents: z.number() })),
+            methodSplit: z.object({ cash: z.number(), card: z.number() }),
+          }),
+        }),
+      getAuditLog: (params: { limit?: number; offset?: number; type?: string; from?: string; to?: string }): Promise<{ entries: AuditLogEntry[]; total: number }> => {
+        const qs = new URLSearchParams();
+        if (params.limit !== undefined) qs.set("limit", String(params.limit));
+        if (params.offset !== undefined) qs.set("offset", String(params.offset));
+        if (params.type) qs.set("type", params.type);
+        if (params.from) qs.set("from", params.from);
+        if (params.to) qs.set("to", params.to);
+        const query = qs.toString() ? `?${qs.toString()}` : "";
+        return request(config, `/admin/audit-log${query}`, {
+          schema: z.object({
+            entries: z.array(z.object({
+              id: z.string(),
+              type: z.string(),
+              actor: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
+              tenant: z.object({ id: z.string(), name: z.string(), slug: z.string() }).nullable(),
+              metadata: z.record(z.unknown()),
+              createdAt: z.string(),
+            })),
+            total: z.number(),
+          }),
+        });
+      },
     },
   };
 }

@@ -1,15 +1,59 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Shell } from "./components/Shell";
-import { DashboardPage } from "./pages/DashboardPage";
-import { MenuPage } from "./pages/MenuPage";
-import { TablesPage } from "./pages/TablesPage";
-import { TableSessionPage } from "./pages/TableSessionPage";
-import { BillingPage } from "./pages/BillingPage";
-import { PaymentCompletePage } from "./pages/PaymentCompletePage";
-import { AnalyticsPage } from "./pages/AnalyticsPage";
-import { OrderHistoryPage } from "./pages/OrderHistoryPage";
+import { RequirePermission } from "./components/RequirePermission";
+
+// Eagerly loaded — always needed on first paint
 import { LoginPage } from "./pages/LoginPage";
-import { KdsPage } from "./kds/KdsPage";
+
+// Lazy-loaded — each becomes its own chunk, fetched only when navigated to
+const DashboardPage = lazy(() =>
+  import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
+);
+const MenuPage = lazy(() =>
+  import("./pages/MenuPage").then((m) => ({ default: m.MenuPage })),
+);
+const TablesPage = lazy(() =>
+  import("./pages/TablesPage").then((m) => ({ default: m.TablesPage })),
+);
+const TableSessionPage = lazy(() =>
+  import("./pages/TableSessionPage").then((m) => ({ default: m.TableSessionPage })),
+);
+const BillingPage = lazy(() =>
+  import("./pages/BillingPage").then((m) => ({ default: m.BillingPage })),
+);
+const PaymentCompletePage = lazy(() =>
+  import("./pages/PaymentCompletePage").then((m) => ({ default: m.PaymentCompletePage })),
+);
+const AnalyticsPage = lazy(() =>
+  import("./pages/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
+);
+const OrderHistoryPage = lazy(() =>
+  import("./pages/OrderHistoryPage").then((m) => ({ default: m.OrderHistoryPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
+const TeamPage = lazy(() =>
+  import("./pages/TeamPage").then((m) => ({ default: m.TeamPage })),
+);
+const RolesPage = lazy(() =>
+  import("./pages/RolesPage").then((m) => ({ default: m.RolesPage })),
+);
+const BrandingPage = lazy(() =>
+  import("./pages/BrandingPage").then((m) => ({ default: m.BrandingPage })),
+);
+const KdsPage = lazy(() =>
+  import("./kds/KdsPage").then((m) => ({ default: m.KdsPage })),
+);
+
+function PageFallback() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      Loading…
+    </div>
+  );
+}
 
 /**
  * Restaurant Admin — the manager "cockpit".
@@ -21,27 +65,132 @@ import { KdsPage } from "./kds/KdsPage";
  */
 export default function App() {
   return (
-    <Routes>
-      {/* Full-screen, no shell */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/tables/:id/billing" element={<BillingPage />} />
-      <Route path="/tables/:id/complete" element={<PaymentCompletePage />} />
-      {/* Dedicated full-screen kitchen board (kitchen staff open this URL — no
-          admin sidebar/top bar). Same live KDS as the in-shell /kds route. */}
-      <Route path="/kds/display" element={<KdsPage />} />
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        {/* Full-screen, no shell. Each guarded by the permission it needs — a user
+            who lacks it is redirected to their own home route (hide, don't tease). */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/tables/:id/billing"
+          element={
+            <RequirePermission permission="tables.manage">
+              <BillingPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/tables/:id/complete"
+          element={
+            <RequirePermission permission="tables.manage">
+              <PaymentCompletePage />
+            </RequirePermission>
+          }
+        />
+        {/* Dedicated full-screen kitchen board (kitchen staff open this URL — no
+            admin sidebar/top bar). Same live KDS as the in-shell /kds route. */}
+        <Route
+          path="/kds/display"
+          element={
+            <RequirePermission permission="kds.use">
+              <KdsPage />
+            </RequirePermission>
+          }
+        />
 
-      {/* Shell-wrapped */}
-      <Route element={<Shell />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/menu" element={<MenuPage />} />
-        <Route path="/tables" element={<TablesPage />} />
-        <Route path="/tables/:id" element={<TableSessionPage />} />
-        <Route path="/history" element={<OrderHistoryPage />} />
-        <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/kds" element={<KdsPage />} />
-      </Route>
+        {/* Shell-wrapped */}
+        <Route element={<Shell />}>
+          <Route
+            path="/"
+            element={
+              <RequirePermission permission="dashboard.view">
+                <DashboardPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/menu"
+            element={
+              <RequirePermission permission="menu.manage">
+                <MenuPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/tables"
+            element={
+              <RequirePermission permission="tables.manage">
+                <TablesPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/tables/:id"
+            element={
+              <RequirePermission permission="tables.manage">
+                <TableSessionPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <RequirePermission permission="orders.history">
+                <OrderHistoryPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <RequirePermission permission="analytics.view">
+                <AnalyticsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/kds"
+            element={
+              <RequirePermission permission="kds.use">
+                <KdsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <RequirePermission permission="settings.manage">
+                <SettingsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/team"
+            element={
+              <RequirePermission permission="team.manage">
+                <TeamPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/roles"
+            element={
+              <RequirePermission permission="team.manage">
+                <RolesPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/branding"
+            element={
+              <RequirePermission permission="settings.manage">
+                <BrandingPage />
+              </RequirePermission>
+            }
+          />
+        </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

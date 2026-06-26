@@ -50,16 +50,34 @@ model Tenant {
   payments        Payment[]
   reviews         Review[]
   menuPlacements  MenuPlacement[]
+  roles           Role[]
+  subscription    Subscription?
+  auditLogs       AuditLog[]
 }
 
 // ── Identity & access ──────────────────────────────────────────────────────
 
-/** Per-tenant role on a Membership. Platform super-admins use User.isSuperAdmin. */
-enum Role {
-  owner
-  manager
-  server
-  kitchen
+/**
+ * A custom, Admin-named role: a label + a bundle of permission keys, scoped to
+ * one tenant. NOT a fixed enum — the Admin creates/renames/edits roles freely
+ * (Microsoft-style). `permissions` holds the permission-key strings from
+ * @amber/domain's PERMISSIONS catalog. `protected` roles can't be deleted (the
+ * last-Admin lockout guard). See SETTINGS.md §B.
+ */
+model Role {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  permissions String[]
+  protected   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  memberships Membership[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 /**
@@ -70,8 +88,11 @@ enum Role {
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
-  passwordHash String
+  /** Null for Supabase-auth users (super-admins who log in via Supabase, not password). */
+  passwordHash String?
   name         String
+  /** Supabase Auth UUID — set on super-admin users; null for restaurant staff. */
+  supabaseId   String?  @unique
   /** Platform operator (super-admin app). Has no tenant memberships. */
   isSuperAdmin Boolean  @default(false)
   active       Boolean  @default(true)
@@ -81,22 +102,32 @@ model User {
   memberships   Membership[]
   ordersServed  Order[]      @relation("OrderServer")
   paymentsTaken Payment[]    @relation("PaymentTakenBy")
+  auditLogs     AuditLog[]
 }
 
-/** Join of a User to a Tenant, carrying that user's role at that restaurant. */
+/**
+ * Join of a User to a Tenant, carrying that user's role at that restaurant plus
+ * optional per-user permission overrides. A non-empty `permissions` array is the
+ * user's COMPLETE effective set (Admin tuned them individually — supports grant
+ * AND revoke vs. the role); empty = inherit the role. See @amber/domain
+ * `effectivePermissions`.
+ */
 model Membership {
-  id        String   @id @default(cuid())
-  tenantId  String
-  userId    String
-  role      Role
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  roleId      String
+  permissions String[] @default([])
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role     @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, userId])
   @@index([tenantId])
   @@index([userId])
+  @@index([roleId])
 }
 
 // ── Floor layout ───────────────────────────────────────────────────────────
@@ -434,6 +465,78 @@ model Review {
 
   @@index([tenantId, createdAt])
 }
-generator erd {
-  provider = "prisma-erd-generator"
+// ── Billing (platform-managed plans + per-tenant subscriptions) ────────────
+
+enum BillingInterval {
+  month
+  year
 }
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+}
+
+model Plan {
+  id         String          @id @default(cuid())
+  name       String
+  priceCents Int
+  interval   BillingInterval @default(month)
+  limits     Json            @default("{}")
+  active     Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  tenantId               String             @unique
+  planId                 String
+  status                 SubscriptionStatus @default(trialing)
+  currentPeriodEnd       DateTime
+  cancelAtPeriodEnd      Boolean            @default(false)
+  provider               String?
+  providerCustomerId     String?
+  providerSubscriptionId String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  @@index([planId])
+}
+
+// ── Platform audit log ────────────────────────────────────────────────────────
+
+enum AuditLogType {
+  impersonation
+  tenant_created
+  tenant_updated
+  tenant_suspended
+  tenant_reactivated
+  plan_assigned
+  subscription_status_changed
+}
+
+model AuditLog {
+  id        String       @id @default(cuid())
+  type      AuditLogType
+  actorId   String?
+  tenantId  String?
+  metadata  Json         @default("{}")
+  createdAt DateTime     @default(now())
+
+  actor  User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([tenantId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+

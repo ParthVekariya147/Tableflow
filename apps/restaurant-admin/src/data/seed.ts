@@ -162,6 +162,7 @@ const tables: Table[] = [
 export function makeSeedState(): AdminState {
   return {
     taxRate: 0.085,
+    currency: "USD",
     categories,
     items,
     tables,

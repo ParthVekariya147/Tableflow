@@ -1,4 +1,5 @@
 import { useSession } from "../context/SessionContext";
+import { useMoney } from "../money";
 
 /**
  * Terminal screen shown once the guest has settled (card captured / cash
@@ -10,6 +11,7 @@ import { useSession } from "../context/SessionContext";
  */
 export default function SessionEndScreen() {
   const { billTotal, taxRate, tableNumber, sessionStartTime, awaitingCash, paidMethod, sessionCancelled } = useSession();
+  const money = useMoney();
 
   const gst = billTotal * taxRate;
   const grandTotal = billTotal + gst;
@@ -46,7 +48,7 @@ export default function SessionEndScreen() {
         <h2 className="text-[26px] font-bold text-on-surface font-serif">Please pay at the counter</h2>
         <div className="bg-surface-container-lowest rounded-2xl p-5 w-full max-w-sm shadow-sm">
           <p className="text-[12px] text-on-surface-variant mb-1">Amount due</p>
-          <p className="text-[32px] font-bold text-primary">${grandTotal.toFixed(2)}</p>
+          <p className="text-[32px] font-bold text-primary">{money(grandTotal)}</p>
           <p className="text-[12px] text-on-surface-variant mt-1">Table {tableNumber}</p>
         </div>
         <div className="flex items-center gap-2 text-on-surface-variant text-[14px]">
@@ -73,7 +75,7 @@ export default function SessionEndScreen() {
       </p>
       <div className="bg-surface-container-lowest rounded-2xl p-5 w-full max-w-sm shadow-sm">
         <p className="text-[12px] text-on-surface-variant mb-1">Total paid</p>
-        <p className="text-[32px] font-bold text-primary">${grandTotal.toFixed(2)}</p>
+        <p className="text-[32px] font-bold text-primary">{money(grandTotal)}</p>
         <p className="text-[12px] text-on-surface-variant mt-1">Table {tableNumber} · Session started {startTime}</p>
       </div>
       <div className="flex gap-2 mt-2">

@@ -80,8 +80,14 @@ All shapes are Zod schemas with inferred types. Key entities:
 
 ## API — `services/api` (NestJS + Prisma)
 - `prisma/schema.prisma` — root `Tenant` (theme as JSON) + identity (`User`,
-  `Membership` w/ `Role` owner|manager|server|kitchen; platform staff are
-  `User.isSuperAdmin`), floor (`Room`, `Table` w/ `sortOrder`), menu
+  `Membership`, `Role`; platform staff are `User.isSuperAdmin`). **RBAC:** `Role`
+  is now a **per-tenant table** (`{ name, permissions String[], protected }`), NOT
+  a fixed enum — Admins create/rename/edit custom roles. `Membership` carries
+  `roleId` + an optional per-user `permissions String[]` override (non-empty =
+  the member's COMPLETE effective set; else inherit the role — see
+  `effectivePermissions`). The permission keys are the fixed catalog in
+  `@amber/domain`'s `PERMISSIONS`. See **`SETTINGS.md`** §B. Then floor (`Room`,
+  `Table` w/ `sortOrder`), menu
   (`MenuCategory`, `MenuItem`, optional `ModifierGroup`/`ModifierOption`),
   curated `MenuPlacement` (`PlacementKind` featured|welcome — fast lookup for the
   customer Welcome carousels + Menu hero), session (`Order`, `Round`, `OrderItem`
@@ -90,13 +96,39 @@ All shapes are Zod schemas with inferred types. Key entities:
   subtotal/tax/tip/total, `tendered`), and `Review` (guest stars + comment).
   Every non-tenant row carries `tenantId` (RLS-ready). `Order.billRequestedAt`
   powers the bill-request flow; `Order.customerName/customerPhone` (both optional)
-  hold guest contact for the bill/receipt. ⚠️ Auth tokens, online-pay provider fields,
+  hold guest contact for the bill/receipt. ⚠️ Online-pay provider fields,
   kitchen-station routing, audit log, notifications and SaaS billing are
-  **deliberately deferred** (see `FEATURES.md` §5).
+  **deliberately deferred** (see `FEATURES.md` §5). **Auth is now implemented**
+  (was deferred): email+password login → JWT → role/permission resolution; see
+  the `auth/` module below.
 - **Tenant scoping:** `TenantMiddleware` reads `X-Tenant-Slug`, resolves the tenant,
   attaches it to the request; `@CurrentTenant()` injects it into handlers; services
   scope every query by `tenant.id`. `/admin/*` is excluded (cross-tenant, super-admin).
-- Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`),
+- Modules: `tenant/` (resolve + `GET /tenant`, `/tenants/:slug`; `PATCH /tenant`
+  updates the active tenant's own settings — Branding `theme` / Restaurant Profile
+  name·currency·taxRate — `settings.manage`-gated, scoped to the caller's tenant),
+  `auth/` (**email-first login, NOT tenant-scoped** — `auth/*` is excluded from
+  `TenantMiddleware`): `POST /auth/login` bcrypt-verifies by email globally, then
+  resolves the user's active tenants → `{ kind:"authenticated", token, user }` if
+  exactly one, or `{ kind:"select_tenant", ticket, tenants[] }` if several (no
+  token yet). `POST /auth/select-tenant {ticket, tenantId}` redeems the short-lived
+  (5 min, `scope:"tenant-select"`, no `tid`) ticket for the chosen tenant → `{token,
+  user}`. `GET /auth/me` → current `AuthUser` (reads tenant from the token's `tid`,
+  so it needs no header). `AuthUser` now carries `tenantSlug` so the client can
+  scope later calls. Exports `JwtAuthGuard`, `@CurrentUser()`, `@RequirePermission()`
+  + `PermissionsGuard`; the guard re-resolves role+permissions on every request so
+  changes apply at once; `JWT_SECRET` in `.env`, 12h access tokens),
+  `roles/` (`GET/POST/PATCH/DELETE /roles` — custom-role CRUD, `team.manage`-only;
+  protected roles can't be deleted/can't drop `team.manage`; a role with members
+  can't be deleted; **Admin-tier guard:** editing a `protected` role 403s unless the
+  actor is themselves on a protected role), `members/` (`GET/POST/PATCH/DELETE /members`
+  — add user (creates the User w/ temp password `changeme123` if new), change role, set
+  per-user permission override, activate/deactivate; `team.manage`-only;
+  **last-admin lockout guard** refuses removing/downgrading the only `team.manage`
+  holder; **Admin-tier guard** (`assertCanManageProtected`): a non-protected actor
+  (e.g. a Manager with `team.manage`) can't add/edit/remove a member on a `protected`
+  (Admin) role, nor promote anyone *into* one — only an Admin manages Admins. The
+  actor's tier rides on `AuthUser.roleProtected`),
   `menu/` (`GET /menu`, `POST /menu/categories`, `PATCH /menu/categories/:id`
   rename/reorder, `DELETE /menu/categories/:id` (blocked while it holds items),
   `POST /menu/items`, `PATCH /menu/items/:id`, `DELETE /menu/items/:id`,
@@ -165,20 +197,34 @@ All shapes are Zod schemas with inferred types. Key entities:
   rooms + tables, menu placements, staff users/memberships, 2 active sessions (one
   bill-requested), 4 paid orders + payments, 2 reviews — so the customer app, KDS,
   dashboard and analytics all have live data. Green Bowl / Bella Pizza get a lean
-  menu + tables to prove multi-tenancy.
+  menu + tables to prove multi-tenancy, **plus their own roles + Admin login**
+  (`admin@greenbowl.com`, `admin@bellapizza.com`). A **cross-tenant owner**
+  (`owner@ambergroup.com`) holds Admin memberships at both Amber & Grain and Green
+  Bowl, so its login triggers the tenant picker.
 - ⚠️ `@prisma/client` types require `pnpm db:generate` (offline, schema-only) before
-  the API typechecks/builds. `/admin/*` still needs an auth guard (TODO). **All
-  tenant-scoped routes above are currently unauthenticated** (auth deferred) — they
-  rely only on `X-Tenant-Slug`.
+  the API typechecks/builds. `/admin/*` still needs an auth guard (TODO).
+  **Auth/RBAC status:** `auth/`, `roles/`, `members/` are JWT+permission-guarded
+  (`@RequirePermission("team.manage")`). The other tenant-scoped routes
+  (`menu/`, `tables/`, `orders/`) are **not yet gated** — they still rely only on
+  `X-Tenant-Slug`. Annotating them with `@RequirePermission(...)` is the next
+  hardening step (the guards + decorators already exist). Customer (guest) routes
+  stay unauthenticated by design (device-id bound).
 - The DB runs on **Supabase** (cloud Postgres). The Prisma datasource uses TWO
   URLs (`services/api/.env`): `DATABASE_URL` = the **pooler** (pgBouncer, IPv4,
   session mode `aws-1-…pooler.supabase.com:5432`) for runtime — keeps connections
   warm (~150 ms warm queries vs ~340 ms direct, and no IPv6-only flakiness);
   `DIRECT_URL` = the direct endpoint (`db.…supabase.co:5432`) used only by
-  `npx prisma db push` / migrations (no `migrations/` dir). ⚠️ If the DB password
+  `npx prisma db push` / migrations (no `migrations/` dir). ⚠️ The pooler is
+  **session mode, capped at 15 clients** — Prisma's *default* pool
+  (`cpus×2+1`, ~17) exceeds that on its own → `FATAL: max clients reached
+  (EMAXCONNSESSION)`. So `DATABASE_URL` MUST carry **`?connection_limit=5&pool_timeout=20`**
+  (cap Prisma well under 15; leaves room for `nest --watch` restart overlap). Don't
+  spawn extra long-lived API instances against the pooler. ⚠️ If the DB password
   contains a literal `@`, it MUST be percent-encoded (`@`→`%40`) in both URLs or
-  the connection string mis-parses. After changing `.env`, **restart the API**
-  (nest watch doesn't reload env).
+  the connection string mis-parses. ⚠️ The schema must be pushed before first use /
+  after schema changes: `pnpm --filter @amber/api exec prisma db push` then
+  `pnpm db:seed` (the `prisma-erd-generator: not found` line is harmless). After
+  changing `.env`, **restart the API** (nest watch doesn't reload env).
 - ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done),
   menu placements, and review submit. (Analytics aggregates are now a real
   server-side endpoint — `GET /orders/analytics` — wired into the Dashboard +
@@ -187,10 +233,21 @@ All shapes are Zod schemas with inferred types. Key entities:
   Verifying a slice needs the DB reachable (`prisma db push` + `pnpm db:seed`).
 
 ## The typed client — `@amber/api-client` (`packages/api-client/src/`)
-`createApiClient({ baseUrl, tenantSlug?, getToken?, fetch? })` → resource methods
-(`tenant`, `menu`, `tables`, `orders`, `admin`). Central `request()` (`http.ts`)
-attaches `X-Tenant-Slug` + bearer token and **validates responses against domain
-schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` for non-2xx.
+`createApiClient({ baseUrl, tenantSlug?, getTenantSlug?, getToken?, getDeviceId?, fetch? })`
+→ resource methods (`tenant`, `menu`, `tables`, `orders`, `admin`). Central
+`request()` (`http.ts`) attaches `X-Tenant-Slug` + bearer token and **validates
+responses against domain schemas**. The tenant slug resolves as
+`opts.tenantSlug ?? config.tenantSlug ?? config.getTenantSlug?.()` — the
+**`getTenantSlug` hook** (read at call time, like `getToken`) lets a long-lived
+client follow the *logged-in* tenant without being recreated (the admin panel uses
+it; `orders.stream`'s `?tenant=` honors it too). `withTenant(client, slug)` clones
+for a different tenant. `ApiError` for non-2xx.
+- **Auth/RBAC:** `auth.login(email,password)` → `LoginResult` (a discriminated
+  union: `{kind:"authenticated", token, user}` | `{kind:"select_tenant", ticket,
+  tenants[]}`); `auth.selectTenant(ticket, tenantId)` → `{token, user}` (step two of
+  a multi-tenant login); `auth.me()` → `AuthUser` (uses the `getToken` hook).
+  `roles.list/create/update/remove` (custom roles) and `members.list/add/update/
+  remove` (team management) — all `team.manage`-gated server-side.
 - Resource methods now cover menu CRUD (`menu.addCategory/updateCategory/deleteCategory/
   addItem/updateItem/deleteItem`, plus `menu.uploadImage(file)` → multipart `FormData`
   POST returning `{ url }`; `request()` passes a `FormData` body through untouched),
@@ -282,7 +339,53 @@ schemas**. `withTenant(client, slug)` clones for a different tenant. `ApiError` 
   **rate-limit** on order creation; SPA host fallback for deep QR links in production;
   and proper auth (the device-id guard is bypassable by a non-staff actor who simply
   omits the header — same gap as the rest of the deferred-auth surface).
-- **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API.**
+- **restaurant-admin** (`apps/restaurant-admin`) — **wired to the live API; now
+  multi-tenant.** The panel is **no longer pinned to one tenant** — both api-clients
+  (`lib/api.ts` + `store/AdminStore.tsx`) scope via **`getTenantSlug`** reading the
+  logged-in tenant from `lib/auth-tenant.ts` (`localStorage`, set on login from
+  `AuthUser.tenantSlug`); `defaultTenant.slug` is only a pre-login dev fallback.
+  **Auth + RBAC (Microsoft-style), email-first login:** `context/AuthContext.tsx`
+  (`useAuth`) owns the session — `login`/`selectTenant`/`logout`, restores from a
+  persisted bearer token (`lib/auth-token.ts`, read by `lib/api.ts`'s `getToken`),
+  exposes `can(permission)`. `LoginPage` signs in by **email+password only**; if the
+  account belongs to several restaurants it renders a **tenant picker**
+  (`login` → `{kind:"select_tenant", ticket, tenants}` → `selectTenant(ticket, id)`).
+  `AdminStore` loads/streams **only once `status==="authed"`** and re-fetches when the
+  active tenant changes (logout clears the floor). ⚠️ No tenant *switcher* yet
+  (one tenant per session — log out to switch).
+  **Dynamic theming (the SaaS is "Amber"; tenants are named at onboarding):**
+  `context/TenantThemeGate.tsx` sits inside `AuthProvider` and, once authed,
+  fetches `api.tenant.current()` and feeds it to `@amber/ui`'s `TenantThemeProvider`
+  so the logged-in **tenant's** brand (colors/fonts/logo) themes the whole panel;
+  pre-login it falls back to the **Amber platform** default (`tenant/defaultTenant.ts`,
+  `name:"Amber"`). `Shell` reads the active tenant via `useTenant()` — sidebar shows
+  the tenant's name + logo/initial with a "Powered by Amber" subtitle; `LoginPage`
+  is Amber-branded. (Tenant fonts load via each theme's `typography.fontLinks` in
+  the seed.) `components/RequirePermission.tsx` guards every route
+  (anon → `/login`; lacking the route's permission → redirected to the user's home
+  via `homeRouteFor`, `lib/nav.ts`). `Shell` **filters the sidebar by `can()`**
+  (hide, don't grey out — a Kitchen user sees only Kitchen Display) and shows the
+  signed-in user. **Settings** (`/settings`, `settings.manage`-gated) is a card
+  landing → **`TeamPage`** (`/settings/team`: add users, assign role, per-user
+  permission overrides via `components/PermissionChecklist`, activate/remove) and
+  **`RolesPage`** (`/settings/roles`: create/rename custom roles + pick permissions,
+  delete), and **`BrandingPage`** (`/settings/branding`: edit the tenant's theme —
+  brand colors, font pairing, logo upload — with a **live whole-app preview** via
+  `useTenantBrand().applyTenant` from `TenantThemeGate`; Save persists via
+  `api.tenant.update({theme})`, leaving without saving reverts). Team & Roles &
+  Branding are live; Restaurant Profile + Payments are still placeholder cards.
+  Both Team/Roles pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
+  a non-Admin (e.g. a Manager) sees a "lock/Admin" chip instead of edit/remove on
+  protected (Admin) members + the Admin role, and can't pick the Admin role when
+  adding/assigning. ⚠️ RBAC is enforced **client-side** for nav/routes here; the API enforces
+  it on `roles`/`members` already (incl. the Admin-tier guard), and other routes get
+  gated next. Seeded demo logins (password `demo1234`): `admin@amberandgrain.com`
+  = **Admin** (protected, all perms — the restaurant Owner), `manager@amberandgrain.com`
+  = **Manager** (now holds `team.manage`+`settings.manage` so they run the team, but
+  the Admin-tier guard blocks them touching the Admin), `kitchen@…` = Kitchen (→ `/kds`
+  only). Other tenants now have logins too: `admin@greenbowl.com`, `admin@bellapizza.com`
+  (each their tenant's Admin), and **`owner@ambergroup.com`** belongs to *both*
+  Amber & Grain and Green Bowl → exercises the **tenant picker**. See **`SETTINGS.md`**.
   `store/AdminStore.tsx` is now API-backed: it loads menu + floor (`tables.list`) +
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each

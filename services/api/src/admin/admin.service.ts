@@ -1,14 +1,42 @@
-import { ConflictException, Injectable } from "@nestjs/common";
-import type { Tenant } from "@amber/domain";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import bcrypt from "bcryptjs";
+import { PERMISSIONS, type Tenant } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { toDomainTenant } from "../tenant/tenant.mapper.js";
-import type { CreateTenantDto } from "./admin.dto.js";
+import type { CreateTenantDto, UpdateTenantDto } from "./admin.dto.js";
+import type { PlatformAnalytics } from "./admin.types.js";
+
+export interface AuditLogEntry {
+  id: string;
+  type: string;
+  actor: { id: string; name: string; email: string } | null;
+  tenant: { id: string; name: string; slug: string } | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface TenantPayment {
+  id: string;
+  tableLabel: string;
+  customerName: string | null;
+  total: number;
+  method: string;
+  createdAt: string;
+}
+
+export interface GetAuditLogOptions {
+  type?: string;
+  tenantId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
 
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Provision a new tenant. Same code path serves every future restaurant. */
   async createTenant(dto: CreateTenantDto): Promise<Tenant> {
     const existing = await this.prisma.tenant.findUnique({
       where: { slug: dto.slug },
@@ -24,6 +52,243 @@ export class AdminService {
         theme: dto.theme,
       },
     });
+
+    // If owner credentials were provided, create User + Admin role + Membership.
+    if (dto.ownerEmail && dto.ownerName && dto.ownerPassword) {
+      const passwordHash = await bcrypt.hash(dto.ownerPassword, 10);
+
+      // Find existing user or create a new one.
+      const owner = await this.prisma.user.upsert({
+        where: { email: dto.ownerEmail.toLowerCase() },
+        update: { passwordHash },
+        create: {
+          email: dto.ownerEmail.toLowerCase(),
+          name: dto.ownerName,
+          passwordHash,
+        },
+      });
+
+      // Create a protected Admin role for this tenant with all permissions.
+      const adminRole = await this.prisma.role.create({
+        data: {
+          tenantId: row.id,
+          name: "Admin",
+          permissions: [...PERMISSIONS],
+          protected: true,
+        },
+      });
+
+      // Link the owner to the tenant as Admin.
+      await this.prisma.membership.create({
+        data: {
+          tenantId: row.id,
+          userId: owner.id,
+          roleId: adminRole.id,
+        },
+      });
+    }
+
+    // Write audit log (fire-and-forget; never crashes the main operation).
+    this.prisma.auditLog
+      .create({
+        data: {
+          type: "tenant_created",
+          tenantId: row.id,
+          metadata: {
+            slug: row.slug,
+            name: row.name,
+            ...(dto.ownerEmail ? { ownerEmail: dto.ownerEmail } : {}),
+          },
+        },
+      })
+      .catch(() => {});
+
     return toDomainTenant(row);
+  }
+
+  async updateTenant(id: string, dto: UpdateTenantDto): Promise<Tenant> {
+    const existing = await this.prisma.tenant.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException(`Unknown tenant: ${id}`);
+
+    const row = await this.prisma.tenant.update({
+      where: { id },
+      data: dto,
+    });
+
+    const type = dto.active === false ? "tenant_suspended" : dto.active === true ? "tenant_reactivated" : "tenant_updated";
+    this.prisma.auditLog
+      .create({ data: { type, tenantId: id, metadata: dto as never } })
+      .catch(() => {});
+
+    return toDomainTenant(row);
+  }
+
+  /** Cross-tenant platform analytics for the super-admin dashboard. */
+  async getPlatformAnalytics(): Promise<PlatformAnalytics> {
+    const now = new Date();
+    const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const d60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    const [allPayments, payments30d, payments60d30d, activeSubs] = await Promise.all([
+      this.prisma.payment.findMany({ select: { total: true, method: true } }),
+      this.prisma.payment.findMany({
+        where: { createdAt: { gte: d30 } },
+        select: { total: true, method: true, createdAt: true, tenantId: true, orderId: true },
+      }),
+      this.prisma.payment.findMany({
+        where: { createdAt: { gte: d60, lt: d30 } },
+        select: { total: true },
+      }),
+      this.prisma.subscription.count({ where: { status: "active" } }),
+    ]);
+
+    const totalGmvCents = allPayments.reduce((s, p) => s + p.total, 0);
+    const gmv30dCents = payments30d.reduce((s, p) => s + p.total, 0);
+    const gmv60to30Cents = payments60d30d.reduce((s, p) => s + p.total, 0);
+    const gmv30dDeltaPct = gmv60to30Cents > 0
+      ? ((gmv30dCents - gmv60to30Cents) / gmv60to30Cents) * 100
+      : 0;
+
+    const orders30d = payments30d.length;
+    const prevOrders = payments60d30d.length;
+    const orders30dDeltaPct = prevOrders > 0
+      ? ((orders30d - prevOrders) / prevOrders) * 100
+      : 0;
+
+    // MRR from active subscriptions
+    const activeSubRows = await this.prisma.subscription.findMany({
+      where: { status: "active" },
+      include: { plan: { select: { priceCents: true, interval: true } } },
+    });
+    const mrrCents = activeSubRows.reduce((s, sub) => {
+      const monthly = sub.plan.interval === "year" ? Math.round(sub.plan.priceCents / 12) : sub.plan.priceCents;
+      return s + monthly;
+    }, 0);
+
+    // Revenue series (daily for last 30 days)
+    const seriesMap = new Map<string, number>();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      seriesMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const p of payments30d) {
+      const key = p.createdAt.toISOString().slice(0, 10);
+      if (seriesMap.has(key)) seriesMap.set(key, (seriesMap.get(key) ?? 0) + p.total);
+    }
+    const revenueSeries = [...seriesMap.entries()].map(([date, cents]) => ({ date, cents }));
+
+    // Top tenants by 30-day revenue
+    const tenantRevMap = new Map<string, number>();
+    for (const p of payments30d) {
+      tenantRevMap.set(p.tenantId, (tenantRevMap.get(p.tenantId) ?? 0) + p.total);
+    }
+    const topTenantIds = [...tenantRevMap.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id]) => id);
+    const topTenantRows = topTenantIds.length
+      ? await this.prisma.tenant.findMany({
+          where: { id: { in: topTenantIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const topTenants = topTenantIds.map((id) => ({
+      tenantId: id,
+      name: topTenantRows.find((t) => t.id === id)?.name ?? id,
+      totalCents: tenantRevMap.get(id) ?? 0,
+    }));
+
+    // Method split (all time)
+    const methodSplit = allPayments.reduce(
+      (acc, p) => {
+        if (p.method === "cash") acc.cash += p.total;
+        else acc.card += p.total;
+        return acc;
+      },
+      { cash: 0, card: 0 },
+    );
+
+    return {
+      totalGmvCents,
+      gmv30dCents,
+      gmv30dDeltaPct,
+      mrrCents,
+      activeSubscriptions: activeSubs,
+      orders30d,
+      orders30dDeltaPct,
+      revenueSeries,
+      topTenants,
+      methodSplit,
+    };
+  }
+
+  async getTenantPayments(tenantId: string): Promise<TenantPayment[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { tenantId },
+      include: { order: { include: { table: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+
+    return rows.map((p) => ({
+      id: p.id,
+      tableLabel: p.order.table.label,
+      customerName: p.order.customerName ?? null,
+      total: p.total,
+      method: p.method,
+      createdAt: p.createdAt.toISOString(),
+    }));
+  }
+
+  /** Write an impersonation event to the audit log (fire-and-forget safe). */
+  async writeImpersonationLog(tenantId: string, metadata: Record<string, unknown>): Promise<void> {
+    await this.prisma.auditLog.create({
+      data: { type: "impersonation", tenantId, metadata: metadata as never },
+    }).catch(() => {});
+  }
+
+  async getAuditLog(opts: GetAuditLogOptions): Promise<{
+    entries: AuditLogEntry[];
+    total: number;
+  }> {
+    const where = {
+      ...(opts.type ? { type: opts.type as never } : {}),
+      ...(opts.tenantId ? { tenantId: opts.tenantId } : {}),
+      ...(opts.from || opts.to
+        ? {
+            createdAt: {
+              ...(opts.from ? { gte: new Date(opts.from) } : {}),
+              ...(opts.to ? { lte: new Date(opts.to) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where,
+        include: {
+          actor: { select: { id: true, name: true, email: true } },
+          tenant: { select: { id: true, name: true, slug: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: opts.limit ?? 50,
+        skip: opts.offset ?? 0,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+
+    return {
+      entries: rows.map((r) => ({
+        id: r.id,
+        type: r.type,
+        actor: r.actor,
+        tenant: r.tenant,
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
 }

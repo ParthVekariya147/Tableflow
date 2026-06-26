@@ -25,7 +25,11 @@ import type {
   TableSession,
 } from "../data/types";
 import { defaultTenant } from "../tenant/defaultTenant";
+import { useAuth } from "../context/AuthContext";
+import { getStoredToken } from "../lib/auth-token";
+import { getStoredTenantSlug } from "../lib/auth-tenant";
 import { kdsClient } from "../kds/kdsClient";
+import { createMoneyFormatter, currencySymbolFor } from "../lib/money";
 
 /** View-model modifier groups (priceCents) → api-client input (priceDelta). */
 function toModifierGroupsInput(groups: ModifierGroup[]) {
@@ -80,6 +84,7 @@ type Action =
 
 const EMPTY_STATE: AdminState = {
   taxRate: defaultTenant.taxRate ?? 0,
+  currency: defaultTenant.currency,
   categories: [],
   items: [],
   tables: [],
@@ -130,10 +135,12 @@ function mapState(
   floor: FloorTable[],
   sales: DomainSale[],
   taxRate: number,
+  currency: string,
 ): AdminState {
   const nameToId = new Map(menu.categories.map((c) => [c.name, c.id]));
   return {
     taxRate,
+    currency,
     categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
     items: menu.items.map((i): MenuItem => ({
       id: i.id,
@@ -185,6 +192,10 @@ export interface PendingItem {
 interface AdminContextValue {
   state: AdminState;
   dispatch: (action: Action) => Promise<void>;
+  /** Format integer cents in the tenant's currency (symbol/grouping derived). */
+  money: (cents: number) => string;
+  /** The tenant's bare currency symbol (e.g. "$", "₹") for input prefixes. */
+  currencySymbol: string;
   /** Force an immediate re-sync from the API (used on session-page open). */
   refresh: () => Promise<void>;
   /** Upload an item photo to storage; resolves to its public URL. */
@@ -200,13 +211,16 @@ interface AdminContextValue {
 const AdminContext = createContext<AdminContextValue | null>(null);
 
 export function AdminStoreProvider({ children }: { children: ReactNode }) {
+  // Scope every call to the *logged-in* tenant (read at call time) and carry the
+  // bearer token — so the store follows whichever restaurant the user signed into.
   const api = useMemo(
     () =>
       createApiClient({
         baseUrl:
           (import.meta.env.VITE_API_URL as string | undefined) ??
           "http://localhost:3001",
-        tenantSlug: defaultTenant.slug,
+        getTenantSlug: () => getStoredTenantSlug() ?? defaultTenant.slug,
+        getToken: getStoredToken,
       }),
     [],
   );
@@ -232,7 +246,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       api.tables.list(),
       api.orders.sales(),
     ]);
-    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0));
+    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency));
     setLoaded(true);
   }, [api]);
 
@@ -257,9 +271,18 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [api]);
 
+  // Load only once signed in, and (re)load when the active tenant changes — so a
+  // logout clears the floor and a login to a different restaurant refetches it.
+  // Before auth there's no tenant to scope to, so we don't hit the API at all.
+  const { status, user } = useAuth();
   useEffect(() => {
+    if (status !== "authed") {
+      setState(EMPTY_STATE);
+      setLoaded(false);
+      return;
+    }
     refresh().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [refresh]);
+  }, [status, user?.tenantId, refresh]);
 
   // Real-time: subscribe to the tenant's live order stream so external changes
   // (guest QR reservations, payments, KDS status, another device's edits) land
@@ -496,21 +519,38 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     [api],
   );
 
+  // Currency formatter + symbol, rebuilt only when the tenant's currency changes
+  // (loaded once with the tenant; not re-fetched). All pages share these.
+  const money = useMemo(
+    () => createMoneyFormatter(state.currency),
+    [state.currency],
+  );
+  const currencySymbol = useMemo(
+    () => currencySymbolFor(state.currency),
+    [state.currency],
+  );
+
   const value = useMemo(
     () => ({
       state,
       dispatch,
       refresh,
       uploadImage,
+      money,
+      currencySymbol,
       loading: !loaded,
       mutating: mutateCount > 0,
       pendingItems,
       error,
     }),
-    [state, dispatch, refresh, uploadImage, loaded, mutateCount, pendingItems, error],
+    [state, dispatch, refresh, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error],
   );
 
-  if (!loaded) {
+  // Only block on the floor/menu data load once the user is signed in. Before
+  // auth (anon, or while the token is still resolving) we must render children so
+  // the LoginPage + route guards can show — otherwise the login screen never
+  // appears (the store can't load without a tenant/token).
+  if (status === "authed" && !loaded) {
     return (
       <div className="flex h-screen items-center justify-center bg-background font-body-md text-body-md text-on-surface-variant">
         {error ? `Failed to load: ${error}` : "Loading…"}
@@ -541,6 +581,11 @@ export function useAdmin(): AdminContextValue {
   const ctx = useContext(AdminContext);
   if (!ctx) throw new Error("useAdmin must be used within AdminStoreProvider");
   return ctx;
+}
+
+/** The tenant-aware money formatter — convenience for presentational components. */
+export function useMoney(): (cents: number) => string {
+  return useAdmin().money;
 }
 
 // ── Derived selectors (unchanged contract) ────────────────────────────────

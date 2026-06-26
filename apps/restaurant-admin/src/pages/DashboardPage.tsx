@@ -4,10 +4,10 @@ import type { AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { useAdmin } from "../store/AdminStore";
 import { api } from "../lib/api";
-import { money, timeAgo } from "../lib/money";
+import { timeAgo } from "../lib/money";
 
 export function DashboardPage() {
-  const { state } = useAdmin();
+  const { state, money } = useAdmin();
 
   // Today's revenue + period-over-period delta, from the real analytics endpoint
   // (genuinely today-scoped, unlike the recent-50 sales feed). Refetched whenever

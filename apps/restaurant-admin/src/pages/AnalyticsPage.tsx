@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
-import { money } from "../lib/money";
+import { useMoney } from "../store/AdminStore";
 
 type RangeKey = "today" | "yesterday" | "week" | "month";
 
@@ -53,6 +53,7 @@ function deltaChip(delta: number | null): { text: string; icon: string; tone: st
 }
 
 export function AnalyticsPage() {
+  const money = useMoney();
   const [range, setRange] = useState<RangeKey>("today");
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -220,6 +221,7 @@ export function AnalyticsPage() {
 
 /** Revenue line chart from a real series (scaled to its own max). */
 function RevenueTrend({ series }: { series: AnalyticsSummary["revenueSeries"] }) {
+  const money = useMoney();
   if (series.length === 0) {
     return <div className="flex min-h-[300px] flex-1 items-center justify-center font-body-md text-on-surface-variant">No revenue in this period</div>;
   }
@@ -243,7 +245,7 @@ function RevenueTrend({ series }: { series: AnalyticsSummary["revenueSeries"] })
         <span>{money(Math.round(max * 0.75))}</span>
         <span>{money(Math.round(max * 0.5))}</span>
         <span>{money(Math.round(max * 0.25))}</span>
-        <span>$0</span>
+        <span>{money(0)}</span>
       </div>
       <div className="relative ml-16 h-[250px] w-full">
         <div className="absolute inset-0 z-0 flex flex-col justify-between">
