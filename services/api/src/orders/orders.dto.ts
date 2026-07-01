@@ -68,15 +68,27 @@ export const addItemSchema = z.object({
 });
 export type AddItemDto = z.infer<typeof addItemSchema>;
 
-/** PATCH /orders/:id/items/:itemId — change qty and/or advance kitchen status. */
+/**
+ * PATCH /orders/:id/items/:itemId — change qty and/or advance kitchen status.
+ * `qty` sets an absolute value (kept for callers that already know the target,
+ * e.g. removal via qty:0). `qtyDelta` applies a relative +/-N atomically at the
+ * DB layer (`{ increment }`) so two rapid taps (double-click, or two staff
+ * devices on the same table) can't clobber each other the way a client-computed
+ * absolute write can — prefer this for stepper-style qty changes.
+ */
 export const updateItemSchema = z
   .object({
     qty: z.number().int().nonnegative().optional(),
+    qtyDelta: z.number().int().optional(),
     status: itemStatusSchema.optional(),
   })
-  .refine((v) => v.qty !== undefined || v.status !== undefined, {
-    message: "Provide qty and/or status",
-  });
+  .refine((v) => v.qty === undefined || v.qtyDelta === undefined, {
+    message: "Provide only one of qty or qtyDelta",
+  })
+  .refine(
+    (v) => v.qty !== undefined || v.qtyDelta !== undefined || v.status !== undefined,
+    { message: "Provide qty, qtyDelta, and/or status" },
+  );
 export type UpdateItemDto = z.infer<typeof updateItemSchema>;
 
 /** POST /orders/:id/payment — settle the bill and close the session. */

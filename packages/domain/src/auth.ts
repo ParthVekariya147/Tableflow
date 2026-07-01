@@ -52,8 +52,19 @@ export const selectTenantRequestSchema = z.object({
   tenantId: idSchema,
 });
 
+/**
+ * Self-service password change. `currentPassword` is required even when the
+ * caller is on the forced `mustChangePassword` default (`changeme123`) — it's
+ * still a real credential check, not just an allowed-to-proceed check.
+ */
+export const changePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type TenantOption = z.infer<typeof tenantOptionSchema>;
 export type LoginResult = z.infer<typeof loginResultSchema>;
 export type SelectTenantRequest = z.infer<typeof selectTenantRequestSchema>;
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;

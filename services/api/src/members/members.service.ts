@@ -14,6 +14,7 @@ import {
   type Permission,
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { AuthService } from "../auth/auth.service.js";
 
 const TEAM_MANAGE: Permission = "team.manage";
 
@@ -72,7 +73,10 @@ function isManager(row: { permissions: string[]; role: { permissions: string[] }
 
 @Injectable()
 export class MembersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: AuthService,
+  ) {}
 
   async list(tenantId: string): Promise<Membership[]> {
     const rows = await this.prisma.membership.findMany({
@@ -101,6 +105,7 @@ export class MembersService {
           email,
           name: input.name,
           passwordHash: await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 10),
+          mustChangePassword: true,
         },
       });
     }
@@ -166,6 +171,7 @@ export class MembersService {
       },
       include: { user: true, role: true },
     });
+    this.auth.invalidateAuthUser(tenantId, current.userId);
     return toDomainMembership(row as MembershipRow);
   }
 
@@ -177,6 +183,7 @@ export class MembersService {
       await this.assertNotLastManager(tenantId, id);
     }
     await this.prisma.membership.delete({ where: { id } });
+    this.auth.invalidateAuthUser(tenantId, current.userId);
     return { ok: true };
   }
 

@@ -75,6 +75,10 @@ export const orderSchema = z.object({
   billRequestedAt: isoTimestampSchema.optional(),
 });
 
+/** Table ids currently holding a live (open/billed) order — a lean shape for
+ *  callers that only need an occupancy check, not the full order graph. */
+export const openTableIdsSchema = z.array(idSchema);
+
 export type ItemStatus = z.infer<typeof itemStatusSchema>;
 export type RoundType = z.infer<typeof roundTypeSchema>;
 export type OrderStatus = z.infer<typeof orderStatusSchema>;

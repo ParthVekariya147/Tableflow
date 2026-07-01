@@ -4,7 +4,7 @@ import {
   type NestModule,
 } from "@nestjs/common";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 import { PrismaModule } from "./prisma/prisma.module.js";
 import { TenantModule } from "./tenant/tenant.module.js";
 import { AuthModule } from "./auth/auth.module.js";
@@ -14,7 +14,9 @@ import { MenuModule } from "./menu/menu.module.js";
 import { TablesModule } from "./tables/tables.module.js";
 import { OrdersModule } from "./orders/orders.module.js";
 import { AdminModule } from "./admin/admin.module.js";
+import { HealthModule } from "./health/health.module.js";
 import { TenantMiddleware } from "./tenant/tenant.middleware.js";
+import { GlobalExceptionFilter } from "./common/http-exception.filter.js";
 
 @Module({
   imports: [
@@ -32,9 +34,11 @@ import { TenantMiddleware } from "./tenant/tenant.middleware.js";
     TablesModule,
     OrdersModule,
     AdminModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],
 })
 export class AppModule implements NestModule {
@@ -45,7 +49,7 @@ export class AppModule implements NestModule {
     // reads it from the bearer token), so it must run without the header.
     consumer
       .apply(TenantMiddleware)
-      .exclude("admin/(.*)", "auth/(.*)")
+      .exclude("admin/(.*)", "auth/(.*)", "health")
       .forRoutes("*");
   }
 }

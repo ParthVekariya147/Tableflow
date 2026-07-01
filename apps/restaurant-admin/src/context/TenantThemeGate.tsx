@@ -11,6 +11,7 @@ import type { Tenant } from "@amber/domain";
 import { api } from "../lib/api";
 import { useAuth } from "./AuthContext";
 import { defaultTenant } from "../tenant/defaultTenant";
+import { fetchCurrentTenantCoalesced } from "../lib/tenant-fetch";
 
 interface TenantBrandValue {
   /** Apply a tenant brand to the whole app at runtime (live theme preview/save). */
@@ -44,8 +45,7 @@ export function TenantThemeGate({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    api.tenant
-      .current()
+    fetchCurrentTenantCoalesced(() => api.tenant.current())
       .then((t) => {
         if (!cancelled) setTenant(t);
       })

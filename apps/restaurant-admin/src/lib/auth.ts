@@ -1,5 +1,5 @@
 import { defaultTenant } from "../tenant/defaultTenant";
-import { getCachedAccessToken } from "./supabase";
+import { getStoredToken } from "./auth-token";
 
 /**
  * Impersonation (see PLATFORM_PLAN.md "Master-password impersonation"). The
@@ -68,7 +68,7 @@ export function clearImpersonation(): void {
  * complete JWT, no Supabase session involved in that path.
  */
 export function getAuthToken(): string | null {
-  return getImpersonationToken() ?? getCachedAccessToken();
+  return getImpersonationToken() ?? getStoredToken();
 }
 
 /** The tenant slug to scope API calls to: the impersonated tenant if active, else the default. */

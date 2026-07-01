@@ -44,7 +44,7 @@ export function SubscriptionsPage() {
     setOpenMenuId(null);
     try {
       const updated = await api.admin.updateSubscriptionStatus(t.id, patch);
-      setTenants((all) => all.map((x) => (x.id === t.id ? updated : x)));
+      setTenants((all) => all.map((x) => (x.id === t.id ? { ...x, subscription: updated } : x)));
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Update failed");
     } finally {

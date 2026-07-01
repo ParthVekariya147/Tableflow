@@ -1,7 +1,9 @@
-import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { z } from "zod";
 import type { Tenant, TenantWithSubscription } from "@amber/domain";
 import { AuthService } from "../auth/auth.service.js";
+import { SupabaseAuthGuard } from "../auth/auth.guard.js";
+import { SuperAdminGuard } from "../auth/super-admin.guard.js";
 import { BillingService } from "../billing/billing.service.js";
 import { AdminService } from "./admin.service.js";
 import type { AuditLogEntry, TenantCredential, TenantPayment } from "./admin.service.js";
@@ -22,9 +24,12 @@ const impersonateSchema = z.object({
 
 /**
  * Super-admin, cross-tenant operations. Excluded from TenantMiddleware.
- * Auth is intentionally deferred (same as all /admin/* routes for now).
+ * Bearer = Supabase access token; every route requires an established
+ * super-admin account (SupabaseAuthGuard resolves req.user, SuperAdminGuard
+ * requires req.user.isSuperAdmin — see auth/auth.guard.ts + super-admin.guard.ts).
  */
 @Controller("admin")
+@UseGuards(SupabaseAuthGuard, SuperAdminGuard)
 export class AdminController {
   constructor(
     private readonly admin: AdminService,

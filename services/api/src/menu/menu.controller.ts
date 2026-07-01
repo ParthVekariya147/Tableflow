@@ -8,13 +8,15 @@ import {
   Patch,
   Post,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Menu, MenuCategory, MenuItem, Tenant } from "@amber/domain";
 import { MenuService } from "./menu.service.js";
-import { StorageService } from "../storage/storage.service.js";
+import { StorageService, isAllowedImageMime } from "../storage/storage.service.js";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import {
   createCategorySchema,
   createItemSchema,
@@ -29,12 +31,14 @@ export class MenuController {
     private readonly storage: StorageService,
   ) {}
 
+  /** Public — the guest app reads the menu with no login. */
   @Get()
   get(@CurrentTenant() tenant: Tenant): Promise<Menu> {
     return this.menu.getMenu(tenant.id);
   }
 
-  /** Upload an item photo to storage; returns its public URL. */
+  /** Staff-only: upload an item photo to storage; returns its public URL. */
+  @UseGuards(JwtAuthGuard)
   @Post("upload")
   @UseInterceptors(
     FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024 } }),
@@ -44,12 +48,17 @@ export class MenuController {
     @UploadedFile() file?: Express.Multer.File,
   ): Promise<{ url: string }> {
     if (!file) throw new BadRequestException("No file provided.");
-    if (!file.mimetype?.startsWith("image/"))
-      throw new BadRequestException("Only image files are allowed.");
+    // Exact allow-list, not `mimetype.startsWith("image/")` — that prefix
+    // check would also admit `image/svg+xml` (stored-XSS risk; SVGs can carry
+    // <script>/event-handler payloads and are served back with the
+    // client-supplied content-type from the public bucket).
+    if (!file.mimetype || !isAllowedImageMime(file.mimetype))
+      throw new BadRequestException("Only PNG, JPEG, WEBP, GIF, or AVIF images are allowed.");
     const url = await this.storage.uploadImage(tenant.id, file);
     return { url };
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post("categories")
   createCategory(
     @CurrentTenant() tenant: Tenant,
@@ -58,6 +67,7 @@ export class MenuController {
     return this.menu.createCategory(tenant.id, createCategorySchema.parse(body));
   }
 
+  @UseGuards(JwtAuthGuard)
   @Patch("categories/:id")
   updateCategory(
     @CurrentTenant() tenant: Tenant,
@@ -71,6 +81,7 @@ export class MenuController {
     );
   }
 
+  @UseGuards(JwtAuthGuard)
   @Delete("categories/:id")
   async deleteCategory(
     @CurrentTenant() tenant: Tenant,
@@ -80,6 +91,7 @@ export class MenuController {
     return { ok: true };
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post("items")
   createItem(
     @CurrentTenant() tenant: Tenant,
@@ -88,6 +100,7 @@ export class MenuController {
     return this.menu.createItem(tenant.id, createItemSchema.parse(body));
   }
 
+  @UseGuards(JwtAuthGuard)
   @Patch("items/:id")
   updateItem(
     @CurrentTenant() tenant: Tenant,
@@ -97,6 +110,7 @@ export class MenuController {
     return this.menu.updateItem(tenant.id, id, updateItemSchema.parse(body));
   }
 
+  @UseGuards(JwtAuthGuard)
   @Delete("items/:id")
   async deleteItem(
     @CurrentTenant() tenant: Tenant,

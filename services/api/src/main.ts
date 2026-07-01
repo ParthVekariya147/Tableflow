@@ -5,8 +5,28 @@ import compression from "compression";
 import express from "express";
 import { AppModule } from "./app.module.js";
 
+function assertProductionSecrets(): void {
+  const isProd = process.env.NODE_ENV === "production";
+  if (isProd && !process.env.JWT_SECRET) {
+    // Without this, every deployed instance falls back to the same hardcoded
+    // string (see auth.module.ts) — anyone could forge a JWT, including an
+    // impersonation token, granting full access to any tenant.
+    throw new Error(
+      "JWT_SECRET must be set in production — refusing to boot with the insecure dev fallback",
+    );
+  }
+}
+
 async function bootstrap() {
+  assertProductionSecrets();
   const app = await NestFactory.create(AppModule);
+
+  // On SIGTERM/SIGINT (container restart, rolling deploy) let Nest drain
+  // in-flight requests and run each module's onModuleDestroy (see
+  // PrismaService) instead of the process just dying mid-query — otherwise
+  // pooled DB connections are left dangling against pgBouncer's 15-client
+  // session-mode cap, starving the next instance's warm-up.
+  app.enableShutdownHooks();
 
   // Security headers: X-Frame-Options, X-Content-Type-Options, HSTS, etc.
   // CSP is disabled in non-production so the SSE stream works locally.

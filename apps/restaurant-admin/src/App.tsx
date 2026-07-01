@@ -3,9 +3,11 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { Shell } from "./components/Shell";
 import { RequirePermission } from "./components/RequirePermission";
 import { Spinner } from "./components/Skeleton";
+import { useAuth } from "./context/AuthContext";
 
 // Eagerly loaded — always needed on first paint
 import { LoginPage } from "./pages/LoginPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 
 // Lazy-loaded — each becomes its own chunk, fetched only when navigated to
 const DashboardPage = lazy(() =>
@@ -73,6 +75,16 @@ function PageFallback() {
  * the in-memory AdminStore, so edits and take-backs propagate live.
  */
 export default function App() {
+  const { status, user } = useAuth();
+
+  // Block the whole app behind a forced password change while the member is
+  // still on the fixed `changeme123` default — rendered above the router
+  // (same pattern the customer app uses for its terminal session screens) so
+  // no route/permission combination can be used to route around it.
+  if (status === "authed" && user?.mustChangePassword) {
+    return <ChangePasswordPage />;
+  }
+
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>

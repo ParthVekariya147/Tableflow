@@ -20,3 +20,6 @@ services/api/prisma/*.db
 .DS_Store
 *.log
 dump/
+
+# local credential/investigation notes — never commit these
+CREDENTIALS.md

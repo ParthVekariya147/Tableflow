@@ -59,6 +59,9 @@ export const authUserSchema = z.object({
    */
   roleProtected: z.boolean().default(false),
   permissions: z.array(permissionSchema),
+  /** True for a member still on their initial default password — the client
+   *  should force a change-password screen before letting them proceed. */
+  mustChangePassword: z.boolean().default(false),
 });
 
 export type User = z.infer<typeof userSchema>;

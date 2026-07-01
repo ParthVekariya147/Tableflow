@@ -15,7 +15,9 @@ import type {
   AnalyticsBucket,
 } from "@amber/domain";
 import { orderItemUnitPrice } from "@amber/domain";
+import { Prisma, type Payment as PrismaPayment } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { TtlCache } from "../common/ttl-cache.js";
 import { OrdersEvents } from "./orders.events.js";
 import { toDomainOrder, toDomainPayment, toSale } from "./orders.mapper.js";
 import type {
@@ -36,6 +38,10 @@ type RoundItemModifier = NonNullable<
   AddRoundDto["items"][number]["modifiers"]
 >[number];
 
+type MenuItemWithModifiers = Prisma.MenuItemGetPayload<{
+  include: { modifierGroups: { include: { options: true } } };
+}>;
+
 /** Maps a kitchen status to the timestamp column that records reaching it. */
 const STATUS_STAMP: Record<ItemStatus, string | null> = {
   placed: null,
@@ -45,8 +51,18 @@ const STATUS_STAMP: Record<ItemStatus, string | null> = {
   cancelled: "cancelledAt",
 };
 
+// reclaimSession's only proof of ownership is a plain string-equality check
+// on a phone number — without a limiter, anyone who knows a table is occupied
+// could brute-force the last-10-digits match. Locked out per (tenant, table)
+// rather than per-IP: a restaurant's guest wifi commonly NATs many phones
+// behind one IP, so an IP-keyed limit would false-lock legitimate guests.
+const RECLAIM_LOCKOUT_WINDOW_MS = 10 * 60 * 1000;
+const RECLAIM_MAX_ATTEMPTS = 5;
+
 @Injectable()
 export class OrdersService {
+  private readonly reclaimAttempts = new TtlCache<number>(RECLAIM_LOCKOUT_WINDOW_MS);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: OrdersEvents,
@@ -131,27 +147,33 @@ export class OrdersService {
   ): Promise<Order> {
     await this.assertOrder(tenantId, orderId, deviceId);
 
-    // Resolve each line's modifiers up front (async DB lookups).
-    const lines = await Promise.all(
-      dto.items.map(async (i) => ({
-        // Honour a client-supplied id (shared id space with the KDS ticket); else
-        // Prisma mints a cuid.
-        ...(i.id ? { id: i.id } : {}),
-        tenantId,
-        menuItemId: i.menuItemId,
-        name: i.name,
-        unitPrice: i.unitPrice,
-        qty: i.qty,
-        notes: i.notes,
-        modifiers: {
-          create: await this.resolveItemModifiers(
-            tenantId,
-            i.menuItemId,
-            i.modifiers ?? [],
-          ),
-        },
-      })),
-    );
+    // Fetch every distinct menu item referenced by this round in one query
+    // (was one round trip per line item).
+    const menuItemIds = [...new Set(dto.items.map((i) => i.menuItemId))];
+    const menuItems = await this.prisma.menuItem.findMany({
+      where: { id: { in: menuItemIds }, tenantId },
+      include: { modifierGroups: { include: { options: true } } },
+    });
+    const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
+
+    const lines = dto.items.map((i) => ({
+      // Honour a client-supplied id (shared id space with the KDS ticket); else
+      // Prisma mints a cuid.
+      ...(i.id ? { id: i.id } : {}),
+      tenantId,
+      menuItemId: i.menuItemId,
+      name: i.name,
+      unitPrice: i.unitPrice,
+      qty: i.qty,
+      notes: i.notes,
+      modifiers: {
+        create: this.resolveItemModifiers(
+          tenantId,
+          menuItemById.get(i.menuItemId) ?? null,
+          i.modifiers ?? [],
+        ),
+      },
+    }));
 
     await this.prisma.round.create({
       data: {
@@ -170,29 +192,25 @@ export class OrdersService {
    * return the rows to persist (price/name snapshotted from the DB, not the
    * client). Enforces option validity + availability, text-group existence, and
    * required / min / max counts. The trust boundary for modifier pricing.
+   * Takes the already-fetched menu item (caller batches the lookup across all
+   * lines in a round instead of one query per line).
    */
-  private async resolveItemModifiers(
+  private resolveItemModifiers(
     tenantId: string,
-    menuItemId: string,
+    item: MenuItemWithModifiers | null,
     mods: RoundItemModifier[],
-  ): Promise<
-    {
-      tenantId: string;
-      optionId: string | null;
-      groupName: string;
-      name: string;
-      priceDelta: number;
-      textValue: string | null;
-    }[]
-  > {
-    const item = await this.prisma.menuItem.findFirst({
-      where: { id: menuItemId, tenantId },
-      include: { modifierGroups: { include: { options: true } } },
-    });
+  ): {
+    tenantId: string;
+    optionId: string | null;
+    groupName: string;
+    name: string;
+    priceDelta: number;
+    textValue: string | null;
+  }[] {
     // Unknown/deleted item: nothing to validate against — reject if mods were sent.
     if (!item) {
       if (mods.length)
-        throw new BadRequestException(`Menu item not found: ${menuItemId}`);
+        throw new BadRequestException(`Menu item not found`);
       return [];
     }
 
@@ -286,6 +304,19 @@ export class OrdersService {
     return this.refreshAndEmit(tenantId, orderId, "updated");
   }
 
+  /**
+   * Table ids currently holding a live (open/billed) order — for occupancy
+   * checks (QR boot, reservation race guard) that don't need the full
+   * ROUND_INCLUDE graph `list()` returns.
+   */
+  async listOpenTableIds(tenantId: string): Promise<string[]> {
+    const rows = await this.prisma.order.findMany({
+      where: { tenantId, status: { in: LIVE_STATUSES } },
+      select: { tableId: true },
+    });
+    return rows.map((r) => r.tableId);
+  }
+
   /** List sessions for the floor / KDS. Defaults to live (open + billed). */
   async list(tenantId: string, status?: OrderStatus): Promise<Order[]> {
     const rows = await this.prisma.order.findMany({
@@ -307,17 +338,17 @@ export class OrdersService {
     dto: AddItemDto,
   ): Promise<Order> {
     await this.assertOrder(tenantId, orderId);
-    const menuItem = await this.prisma.menuItem.findFirst({
-      where: { id: dto.menuItemId, tenantId },
-    });
+    // Independent lookups — run in parallel instead of sequentially.
+    const [menuItem, rounds] = await Promise.all([
+      this.prisma.menuItem.findFirst({ where: { id: dto.menuItemId, tenantId } }),
+      this.prisma.round.findMany({
+        where: { tenantId, orderId },
+        orderBy: { createdAt: "asc" },
+        include: { items: true },
+      }),
+    ]);
     if (!menuItem)
       throw new BadRequestException(`Menu item not found: ${dto.menuItemId}`);
-
-    const rounds = await this.prisma.round.findMany({
-      where: { tenantId, orderId },
-      orderBy: { createdAt: "asc" },
-      include: { items: true },
-    });
     const latest = rounds[rounds.length - 1];
     const isOpen =
       latest &&
@@ -332,9 +363,13 @@ export class OrdersService {
       : undefined;
 
     if (existing) {
+      // Atomic increment (not `existing.qty + dto.qty` computed from the
+      // separately-fetched row above) — two concurrent adds of the same item
+      // would otherwise both read the same starting qty and one increment
+      // would silently overwrite the other.
       await this.prisma.orderItem.update({
         where: { id: existing.id },
-        data: { qty: existing.qty + dto.qty },
+        data: { qty: { increment: dto.qty } },
       });
     } else if (isOpen) {
       await this.prisma.orderItem.create({
@@ -400,6 +435,31 @@ export class OrdersService {
       return this.refreshAndEmit(tenantId, orderId, "updated");
     }
 
+    if (dto.qtyDelta !== undefined) {
+      // Atomic increment at the DB layer (`qty = qty + delta`) — Postgres
+      // serializes concurrent updates to the same row via its row lock, so two
+      // rapid deltas (double-tap, or two staff devices) both land instead of
+      // the second clobbering the first the way a client-computed absolute
+      // write would.
+      const updated = await this.prisma.orderItem.update({
+        where: { id: itemId },
+        data: { qty: { increment: dto.qtyDelta } },
+      });
+      if (updated.qty <= 0) {
+        await this.prisma.orderItem.delete({ where: { id: itemId } }).catch(() => {});
+      }
+      if (dto.status !== undefined) {
+        const stamp = STATUS_STAMP[dto.status];
+        await this.prisma.orderItem
+          .update({
+            where: { id: itemId },
+            data: { status: dto.status, ...(stamp ? { [stamp]: new Date() } : {}) },
+          })
+          .catch(() => {}); // item may have just been deleted by the qty<=0 branch above
+      }
+      return this.refreshAndEmit(tenantId, orderId, "updated");
+    }
+
     const data: Record<string, unknown> = {};
     if (dto.qty !== undefined) data.qty = dto.qty;
     if (dto.status !== undefined) {
@@ -449,24 +509,40 @@ export class OrdersService {
     const tip = dto.tip;
     const total = subtotal + tax + tip;
 
-    const [payment] = await this.prisma.$transaction([
-      this.prisma.payment.create({
-        data: {
-          tenantId,
-          orderId,
-          method: dto.method,
-          subtotal,
-          tax,
-          tip,
-          total,
-          tendered: dto.tendered,
-        },
-      }),
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: { status: "paid", closedAt: new Date() },
-      }),
-    ]);
+    let payment: PrismaPayment;
+    try {
+      [payment] = await this.prisma.$transaction([
+        this.prisma.payment.create({
+          data: {
+            tenantId,
+            orderId,
+            method: dto.method,
+            subtotal,
+            tax,
+            tip,
+            total,
+            tendered: dto.tendered,
+          },
+        }),
+        this.prisma.order.update({
+          where: { id: orderId },
+          data: { status: "paid", closedAt: new Date() },
+        }),
+      ]);
+    } catch (err) {
+      // Payment.orderId is @unique — two near-simultaneous captures for the
+      // same order (double-tap "Pay", or a guest retry racing a staff cash
+      // capture) both pass the status guards above; the DB constraint is the
+      // real tiebreaker. Without this, the loser gets a bare 500 instead of a
+      // clean, expected 409.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        throw new ConflictException("This order has already been paid.");
+      }
+      throw err;
+    }
     // Broadcast the now-closed order so the floor frees the table and the guest
     // phone leaves the bill screen in real time.
     const closed = await this.get(tenantId, orderId);
@@ -514,33 +590,43 @@ export class OrdersService {
     const windowMs = Math.max(1, to.getTime() - from.getTime());
     const prevFrom = new Date(from.getTime() - windowMs);
 
-    // Current window: payments with full item detail (top items / categories).
-    const payments = await this.prisma.payment.findMany({
-      where: { tenantId, createdAt: { gte: from, lte: to } },
-      include: {
-        order: {
-          include: {
-            rounds: {
-              include: {
-                items: {
-                  include: { modifiers: true, menuItem: { include: { category: true } } },
-                },
-              },
-            },
-          },
+    // Three independent, narrow queries run in parallel instead of one deep
+    // 6-level join loaded fully into Node then aggregated with nested loops:
+    //  - current-window payments: only the two fields the trend/peak-hours
+    //    buckets need (not the whole order→round→item→modifier graph).
+    //  - previous-window totals: a DB-side aggregate (was already parallel-
+    //    izable, previously ran sequentially after the deep query).
+    //  - item-level rows for top-items/category-split, filtered to non-
+    //    cancelled lines server-side and selected narrowly (no order/round
+    //    fields at all).
+    const [paymentRows, prev, itemRows] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: { tenantId, createdAt: { gte: from, lte: to } },
+        select: { total: true, createdAt: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: { tenantId, createdAt: { gte: prevFrom, lt: from } },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+      this.prisma.orderItem.findMany({
+        where: {
+          tenantId,
+          status: { not: "cancelled" },
+          round: { order: { payment: { createdAt: { gte: from, lte: to } } } },
         },
-      },
-    });
+        select: {
+          name: true,
+          unitPrice: true,
+          qty: true,
+          modifiers: { select: { priceDelta: true } },
+          menuItem: { select: { category: { select: { name: true } } } },
+        },
+      }),
+    ]);
 
-    // Previous equal-length window: only totals/count, for deltas (cheap).
-    const prev = await this.prisma.payment.aggregate({
-      where: { tenantId, createdAt: { gte: prevFrom, lt: from } },
-      _sum: { total: true },
-      _count: { _all: true },
-    });
-
-    const revenue = payments.reduce((s, p) => s + p.total, 0);
-    const orders = payments.length;
+    const revenue = paymentRows.reduce((s, p) => s + p.total, 0);
+    const orders = paymentRows.length;
     const avgTicket = orders ? Math.round(revenue / orders) : 0;
 
     const prevRevenue = prev._sum.total ?? 0;
@@ -549,33 +635,27 @@ export class OrdersService {
     const delta = (cur: number, prv: number): number | null =>
       prv > 0 ? (cur - prv) / prv : null;
 
-    // Item-level aggregation across non-cancelled lines of paid orders.
+    // Item-level aggregation (already non-cancelled, filtered in the query).
     const itemAgg = new Map<string, { name: string; units: number; revenue: number }>();
     const catAgg = new Map<string, { name: string; units: number; revenue: number }>();
     let totalItems = 0;
     let itemRevenueTotal = 0;
-    for (const p of payments) {
-      for (const round of p.order.rounds) {
-        for (const it of round.items) {
-          if (it.status === "cancelled") continue;
-          const unit =
-            it.unitPrice + it.modifiers.reduce((s, m) => s + m.priceDelta, 0);
-          const rev = unit * it.qty;
-          totalItems += it.qty;
-          itemRevenueTotal += rev;
+    for (const it of itemRows) {
+      const unit = it.unitPrice + it.modifiers.reduce((s, m) => s + m.priceDelta, 0);
+      const rev = unit * it.qty;
+      totalItems += it.qty;
+      itemRevenueTotal += rev;
 
-          const item = itemAgg.get(it.name) ?? { name: it.name, units: 0, revenue: 0 };
-          item.units += it.qty;
-          item.revenue += rev;
-          itemAgg.set(it.name, item);
+      const item = itemAgg.get(it.name) ?? { name: it.name, units: 0, revenue: 0 };
+      item.units += it.qty;
+      item.revenue += rev;
+      itemAgg.set(it.name, item);
 
-          const cname = it.menuItem?.category?.name ?? "Other";
-          const cat = catAgg.get(cname) ?? { name: cname, units: 0, revenue: 0 };
-          cat.units += it.qty;
-          cat.revenue += rev;
-          catAgg.set(cname, cat);
-        }
-      }
+      const cname = it.menuItem?.category?.name ?? "Other";
+      const cat = catAgg.get(cname) ?? { name: cname, units: 0, revenue: 0 };
+      cat.units += it.qty;
+      cat.revenue += rev;
+      catAgg.set(cname, cat);
     }
 
     const topItems = [...itemAgg.values()]
@@ -590,7 +670,7 @@ export class OrdersService {
 
     // Orders settled per hour-of-day (server-local; tenant TZ is deferred).
     const hourCounts = new Array(24).fill(0) as number[];
-    for (const p of payments) {
+    for (const p of paymentRows) {
       const h = p.createdAt.getHours();
       hourCounts[h] = (hourCounts[h] ?? 0) + 1;
     }
@@ -604,7 +684,7 @@ export class OrdersService {
       revenueDelta: delta(revenue, prevRevenue),
       ordersDelta: delta(orders, prevOrders),
       avgTicketDelta: delta(avgTicket, prevAvg),
-      revenueSeries: this.bucketRevenue(payments, from, windowMs),
+      revenueSeries: this.bucketRevenue(paymentRows, from, windowMs),
       topItems,
       categories,
       peakHours,
@@ -652,6 +732,13 @@ export class OrdersService {
     dto: ReclaimSessionDto,
     deviceId?: string,
   ): Promise<Order> {
+    const attemptKey = `${tenantId}:${dto.tableId}`;
+    if ((this.reclaimAttempts.get(attemptKey) ?? 0) >= RECLAIM_MAX_ATTEMPTS) {
+      throw new ForbiddenException(
+        "Too many attempts. Please ask a staff member for help.",
+      );
+    }
+
     const live = await this.prisma.order.findFirst({
       where: {
         tenantId,
@@ -667,8 +754,12 @@ export class OrdersService {
         "This session cannot be reclaimed — no phone on record.",
       );
     const normalize = (p: string) => p.replace(/\D/g, "").slice(-10);
-    if (normalize(live.customerPhone) !== normalize(dto.customerPhone))
+    if (normalize(live.customerPhone) !== normalize(dto.customerPhone)) {
+      const attempts = (this.reclaimAttempts.get(attemptKey) ?? 0) + 1;
+      this.reclaimAttempts.set(attemptKey, attempts);
       throw new ForbiddenException("Phone number does not match.");
+    }
+    this.reclaimAttempts.delete(attemptKey);
 
     await this.prisma.order.update({
       where: { id: live.id },

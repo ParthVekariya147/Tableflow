@@ -34,10 +34,11 @@ export class RolesController {
   @Post()
   create(
     @CurrentTenant() tenant: Tenant,
+    @CurrentUser() actor: AuthUser,
     @Body() body: unknown,
   ): Promise<Role> {
     const dto = CreateRoleDto.parse(body);
-    return this.roles.create(tenant.id, dto);
+    return this.roles.create(tenant.id, actor, dto);
   }
 
   @Patch(":id")

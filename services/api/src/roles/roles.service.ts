@@ -12,8 +12,10 @@ import {
   type Role,
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { AuthService } from "../auth/auth.service.js";
 
 const TEAM_MANAGE: Permission = "team.manage";
+const SENSITIVE_PERMISSIONS = new Set<Permission>(["team.manage", "settings.manage"]);
 
 /** Map a Prisma role row → the domain Role shape. */
 function toDomainRole(row: {
@@ -36,7 +38,10 @@ function toDomainRole(row: {
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: AuthService,
+  ) {}
 
   async list(tenantId: string): Promise<Role[]> {
     const rows = await this.prisma.role.findMany({
@@ -48,8 +53,21 @@ export class RolesService {
 
   async create(
     tenantId: string,
+    actor: AuthUser,
     input: { name: string; permissions: Permission[] },
   ): Promise<Role> {
+    // Admin-tier guard: only an Admin may create a role that grants
+    // sensitive/tier-defining permissions — otherwise a Manager could mint a
+    // fresh (non-protected) role with team.manage/settings.manage and assign
+    // it to themselves, sidestepping the protected-role check entirely.
+    if (
+      !actor.roleProtected &&
+      input.permissions.some((p) => SENSITIVE_PERMISSIONS.has(p))
+    ) {
+      throw new ForbiddenException(
+        "Only an Admin can create a role with team or settings management permissions",
+      );
+    }
     await this.assertNameFree(tenantId, input.name);
     const row = await this.prisma.role.create({
       data: { tenantId, name: input.name, permissions: input.permissions },
@@ -91,6 +109,9 @@ export class RolesService {
           : {}),
       },
     });
+    // Every member on this role has stale cached permissions now — we don't
+    // track role→members here, so drop the whole tenant's auth-user cache.
+    this.auth.invalidateTenantAuthUsers(tenantId);
     return toDomainRole(row);
   }
 
@@ -106,6 +127,7 @@ export class RolesService {
       );
     }
     await this.prisma.role.delete({ where: { id } });
+    this.auth.invalidateTenantAuthUsers(tenantId);
     return { ok: true };
   }
 

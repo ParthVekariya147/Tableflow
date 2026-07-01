@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
@@ -152,16 +152,29 @@ export default function WelcomeScreen() {
   const money = useMoney();
   const [added, setAdded] = useState(new Set());
   const [sent, setSent] = useState(new Set());
+  // Pending "sent" reset timers, keyed by action.key — cleared on unmount so
+  // a screen change before the 4s tick doesn't call setState on an unmounted
+  // component.
+  const sentTimersRef = useRef(new Map());
+
+  useEffect(() => {
+    const timers = sentTimersRef.current;
+    return () => {
+      for (const id of timers.values()) clearTimeout(id);
+      timers.clear();
+    };
+  }, []);
 
   function handleQuickTap(action) {
     if (sent.has(action.key)) return;
     bringIt(action.item, 1);
     setSent((prev) => new Set(prev).add(action.key));
     // Reset the "sent" tick after 4 s so they can re-request
-    setTimeout(
-      () => setSent((prev) => { const n = new Set(prev); n.delete(action.key); return n; }),
-      4000,
-    );
+    const id = setTimeout(() => {
+      sentTimersRef.current.delete(action.key);
+      setSent((prev) => { const n = new Set(prev); n.delete(action.key); return n; });
+    }, 4000);
+    sentTimersRef.current.set(action.key, id);
   }
 
   function handleBringIt(item) {

@@ -213,7 +213,10 @@ export function TableSessionPage() {
       {picker && (
         <ItemPicker
           onClose={() => setPicker(false)}
-          onPick={(menuItemId) => dispatch({ type: "ADD_ORDER_ITEM", tableId: table.id, menuItemId })}
+          onConfirm={(items) => {
+            setPicker(false);
+            void dispatch({ type: "ADD_ORDER_ITEMS", tableId: table.id, items });
+          }}
         />
       )}
 
@@ -285,16 +288,42 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function ItemPicker({
   onClose,
-  onPick,
+  onConfirm,
 }: {
   onClose: () => void;
-  onPick: (menuItemId: string) => void;
+  /** Called once with every selected line when staff confirms the batch. */
+  onConfirm: (items: Array<{ menuItemId: string; qty: number }>) => void;
 }) {
   const { state, money } = useAdmin();
   const [query, setQuery] = useState("");
+  // Staged locally — nothing hits the API until "Add" is pressed, so picking
+  // N items is one request instead of N.
+  const [selected, setSelected] = useState<Record<string, number>>({});
   const items = state.items.filter(
     (i) => i.available && i.name.toLowerCase().includes(query.toLowerCase()),
   );
+
+  function bump(itemId: string, delta: number) {
+    setSelected((prev) => {
+      const next = Math.max(0, (prev[itemId] ?? 0) + delta);
+      const copy = { ...prev };
+      if (next === 0) delete copy[itemId];
+      else copy[itemId] = next;
+      return copy;
+    });
+  }
+
+  const entries = Object.entries(selected);
+  const totalCount = entries.reduce((sum, [, qty]) => sum + qty, 0);
+  const totalCents = entries.reduce((sum, [itemId, qty]) => {
+    const item = state.items.find((i) => i.id === itemId);
+    return sum + (item?.priceCents ?? 0) * qty;
+  }, 0);
+
+  function confirm() {
+    if (totalCount === 0) return;
+    onConfirm(entries.map(([menuItemId, qty]) => ({ menuItemId, qty })));
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex justify-end bg-on-background/20 backdrop-blur-sm" onClick={onClose}>
@@ -326,27 +355,68 @@ function ItemPicker({
         </div>
         <div className="flex-1 overflow-y-auto p-md">
           <ul className="flex flex-col gap-xs">
-            {items.map((item) => (
-              <li key={item.id}>
-                <button
-                  onClick={() => onPick(item.id)}
-                  className="flex w-full items-center gap-md rounded-lg border border-transparent p-sm text-left transition-colors hover:border-outline-variant hover:bg-surface-container-low"
-                >
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.swatch}`}>
-                    <Icon name={item.icon} size={24} className="text-on-background/50" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-body-lg text-body-lg font-medium text-on-surface">{item.name}</div>
-                    <div className="font-data-mono text-data-mono text-on-surface-variant">
-                      {money(item.priceCents)}
+            {items.map((item) => {
+              const qty = selected[item.id] ?? 0;
+              return (
+                <li key={item.id}>
+                  <div
+                    className={`flex w-full items-center gap-md rounded-lg border p-sm text-left transition-colors ${
+                      qty > 0
+                        ? "border-primary/40 bg-primary-container/10"
+                        : "border-transparent hover:border-outline-variant hover:bg-surface-container-low"
+                    }`}
+                  >
+                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.swatch}`}>
+                      <Icon name={item.icon} size={24} className="text-on-background/50" />
                     </div>
+                    <button
+                      onClick={() => bump(item.id, 1)}
+                      className="flex-1 text-left"
+                    >
+                      <div className="font-body-lg text-body-lg font-medium text-on-surface">{item.name}</div>
+                      <div className="font-data-mono text-data-mono text-on-surface-variant">
+                        {money(item.priceCents)}
+                      </div>
+                    </button>
+                    {qty > 0 ? (
+                      <div className="flex items-center gap-xs">
+                        <button
+                          onClick={() => bump(item.id, -1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                        >
+                          <Icon name="remove" size={16} />
+                        </button>
+                        <span className="w-5 text-center font-data-mono text-data-mono text-on-surface">
+                          {qty}
+                        </span>
+                        <button
+                          onClick={() => bump(item.id, 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                        >
+                          <Icon name="add" size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => bump(item.id, 1)}>
+                        <Icon name="add_circle" className="text-primary" />
+                      </button>
+                    )}
                   </div>
-                  <Icon name="add_circle" className="text-primary" />
-                </button>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </div>
+        {totalCount > 0 && (
+          <div className="shrink-0 border-t border-outline-variant bg-surface p-md">
+            <button
+              onClick={confirm}
+              className="flex w-full items-center justify-center gap-xs rounded-lg bg-primary py-sm font-label-lg text-label-lg text-on-primary shadow-sm transition-colors hover:bg-primary-container"
+            >
+              Add {totalCount} {totalCount === 1 ? "Item" : "Items"} · {money(totalCents)}
+            </button>
+          </div>
+        )}
       </aside>
     </div>
   );

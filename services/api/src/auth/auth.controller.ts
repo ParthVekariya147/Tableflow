@@ -2,7 +2,7 @@ import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import type { AuthUser, LoginResponse, LoginResult } from "@amber/domain";
 import { AuthService } from "./auth.service.js";
-import { LoginDto, SelectTenantDto } from "./auth.dto.js";
+import { ChangePasswordDto, LoginDto, SelectTenantDto } from "./auth.dto.js";
 import { JwtAuthGuard } from "./jwt-auth.guard.js";
 import { SupabaseAuthGuard } from "./auth.guard.js";
 import { CurrentUser } from "./current-user.decorator.js";
@@ -34,6 +34,22 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser): AuthUser {
     return user;
+  }
+
+  /**
+   * Self-service password change — required before a member can do anything
+   * else while `AuthUser.mustChangePassword` is true (still a default
+   * `changeme123` password), but usable any time.
+   */
+  @Post("change-password")
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    const { currentPassword, newPassword } = ChangePasswordDto.parse(body);
+    await this.auth.changePassword(user.tenantId, user.id, currentPassword, newPassword);
+    return { ok: true };
   }
 
   /**

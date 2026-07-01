@@ -7,11 +7,13 @@ export function KdsColumn({
   badge,
   tickets,
   onAdvance,
+  advancingIds,
 }: {
   title: string;
   badge?: string;
   tickets: KdsTicket[];
   onAdvance: (ticket: KdsTicket) => void;
+  advancingIds: Set<string>;
 }) {
   return (
     <section className="flex flex-col h-full bg-surface-container-low rounded-lg border border-outline-variant overflow-hidden">
@@ -39,6 +41,7 @@ export function KdsColumn({
               key={ticket.id}
               ticket={ticket}
               onAdvance={onAdvance}
+              advancing={advancingIds.has(ticket.id)}
             />
           ))
         )}

@@ -46,9 +46,11 @@ function timerColor(seconds: number): string {
 export function TicketCard({
   ticket,
   onAdvance,
+  advancing = false,
 }: {
   ticket: KdsTicket;
   onAdvance: (ticket: KdsTicket) => void;
+  advancing?: boolean;
 }) {
   useTick(1000); // keep the elapsed timer ticking
   const ui = STAGE_UI[ticket.stage as Exclude<KdsStage, "served">];
@@ -137,10 +139,15 @@ export function TicketCard({
         {/* Action */}
         <button
           onClick={() => onAdvance(ticket)}
-          className={`w-full py-2 rounded-full font-bold text-[12px] tracking-wide flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all ${ui.button}`}
+          disabled={advancing}
+          className={`w-full py-2 rounded-full font-bold text-[12px] tracking-wide flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-70 disabled:active:scale-100 ${ui.button}`}
         >
-          <MaterialIcon name={ui.actionIcon} size={16} />
-          {ui.actionLabel}
+          <MaterialIcon
+            name={advancing ? "progress_activity" : ui.actionIcon}
+            size={16}
+            className={advancing ? "ag-spin" : ""}
+          />
+          {advancing ? "Updating…" : ui.actionLabel}
         </button>
       </div>
     </article>

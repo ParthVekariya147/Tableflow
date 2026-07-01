@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Sse,
+  UseGuards,
 } from "@nestjs/common";
 import { SkipThrottle } from "@nestjs/throttler";
 import { defer, from, map, merge, type Observable } from "rxjs";
@@ -23,6 +24,7 @@ import type {
 import { OrdersService } from "./orders.service.js";
 import { OrdersEvents, type OrderEvent } from "./orders.events.js";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
+import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import {
   addRoundSchema,
   createOrderSchema,
@@ -62,7 +64,8 @@ export class OrdersController {
     return merge(snapshot, this.events.stream(tenant.id));
   }
 
-  /** List sessions (defaults to live: open + billed). Optional ?status=. */
+  /** Staff-only: list sessions (defaults to live: open + billed). Optional ?status=. */
+  @UseGuards(JwtAuthGuard)
   @Get()
   list(
     @CurrentTenant() tenant: Tenant,
@@ -71,8 +74,17 @@ export class OrdersController {
     return this.orders.list(tenant.id, status);
   }
 
-  /** Completed sales (declared before :id so it isn't read as an id). Optional
-   *  ?from=&to= ISO window for the Order History page; omitted = recent feed. */
+  /** Table ids with a live session — lean occupancy check (declared before :id).
+   *  Used by the customer app's QR boot / reservation race guard instead of the
+   *  full `list("open")`, which carries the whole ROUND_INCLUDE graph. */
+  @Get("open-table-ids")
+  openTableIds(@CurrentTenant() tenant: Tenant): Promise<string[]> {
+    return this.orders.listOpenTableIds(tenant.id);
+  }
+
+  /** Staff-only: completed sales (declared before :id so it isn't read as an id).
+   *  Optional ?from=&to= ISO window for the Order History page; omitted = recent feed. */
+  @UseGuards(JwtAuthGuard)
   @Get("sales")
   sales(
     @CurrentTenant() tenant: Tenant,
@@ -82,8 +94,9 @@ export class OrdersController {
     return this.orders.listSales(tenant.id, { from, to });
   }
 
-  /** Aggregated analytics for the dashboard + Analytics page. Optional ?from=&to=
-   *  ISO window (defaults to the last 24h). Declared before :id. */
+  /** Staff-only: aggregated analytics for the dashboard + Analytics page. Optional
+   *  ?from=&to= ISO window (defaults to the last 24h). Declared before :id. */
+  @UseGuards(JwtAuthGuard)
   @Get("analytics")
   analytics(
     @CurrentTenant() tenant: Tenant,
@@ -93,6 +106,8 @@ export class OrdersController {
     return this.orders.getAnalytics(tenant.id, { from, to });
   }
 
+  /** Public — the guest app polls its own order (device-id bound); staff also
+   *  use this for a single order's detail. */
   @Get(":id")
   get(
     @CurrentTenant() tenant: Tenant,
@@ -103,8 +118,9 @@ export class OrdersController {
   }
 
   /**
-   * Re-bind an open session to a new device using phone-number ownership proof.
-   * Declared before ":id" routes so "reclaim" is never mistaken for an order id.
+   * Public — guest-only. Re-bind an open session to a new device using
+   * phone-number ownership proof. Declared before ":id" routes so "reclaim" is
+   * never mistaken for an order id.
    */
   @Post("reclaim")
   reclaim(
@@ -119,6 +135,8 @@ export class OrdersController {
     );
   }
 
+  /** Public — the guest app opens a session with no login; staff walk-in seating
+   *  (restaurant-admin's "Open Session") also calls this, sending no device id. */
   @Post()
   create(
     @CurrentTenant() tenant: Tenant,
@@ -132,6 +150,7 @@ export class OrdersController {
     );
   }
 
+  /** Public — guest-only round submission ("bring it" / "bring these"). */
   @Post(":id/rounds")
   addRound(
     @CurrentTenant() tenant: Tenant,
@@ -147,6 +166,8 @@ export class OrdersController {
     );
   }
 
+  /** Staff-only: add an item to a session on the guest's behalf. */
+  @UseGuards(JwtAuthGuard)
   @Post(":id/items")
   addItem(
     @CurrentTenant() tenant: Tenant,
@@ -156,6 +177,8 @@ export class OrdersController {
     return this.orders.addItem(tenant.id, id, addItemSchema.parse(body));
   }
 
+  /** Staff-only: change a line's qty and/or advance its kitchen status (KDS). */
+  @UseGuards(JwtAuthGuard)
   @Patch(":id/items/:itemId")
   updateItem(
     @CurrentTenant() tenant: Tenant,
@@ -171,6 +194,7 @@ export class OrdersController {
     );
   }
 
+  /** Public — guest-only bill request. */
   @Post(":id/bill")
   requestBill(
     @CurrentTenant() tenant: Tenant,
@@ -180,6 +204,8 @@ export class OrdersController {
     return this.orders.requestBill(tenant.id, id, deviceId);
   }
 
+  /** Staff-only: abandon a session without payment. */
+  @UseGuards(JwtAuthGuard)
   @Post(":id/cancel")
   cancel(
     @CurrentTenant() tenant: Tenant,
@@ -188,6 +214,9 @@ export class OrdersController {
     return this.orders.cancel(tenant.id, id);
   }
 
+  /** Public — the guest's "Pay Online" (card) and staff's cash capture both call
+   *  this with no distinguishing credential today; see PRODUCTION_READINESS_AUDIT.md
+   *  C3 for the remaining follow-up (a guest-scoped session token). */
   @Post(":id/payment")
   payment(
     @CurrentTenant() tenant: Tenant,

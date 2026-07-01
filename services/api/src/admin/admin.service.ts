@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import { PERMISSIONS, type Tenant } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { toDomainTenant } from "../tenant/tenant.mapper.js";
+import { TenantService } from "../tenant/tenant.service.js";
+import { AuthService } from "../auth/auth.service.js";
 import type { CreateTenantDto, UpdateTenantDto } from "./admin.dto.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 
@@ -46,7 +48,11 @@ export interface GetAuditLogOptions {
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantService: TenantService,
+    private readonly auth: AuthService,
+  ) {}
 
   async createTenant(dto: CreateTenantDto): Promise<Tenant> {
     const existing = await this.prisma.tenant.findUnique({
@@ -125,6 +131,16 @@ export class AdminService {
       where: { id },
       data: dto,
     });
+    // This write bypasses TenantService.update() (it needs `active`, which
+    // that self-service method deliberately doesn't expose) — so it must
+    // invalidate TenantService's getBySlug cache itself, or a just-suspended
+    // tenant keeps resolving (and fully operating) for up to the cache TTL.
+    this.tenantService.invalidateCache(row.slug);
+    // Also drop every cached AuthUser for this tenant — resolveAuthUser's
+    // `membership.tenant.active` check only re-runs on a cache miss, so
+    // without this a just-suspended tenant's staff would stay "logged in"
+    // for up to the auth-user cache TTL too.
+    this.auth.invalidateTenantAuthUsers(id);
 
     const type = dto.active === false ? "tenant_suspended" : dto.active === true ? "tenant_reactivated" : "tenant_updated";
     this.prisma.auditLog
@@ -140,20 +156,29 @@ export class AdminService {
     const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const d60 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
-    const [allPayments, payments30d, payments60d30d, activeSubs] = await Promise.all([
-      this.prisma.payment.findMany({ select: { total: true, method: true } }),
-      this.prisma.payment.findMany({
-        where: { createdAt: { gte: d30 } },
-        select: { total: true, method: true, createdAt: true, tenantId: true, orderId: true },
-      }),
-      this.prisma.payment.findMany({
-        where: { createdAt: { gte: d60, lt: d30 } },
-        select: { total: true },
-      }),
-      this.prisma.subscription.count({ where: { status: "active" } }),
-    ]);
+    // All-time GMV/method-split are computed in SQL (aggregate/groupBy)
+    // instead of loading every payment ever made into Node — this was an
+    // unbounded, ever-growing full-table scan.
+    const [gmvAgg, methodAgg, payments30d, payments60d30d, activeSubs, activeSubRows] =
+      await Promise.all([
+        this.prisma.payment.aggregate({ _sum: { total: true } }),
+        this.prisma.payment.groupBy({ by: ["method"], _sum: { total: true } }),
+        this.prisma.payment.findMany({
+          where: { createdAt: { gte: d30 } },
+          select: { total: true, method: true, createdAt: true, tenantId: true, orderId: true },
+        }),
+        this.prisma.payment.findMany({
+          where: { createdAt: { gte: d60, lt: d30 } },
+          select: { total: true },
+        }),
+        this.prisma.subscription.count({ where: { status: "active" } }),
+        this.prisma.subscription.findMany({
+          where: { status: "active" },
+          include: { plan: { select: { priceCents: true, interval: true } } },
+        }),
+      ]);
 
-    const totalGmvCents = allPayments.reduce((s, p) => s + p.total, 0);
+    const totalGmvCents = gmvAgg._sum.total ?? 0;
     const gmv30dCents = payments30d.reduce((s, p) => s + p.total, 0);
     const gmv60to30Cents = payments60d30d.reduce((s, p) => s + p.total, 0);
     const gmv30dDeltaPct = gmv60to30Cents > 0
@@ -167,10 +192,6 @@ export class AdminService {
       : 0;
 
     // MRR from active subscriptions
-    const activeSubRows = await this.prisma.subscription.findMany({
-      where: { status: "active" },
-      include: { plan: { select: { priceCents: true, interval: true } } },
-    });
     const mrrCents = activeSubRows.reduce((s, sub) => {
       const monthly = sub.plan.interval === "year" ? Math.round(sub.plan.priceCents / 12) : sub.plan.priceCents;
       return s + monthly;
@@ -210,11 +231,11 @@ export class AdminService {
       totalCents: tenantRevMap.get(id) ?? 0,
     }));
 
-    // Method split (all time)
-    const methodSplit = allPayments.reduce(
-      (acc, p) => {
-        if (p.method === "cash") acc.cash += p.total;
-        else acc.card += p.total;
+    // Method split (all time), computed in SQL via groupBy above.
+    const methodSplit = methodAgg.reduce(
+      (acc, m) => {
+        if (m.method === "cash") acc.cash += m._sum.total ?? 0;
+        else acc.card += m._sum.total ?? 0;
         return acc;
       },
       { cash: 0, card: 0 },

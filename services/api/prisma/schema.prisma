@@ -101,6 +101,10 @@ model User {
   /** Platform operator (super-admin app). Has no tenant memberships. */
   isSuperAdmin Boolean  @default(false)
   active       Boolean  @default(true)
+  /** True for a member still on their initial default password (see
+   *  members.service.ts DEFAULT_MEMBER_PASSWORD) — forces a change-password
+   *  screen client-side until they set their own. */
+  mustChangePassword Boolean @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -359,6 +363,7 @@ model Order {
 
   @@index([tenantId])
   @@index([tenantId, status]) // live-table / active-session lookups
+  @@index([tenantId, createdAt]) // sales / order-history sorting
   @@index([tableId])
   @@index([serverId])
 }
@@ -401,6 +406,7 @@ model OrderItem {
   modifiers  OrderItemModifier[]
 
   @@index([tenantId])
+  @@index([tenantId, status]) // active-item filtering (analytics, KDS self-heal)
   @@index([roundId])
   @@index([menuItemId])
 }

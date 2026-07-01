@@ -53,6 +53,7 @@ export class SupabaseAuthGuard implements CanActivate {
         roleName: "super-admin",
         roleProtected: true,
         permissions: [],
+        mustChangePassword: false,
       };
     }
 

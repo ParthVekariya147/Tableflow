@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  BadRequestException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -7,7 +8,14 @@ import {
 } from "@nestjs/common";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-/** Map common image mime types to a file extension for the stored object. */
+/**
+ * Allow-listed raster image mime types → stored file extension. `image/svg+xml`
+ * is deliberately EXCLUDED: an SVG can carry `<script>`/event-handler payloads
+ * and would be served back from the public bucket with the client-supplied
+ * content-type, i.e. a stored-XSS vector. This map is also the exact allow-list
+ * (see `isAllowedImageMime`) — there is no fallback to a client-supplied
+ * filename extension for anything outside it.
+ */
 const EXT_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -15,8 +23,13 @@ const EXT_BY_MIME: Record<string, string> = {
   "image/webp": "webp",
   "image/gif": "gif",
   "image/avif": "avif",
-  "image/svg+xml": "svg",
 };
+
+/** Exact allow-list check — NOT `mimetype.startsWith("image/")`, which would
+ *  also admit `image/svg+xml` and anything else with that prefix. */
+export function isAllowedImageMime(mimetype: string): boolean {
+  return mimetype in EXT_BY_MIME;
+}
 
 /**
  * Wraps Supabase Storage. Item photos are uploaded here (service-role key, so
@@ -79,10 +92,13 @@ export class StorageService implements OnModuleInit {
     if (!this.client)
       throw new ServiceUnavailableException("Image storage is not configured.");
 
-    const ext =
-      EXT_BY_MIME[file.mimetype] ??
-      file.originalname?.split(".").pop()?.toLowerCase() ??
-      "bin";
+    // Defense in depth: the controller already checks this, but the extension
+    // used in the storage KEY must never come from client-controlled input
+    // (originalname) — only ever from this fixed, server-side map.
+    const ext = EXT_BY_MIME[file.mimetype];
+    if (!ext) {
+      throw new BadRequestException(`Unsupported image type: ${file.mimetype}`);
+    }
     const path = `${tenantId}/${randomUUID()}.${ext}`;
 
     const { error } = await this.client.storage

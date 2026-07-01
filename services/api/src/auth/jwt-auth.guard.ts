@@ -42,7 +42,7 @@ export class JwtAuthGuard implements CanActivate {
     // They bypass the membership check and synthesize a full-access user so
     // platform support can navigate the tenant's admin panel.
     if (payload.imp) {
-      req.authUser = this.auth.resolveImpersonationUser(payload.tid, payload.slug ?? "");
+      req.authUser = await this.auth.resolveImpersonationUser(payload.tid, payload.slug ?? "");
       return true;
     }
 

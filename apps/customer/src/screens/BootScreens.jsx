@@ -44,6 +44,36 @@ export function InvalidQr({ reason }) {
 }
 
 /**
+ * Shown when re-verifying a saved session fails transiently (network blip,
+ * timeout, 5xx) rather than definitively (403/404 = really gone). We must NOT
+ * silently fall through to "nothing to resume" here — that would drop the
+ * guest onto an unrelated table and wipe their real order. Let them retry
+ * instead of guessing.
+ */
+export function ResumeError({ onRetry }) {
+  return (
+    <Shell>
+      <span className="material-symbols-outlined text-[48px] text-error">
+        wifi_off
+      </span>
+      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+        Couldn’t reconnect
+      </h1>
+      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+        We couldn’t check on your order — please check your connection and
+        try again.
+      </p>
+      <button
+        onClick={onRetry}
+        className="mt-2 bg-primary text-on-primary font-semibold py-3 px-8 rounded-full text-[15px]"
+      >
+        Try again
+      </button>
+    </Shell>
+  );
+}
+
+/**
  * Terminal screen for a device whose session has already been settled. After
  * paying, a refresh must NOT drop back into the ordering flow — the device can
  * only see this neutral page until it scans a fresh table QR to start anew.

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { kitchen } from "../kitchen";
 import { useBoot } from "./BootContext";
 import { writeSession, markSessionEnded } from "../session-store";
@@ -129,6 +129,13 @@ export function SessionProvider({ children }) {
   // actions so a settled guest can't keep writing rounds to a closed order.
   const sessionEndedRef = useRef(false);
 
+  // Re-entrancy guard for bringIt/bringThese: a double-tap (or a touch+click
+  // synthetic double-fire on some mobile browsers) fires both handlers before
+  // React re-renders any disabled state, so the guard has to live here rather
+  // than in a component's `processing` state (mirrors the pattern already
+  // proven in BillScreen.jsx, just centralized so every call site is covered).
+  const sendingRoundRef = useRef(false);
+
   // My Order (holding area — not yet sent)
   const [myOrder, setMyOrder] = useState([]);
 
@@ -139,6 +146,7 @@ export function SessionProvider({ children }) {
 
   // Toast notification
   const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
 
   // Item detail sheet
   const [sheetItem, setSheetItem] = useState(null);
@@ -150,8 +158,8 @@ export function SessionProvider({ children }) {
     async ({ customerName, customerPhone }) => {
       if (!table) throw new Error("No table — please rescan the QR code.");
 
-      const open = await api.orders.list("open");
-      if (open.some((o) => o.tableId === table.id)) {
+      const openTableIds = await api.orders.openTableIds();
+      if (openTableIds.includes(table.id)) {
         throw new Error("This table was just taken. Please ask a staff member.");
       }
 
@@ -172,8 +180,14 @@ export function SessionProvider({ children }) {
   );
 
   const showToast = useCallback((msg, icon = "check_circle") => {
+    // Clear any pending dismiss from a previous toast — otherwise its timer
+    // fires later and cuts THIS toast short instead of the one it was set for.
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ msg, icon, id: Date.now() });
-    setTimeout(() => setToast(null), 2800);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, 2800);
   }, []);
 
   // Add to My Order queue. Plain items (no modifiers) merge with an existing
@@ -268,6 +282,9 @@ export function SessionProvider({ children }) {
   // refreshed/settled client can't fire a phantom ticket at the KDS.
   const bringIt = useCallback((item, qty = 1, modifiers = []) => {
     if (sessionEndedRef.current || !orderIdRef.current) return;
+    if (sendingRoundRef.current) return; // double-tap guard — see sendingRoundRef
+    sendingRoundRef.current = true;
+    setTimeout(() => { sendingRoundRef.current = false; }, 800);
     const round = {
       id: newId("rnd"),
       type: "instant",
@@ -284,6 +301,9 @@ export function SessionProvider({ children }) {
   // Bring these — send full My Order queue to kitchen
   const bringThese = useCallback(() => {
     if (sessionEndedRef.current || !orderIdRef.current || myOrder.length === 0) return;
+    if (sendingRoundRef.current) return; // double-tap guard — see sendingRoundRef
+    sendingRoundRef.current = true;
+    setTimeout(() => { sendingRoundRef.current = false; }, 800);
     const round = {
       id: newId("rnd"),
       type: "bundled",
@@ -512,17 +532,31 @@ export function SessionProvider({ children }) {
     };
   }, [sessionStarted, sessionEnded, awaitingCash, api, endSession]);
 
+  // Memoized so every consumer doesn't re-render on every SessionProvider
+  // render (e.g. the 15s self-heal poll's own state churn) — only when a
+  // value it actually reads changes.
+  const value = useMemo(() => ({
+    tableNumber, sessionStarted, startSession, sessionStartTime,
+    myOrder, addToOrder, updateOrderQty, removeFromOrder,
+    myOrderTotal, myOrderCount,
+    rounds, bringIt, bringThese,
+    billTotal, taxRate, billRequested, requestBill, payBill,
+    sessionEnded, sessionCancelled, awaitingCash, paidMethod,
+    toast, showToast,
+    sheetItem, setSheetItem,
+  }), [
+    tableNumber, sessionStarted, startSession, sessionStartTime,
+    myOrder, addToOrder, updateOrderQty, removeFromOrder,
+    myOrderTotal, myOrderCount,
+    rounds, bringIt, bringThese,
+    billTotal, taxRate, billRequested, requestBill, payBill,
+    sessionEnded, sessionCancelled, awaitingCash, paidMethod,
+    toast, showToast,
+    sheetItem, setSheetItem,
+  ]);
+
   return (
-    <SessionContext.Provider value={{
-      tableNumber, sessionStarted, startSession, sessionStartTime,
-      myOrder, addToOrder, updateOrderQty, removeFromOrder,
-      myOrderTotal, myOrderCount,
-      rounds, bringIt, bringThese,
-      billTotal, taxRate, billRequested, requestBill, payBill,
-      sessionEnded, sessionCancelled, awaitingCash, paidMethod,
-      toast, showToast,
-      sheetItem, setSheetItem,
-    }}>
+    <SessionContext.Provider value={value}>
       {children}
     </SessionContext.Provider>
   );

@@ -29,6 +29,7 @@ export const api = {
         roleName: "super-admin",
         roleProtected: true,
         permissions: [],
+        mustChangePassword: false,
       };
     },
   },

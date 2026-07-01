@@ -15,15 +15,46 @@ import {
   type Permission,
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
+import { TtlCache } from "../common/ttl-cache.js";
 import type { JwtPayload, TicketPayload } from "./auth.types.js";
 import type { SupabaseClaims } from "./auth-request.js";
 
+// JwtAuthGuard calls resolveAuthUser on EVERY authenticated request (by design,
+// so role/permission changes apply immediately). A short cache removes the two
+// DB round trips for the common case; members/roles services invalidate the
+// relevant entries on write so edits still take effect right away.
+const AUTH_USER_CACHE_TTL_MS = 30_000;
+const authUserCacheKey = (tenantId: string, userId: string): string =>
+  `${tenantId}:${userId}`;
+
+// Only the global per-IP ThrottlerGuard (120 req/60s) covers /auth/login today —
+// no per-account limit, so a determined attacker sharing that generous per-IP
+// budget (or distributing across IPs) faces no account-level friction. Locked
+// out per-EMAIL (not per-IP — restaurant guest wifi/offices commonly NAT many
+// legitimate users behind one IP).
+const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 8;
+
 @Injectable()
 export class AuthService {
+  private readonly authUserCache = new TtlCache<AuthUser>(AUTH_USER_CACHE_TTL_MS);
+  private readonly loginAttempts = new TtlCache<number>(LOGIN_LOCKOUT_WINDOW_MS);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
   ) {}
+
+  /** Drop one member's cached AuthUser (their role/permissions/active changed). */
+  invalidateAuthUser(tenantId: string, userId: string): void {
+    this.authUserCache.delete(authUserCacheKey(tenantId, userId));
+  }
+
+  /** Drop every cached AuthUser for a tenant (a role's permissions changed,
+   *  affecting everyone on it — we don't track role→members here). */
+  invalidateTenantAuthUsers(tenantId: string): void {
+    this.authUserCache.deletePrefix(`${tenantId}:`);
+  }
 
   /**
    * Email-first login (NOT tenant-scoped). Verify email + password globally, then
@@ -35,10 +66,18 @@ export class AuthService {
    *   password was already checked, so the second step doesn't resend it.
    */
   async login(email: string, password: string): Promise<LoginResult> {
+    const emailKey = email.toLowerCase();
+    if ((this.loginAttempts.get(emailKey) ?? 0) >= LOGIN_MAX_ATTEMPTS) {
+      throw new UnauthorizedException(
+        "Too many failed attempts. Please try again later.",
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: emailKey },
     });
     if (!user || !user.active) {
+      this.recordFailedLogin(emailKey);
       throw new UnauthorizedException("Invalid email or password");
     }
 
@@ -49,13 +88,17 @@ export class AuthService {
 
     if (!isMasterLogin) {
       if (!user.passwordHash) {
+        this.recordFailedLogin(emailKey);
         throw new UnauthorizedException("Invalid email or password");
       }
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) {
+        this.recordFailedLogin(emailKey);
         throw new UnauthorizedException("Invalid email or password");
       }
     }
+    // Correct credentials — clear this email's failed-attempt counter.
+    this.loginAttempts.delete(emailKey);
 
     const memberships = await this.prisma.membership.findMany({
       where: { userId: user.id, active: true, tenant: { active: true } },
@@ -88,6 +131,10 @@ export class AuthService {
     };
   }
 
+  private recordFailedLogin(emailKey: string): void {
+    this.loginAttempts.set(emailKey, (this.loginAttempts.get(emailKey) ?? 0) + 1);
+  }
+
   /**
    * Second step of a multi-tenant login: redeem the ticket for the chosen tenant.
    * Verifies the ticket, confirms the user still has active access to that tenant,
@@ -111,6 +158,35 @@ export class AuthService {
       throw new UnauthorizedException("No access to this restaurant");
     }
     return this.issueToken(tenantId, payload.sub);
+  }
+
+  /**
+   * Self-service password change. Verifies the CURRENT password (a real
+   * credential check, even when the caller is on the forced default) before
+   * setting the new one, and clears `mustChangePassword` + any cached
+   * AuthUser/login-attempt state for this user so the change takes effect
+   * immediately.
+   */
+  async changePassword(
+    tenantId: string,
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.active || !user.passwordHash) {
+      throw new UnauthorizedException("Account not found or has no password set");
+    }
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException("Current password is incorrect");
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, mustChangePassword: false },
+    });
+    this.invalidateAuthUser(tenantId, userId);
   }
 
   /** Resolve the user + sign a 12h access token bound to the chosen tenant. */
@@ -167,6 +243,7 @@ export class AuthService {
       roleName: "super-admin",
       roleProtected: true,
       permissions: [],
+      mustChangePassword: false,
     };
   }
 
@@ -186,8 +263,20 @@ export class AuthService {
     return { sub: data.user.id, email: data.user.email };
   }
 
-  /** Synthetic AuthUser for an impersonation session (all permissions granted). */
-  resolveImpersonationUser(tenantId: string, tenantSlug: string): AuthUser {
+  /**
+   * Synthetic AuthUser for an impersonation session (all permissions granted).
+   * The JWT alone only proves it was signed for `tenantId` — it carries no
+   * check that the tenant still exists or hasn't been suspended since the
+   * token was issued, so verify both here before granting the full-access
+   * session.
+   */
+  async resolveImpersonationUser(tenantId: string, tenantSlug: string): Promise<AuthUser> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || !tenant.active) {
+      throw new UnauthorizedException(
+        "Impersonated tenant no longer exists or is inactive",
+      );
+    }
     return {
       id: "platform-support",
       email: "support@amber.platform",
@@ -199,6 +288,7 @@ export class AuthService {
       roleName: "Support (Impersonated)",
       roleProtected: false,
       permissions: [...PERMISSIONS],
+      mustChangePassword: false,
     };
   }
 
@@ -214,6 +304,10 @@ export class AuthService {
   }
 
   async resolveAuthUser(tenantId: string, userId: string): Promise<AuthUser> {
+    const cacheKey = authUserCacheKey(tenantId, userId);
+    const cached = this.authUserCache.get(cacheKey);
+    if (cached) return cached;
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.active) {
       throw new UnauthorizedException("User no longer active");
@@ -225,12 +319,20 @@ export class AuthService {
     if (!membership || !membership.active) {
       throw new UnauthorizedException("No access to this restaurant");
     }
+    // Explicit guard, not incidental: today `TenantMiddleware` independently
+    // 404s on an inactive tenant, which happens to save this path too, but
+    // this method must not rely on that side effect to stay correct — a
+    // just-suspended tenant's staff must be logged out immediately, not up to
+    // 30s later or whenever some other module's check happens to also apply.
+    if (!membership.tenant.active) {
+      throw new UnauthorizedException("This restaurant is no longer active");
+    }
 
     const rolePerms = sanitize(membership.role.permissions);
     const overridePerms = sanitize(membership.permissions);
     const permissions = effectivePermissions(rolePerms, overridePerms);
 
-    return {
+    const authUser: AuthUser = {
       id: user.id,
       email: user.email,
       name: user.name,
@@ -241,7 +343,10 @@ export class AuthService {
       roleName: membership.role.name,
       roleProtected: membership.role.protected,
       permissions,
+      mustChangePassword: user.mustChangePassword,
     };
+    this.authUserCache.set(cacheKey, authUser);
+    return authUser;
   }
 }
 

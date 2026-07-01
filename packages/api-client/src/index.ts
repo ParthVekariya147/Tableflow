@@ -14,6 +14,7 @@ import {
   tableSchema,
   floorTableSchema,
   orderSchema,
+  openTableIdsSchema,
   paymentSchema,
   saleSchema,
   analyticsSummarySchema,
@@ -303,6 +304,17 @@ export function createApiClient(config: ApiClientConfig) {
           method: "POST",
           schema: authUserSchema,
         }),
+      /**
+       * Self-service password change. Required before proceeding while
+       * `AuthUser.mustChangePassword` is true (still on the default
+       * `changeme123`), but callable any time.
+       */
+      changePassword: (currentPassword: string, newPassword: string): Promise<{ ok: true }> =>
+        request(config, "/auth/change-password", {
+          method: "POST",
+          body: { currentPassword, newPassword },
+          schema: z.object({ ok: z.literal(true) }),
+        }),
     },
 
     /** Tenant-scoped, read-only billing info (restaurant-admin plan page). */
@@ -485,6 +497,13 @@ export function createApiClient(config: ApiClientConfig) {
           status ? `/orders?status=${encodeURIComponent(status)}` : "/orders",
           { schema: z.array(orderSchema) },
         ),
+      /** Table ids currently holding a live session — a lean occupancy check
+       *  (used by the customer app's QR boot / reservation race guard) instead
+       *  of `list("open")`, which carries the whole order graph. */
+      openTableIds: (): Promise<string[]> =>
+        request(config, "/orders/open-table-ids", {
+          schema: openTableIdsSchema,
+        }),
       /** Completed sales. With a `from`/`to` ISO window, returns every sale in
        *  that range (Order History); without it, the recent dashboard feed. */
       sales: (range?: { from?: string; to?: string }): Promise<Sale[]> => {
@@ -561,11 +580,16 @@ export function createApiClient(config: ApiClientConfig) {
           body: input,
           schema: orderSchema,
         }),
-      /** Change a line's qty (0 removes) and/or advance its kitchen status. */
+      /**
+       * Change a line's qty and/or advance its kitchen status. Prefer
+       * `qtyDelta` (relative +/-N, applied atomically server-side) over `qty`
+       * (absolute; qty:0 removes the line) for stepper-style changes so two
+       * rapid taps can't clobber each other via a stale client-side snapshot.
+       */
       updateItem: (
         orderId: string,
         itemId: string,
-        input: { qty?: number; status?: ItemStatus },
+        input: { qty?: number; qtyDelta?: number; status?: ItemStatus },
       ): Promise<Order> =>
         request(
           config,

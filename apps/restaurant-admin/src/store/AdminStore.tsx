@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createApiClient } from "@amber/api-client";
+import { createApiClient, type OrderStreamEvent } from "@amber/api-client";
 import type {
   Menu as DomainMenu,
   FloorTable,
@@ -28,6 +28,7 @@ import { defaultTenant } from "../tenant/defaultTenant";
 import { useAuth } from "../context/AuthContext";
 import { getStoredToken } from "../lib/auth-token";
 import { getStoredTenantSlug } from "../lib/auth-tenant";
+import { fetchCurrentTenantCoalesced } from "../lib/tenant-fetch";
 import { kdsClient } from "../kds/kdsClient";
 import { createMoneyFormatter, currencySymbolFor } from "../lib/money";
 import { AppShellSkeleton } from "../components/Skeleton";
@@ -77,7 +78,11 @@ type Action =
   | { type: "REGEN_QR"; tableId: string }
   | { type: "UPDATE_TABLE"; tableId: string; patch: Partial<Table> }
   | { type: "DELETE_TABLE"; tableId: string }
-  | { type: "ADD_ORDER_ITEM"; tableId: string; menuItemId: string }
+  | {
+      type: "ADD_ORDER_ITEMS";
+      tableId: string;
+      items: Array<{ menuItemId: string; qty: number }>;
+    }
   | { type: "CHANGE_QTY"; tableId: string; roundId: string; itemId: string; delta: number }
   | { type: "CANCEL_ITEM"; tableId: string; roundId: string; itemId: string }
   | { type: "CANCEL_ORDER"; tableId: string }
@@ -219,6 +224,13 @@ interface AdminContextValue {
   /** Items being created right now, shown as "crafting" skeletons in the grid. */
   pendingItems: PendingItem[];
   error: string | null;
+  /**
+   * Subscribe to the store's single `/orders/stream` connection instead of
+   * opening a second one — the KDS board (mounted at `/kds` and `/kds/display`,
+   * both inside this provider) taps this rather than calling
+   * `api.orders.stream` itself, so an open KDS tab holds one connection, not two.
+   */
+  subscribeOrderEvents: (handler: (event: OrderStreamEvent) => void) => () => void;
 }
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -252,13 +264,24 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const mutatingRef = useRef(false);
   mutatingRef.current = mutateCount > 0;
 
+  // Monotonic counter shared by `refresh`/`refreshFloor`. Both can be
+  // triggered from independent sources (the SSE stream, the poll interval,
+  // focus/visibilitychange, an explicit page-level `refresh()` call) that can
+  // race — an EARLIER request resolving AFTER a LATER one (ordinary network
+  // jitter) would otherwise silently revert state to stale data. Each call
+  // captures its own sequence number and only applies its result if nothing
+  // newer has started since.
+  const syncSeqRef = useRef(0);
+
   const refresh = useCallback(async () => {
+    const seq = ++syncSeqRef.current;
     const [tenant, menu, floor, sales] = await Promise.all([
-      api.tenant.current(),
+      fetchCurrentTenantCoalesced(() => api.tenant.current()),
       api.menu.get(),
       api.tables.list(),
       api.orders.sales(),
     ]);
+    if (seq !== syncSeqRef.current) return; // superseded by a newer sync
     setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency, tenant.gstNumber, tenant.upiId, tenant.upiMobile, tenant.name));
     setLoaded(true);
   }, [api]);
@@ -267,10 +290,12 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // order mutation, so leave menu/categories/taxRate untouched (less load than a
   // full `refresh`). Driven by the SSE stream below.
   const refreshFloor = useCallback(async () => {
+    const seq = ++syncSeqRef.current;
     const [floor, sales] = await Promise.all([
       api.tables.list(),
       api.orders.sales(),
     ]);
+    if (seq !== syncSeqRef.current) return; // superseded by a newer sync
     setState((s) => ({
       ...s,
       tables: floor.map(mapTable),
@@ -284,6 +309,39 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     }));
   }, [api]);
 
+  // Listeners registered via `subscribeOrderEvents` (e.g. the KDS board) — fed
+  // from the single stream subscription below instead of opening their own.
+  // `liveOrdersRef` mirrors the current live floor (by order id) so a listener
+  // that subscribes AFTER the initial snapshot already arrived (e.g. navigating
+  // to /kds once the app is already loaded) still gets an equivalent seed —
+  // otherwise it would only see later deltas and never learn about orders that
+  // were already live.
+  const orderEventListenersRef = useRef<Set<(event: OrderStreamEvent) => void>>(
+    new Set(),
+  );
+  const liveOrdersRef = useRef<Map<string, DomainOrder>>(new Map());
+  // Whether the real stream has delivered its first snapshot yet — NOT the
+  // same as "liveOrdersRef has entries". A tenant with zero live tables gets
+  // a legitimately EMPTY snapshot; keying the synthetic-seed-on-subscribe
+  // below off `liveOrdersRef.current.size > 0` treated "0 live orders" the
+  // same as "snapshot never arrived", so a late subscriber (e.g. KDS, which
+  // mounts after AdminStore already loaded) never got seeded and `connected`
+  // stayed false forever — the board showed a permanent "Connecting…" even
+  // though the stream was fine and genuinely had nothing to report.
+  const hasSnapshotRef = useRef(false);
+  const subscribeOrderEvents = useCallback(
+    (handler: (event: OrderStreamEvent) => void) => {
+      if (hasSnapshotRef.current) {
+        handler({ type: "snapshot", orders: [...liveOrdersRef.current.values()] });
+      }
+      orderEventListenersRef.current.add(handler);
+      return () => {
+        orderEventListenersRef.current.delete(handler);
+      };
+    },
+    [],
+  );
+
   // Load only once signed in, and (re)load when the active tenant changes — so a
   // logout clears the floor and a login to a different restaurant refetches it.
   // Before auth there's no tenant to scope to, so we don't hit the API at all.
@@ -292,6 +350,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     if (status !== "authed") {
       setState(EMPTY_STATE);
       setLoaded(false);
+      // Drop the previous tenant's live-order mirror so a stale snapshot
+      // can't leak into a different tenant's session after a re-login.
+      hasSnapshotRef.current = false;
+      liveOrdersRef.current = new Map();
       return;
     }
     refresh().catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -302,10 +364,26 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // on the floor instantly. Coalesce bursts (snapshot + deltas) into one floor
   // refetch, and skip while a local mutation (+ its refetch) is in flight so a
   // pushed event can't clobber optimistic state (existing `mutatingRef` guard).
+  // This is the ONE `/orders/stream` connection for the whole app — other
+  // consumers (KDS) subscribe via `subscribeOrderEvents` above rather than
+  // opening a second EventSource.
   useEffect(() => {
     if (!loaded) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsub = api.orders.stream((event) => {
+      // Keep the live-orders mirror in sync so a late `subscribeOrderEvents`
+      // caller can be seeded correctly (see liveOrdersRef above).
+      if (event.type === "snapshot") {
+        hasSnapshotRef.current = true;
+        liveOrdersRef.current = new Map(event.orders.map((o) => [o.id, o]));
+      } else if (event.type === "closed") {
+        liveOrdersRef.current.delete(event.orderId);
+      } else {
+        liveOrdersRef.current.set(event.orderId, event.order);
+      }
+
+      for (const handler of orderEventListenersRef.current) handler(event);
+
       // An order that just closed (staff cancelled, or settled) must vanish from
       // the KDS too — otherwise the kitchen keeps seeing a dead order and can
       // advance it (writing a bogus status back to the guest). The relay is
@@ -327,26 +405,40 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   }, [loaded, api, refreshFloor]);
 
   // Background sync — low-frequency self-heal fallback behind the SSE stream
-  // above (covers a dropped stream, e.g. a backgrounded tab, and resyncs menu).
+  // above (covers a dropped stream, e.g. a backgrounded tab). Only resyncs
+  // floor + sales (via `refreshFloor`), not menu — menu only changes through
+  // explicit admin edits, which already trigger their own full `refresh()` in
+  // `dispatch` — so polling it here was pure redundant `/menu` traffic for
+  // every page, including ones (like KDS) that never read menu state at all.
   // Polls while the tab is visible and refetches immediately on focus; skips
   // while a mutation (+ its own refetch) is in flight to avoid clobbering
   // optimistic state.
   useEffect(() => {
     if (!loaded) return;
     const POLL_MS = 20000;
+    // `visibilitychange` and `focus` commonly both fire within the same tick
+    // when switching back to a backgrounded tab — debounce them behind one
+    // trigger (mirrors the SSE handler's 150ms coalescing above) instead of
+    // firing two redundant refetches.
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
     const syncNow = () => {
-      if (document.hidden || mutatingRef.current) return;
-      refresh().catch(() => {});
+      if (document.hidden || mutatingRef.current || debounceTimer) return;
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        if (mutatingRef.current) return;
+        refreshFloor().catch(() => {});
+      }, 150);
     };
     const id = setInterval(syncNow, POLL_MS);
     document.addEventListener("visibilitychange", syncNow);
     window.addEventListener("focus", syncNow);
     return () => {
       clearInterval(id);
+      if (debounceTimer) clearTimeout(debounceTimer);
       document.removeEventListener("visibilitychange", syncNow);
       window.removeEventListener("focus", syncNow);
     };
-  }, [loaded, refresh]);
+  }, [loaded, refreshFloor]);
 
   const orderIdFor = useCallback((tableId: string): string | undefined => {
     return stateRef.current.tables.find((t) => t.id === tableId)?.session
@@ -437,23 +529,39 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "DELETE_TABLE":
           await api.tables.remove(action.tableId);
           return;
-        case "ADD_ORDER_ITEM": {
+        case "ADD_ORDER_ITEMS": {
           const orderId = orderIdFor(action.tableId);
-          if (orderId)
-            await api.orders.addItem(orderId, { menuItemId: action.menuItemId });
+          if (!orderId || action.items.length === 0) return;
+          // One `addRound` call for the whole batch (same endpoint the guest
+          // app's "Bring these" uses) instead of one `addItem` POST per item —
+          // an N-item add from the picker is 1 request instead of N, each of
+          // which used to also trigger its own full floor refetch.
+          const roundItems = action.items
+            .map((sel) => {
+              const menuItem = stateRef.current.items.find((i) => i.id === sel.menuItemId);
+              if (!menuItem) return null;
+              return {
+                menuItemId: menuItem.id,
+                name: menuItem.name,
+                unitPrice: menuItem.priceCents,
+                qty: sel.qty,
+              };
+            })
+            .filter((i): i is NonNullable<typeof i> => i !== null);
+          if (roundItems.length === 0) return;
+          await api.orders.addRound(orderId, { type: "bundled", items: roundItems });
           return;
         }
         case "CHANGE_QTY": {
           const orderId = orderIdFor(action.tableId);
-          const table = stateRef.current.tables.find(
-            (t) => t.id === action.tableId,
-          );
-          const item = table?.session?.rounds
-            .flatMap((r) => r.items)
-            .find((i) => i.id === action.itemId);
-          if (orderId && item)
+          // Send the relative delta rather than computing `item.qty + delta`
+          // from this client's cached snapshot — the server applies it as an
+          // atomic DB increment, so two rapid taps (or two staff devices on
+          // the same table) both land instead of the second silently
+          // clobbering the first's write.
+          if (orderId)
             await api.orders.updateItem(orderId, action.itemId, {
-              qty: Math.max(0, item.qty + action.delta),
+              qtyDelta: action.delta,
             });
           return;
         }
@@ -493,6 +601,25 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     [api, orderIdFor],
   );
 
+  // Menu/category actions change items the floor refetch doesn't cover
+  // (categories, item fields, tenant taxRate/currency) — those need the full
+  // 4-call refresh. Table/session/payment actions only ever change tables +
+  // sales, so the lighter 2-call refreshFloor (already used by the SSE
+  // handler) is enough and halves the API calls for the common case.
+  const MENU_ACTION_TYPES = useMemo(
+    () =>
+      new Set<Action["type"]>([
+        "TOGGLE_AVAILABILITY",
+        "UPDATE_ITEM",
+        "ADD_ITEM",
+        "DELETE_ITEM",
+        "ADD_CATEGORY",
+        "UPDATE_CATEGORY",
+        "DELETE_CATEGORY",
+      ]),
+    [],
+  );
+
   const dispatch = useCallback(
     async (action: Action): Promise<void> => {
       // Optimistic "crafting" placeholder so the new item appears immediately.
@@ -515,13 +642,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        await refresh().catch(() => {});
+        const resync = MENU_ACTION_TYPES.has(action.type) ? refresh : refreshFloor;
+        await resync().catch(() => {});
         setMutateCount((c) => Math.max(0, c - 1));
         if (tempId)
           setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
       }
     },
-    [apply, refresh],
+    [apply, refresh, refreshFloor, MENU_ACTION_TYPES],
   );
 
   const uploadImage = useCallback(
@@ -555,8 +683,9 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       mutating: mutateCount > 0,
       pendingItems,
       error,
+      subscribeOrderEvents,
     }),
-    [state, dispatch, refresh, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error],
+    [state, dispatch, refresh, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error, subscribeOrderEvents],
   );
 
   // Only block on the floor/menu data load once the user is signed in. Before

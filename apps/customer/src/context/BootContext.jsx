@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@amber/api-client";
 import { createGuestApi, DEFAULT_SLUG } from "../api";
-import { BootSplash, InvalidQr, TableInUse, SessionClosed } from "../screens/BootScreens";
+import { BootSplash, InvalidQr, TableInUse, SessionClosed, ResumeError } from "../screens/BootScreens";
 import { readSession, writeSession, clearSession, markSessionEnded } from "../session-store";
 
 /**
@@ -44,6 +44,10 @@ const LIVE = ["open", "billed"];
 
 export function BootProvider({ children }) {
   const [boot, setBoot] = useState({ status: "loading" });
+  // Bumped by the "Try again" button on ResumeError to re-run the whole boot
+  // sequence below (a transient resume failure must not fall through to the
+  // dev-fallback path — see the `!parsed` branch).
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -78,6 +82,11 @@ export function BootProvider({ children }) {
     }
 
     (async () => {
+      // Reset to the splash on a retry (harmless no-op on the initial mount,
+      // where boot is already "loading") so "Try again" doesn't leave the
+      // error screen showing while the resume check re-runs.
+      if (retryNonce > 0 && active) setBoot({ status: "loading" });
+
       const parsed = parseEntryPath(window.location.pathname);
       const saved = readSession();
 
@@ -99,13 +108,23 @@ export function BootProvider({ children }) {
 
       // ── No QR in the path: refresh / direct visit → try resume first ──────
       if (!parsed) {
+        const hadSavedSession = Boolean(saved?.orderId);
         const resumed = await tryResume(api, saved);
         if (!active) return;
         if (resumed) {
           setBoot(resumed.status === "ready" ? { ...resumed, menuPromise } : resumed);
           return;
         }
-        // Nothing to resume — dev fallback so the app stays runnable locally.
+        // `resumed === null` means tryResume hit a TRANSIENT failure (network/5xx),
+        // not "there was nothing to resume" (that returns {status:"closed"} and is
+        // handled above). If we had a real saved session, do NOT fall through to
+        // the free-table dev-fallback below — that would silently wipe the guest's
+        // live order and reseat them at an unrelated table. Let them retry instead.
+        if (hadSavedSession) {
+          setBoot({ status: "resume-error" });
+          return;
+        }
+        // Genuinely nothing to resume — dev fallback so the app stays runnable locally.
       }
 
       // ── Fresh QR scan, or dev fallback ────────────────────────────────────
@@ -116,15 +135,15 @@ export function BootProvider({ children }) {
           : api.tables
               .list()
               .then((floor) => floor.find((t) => t.status === "free") ?? floor[0]);
-        const [tenant, table, open] = await Promise.all([
+        const [tenant, table, openTableIds] = await Promise.all([
           api.tenant.bySlug(slug),
           tablePromise,
-          api.orders.list("open"),
+          api.orders.openTableIds(),
         ]);
         if (!table) throw new ApiError(404, "No tables configured");
 
         // Occupancy: a free table has no order in the "open"/"billed" set.
-        const occupied = open.some((o) => o.tableId === table.id);
+        const occupied = openTableIds.includes(table.id);
 
         if (occupied) {
           // It might be THIS device's session (e.g. re-scanned after refresh) —
@@ -160,10 +179,29 @@ export function BootProvider({ children }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [retryNonce]);
+
+  // Memoized so every consumer doesn't re-render whenever BootProvider does —
+  // only when one of these fields actually changes. Computed unconditionally
+  // (before the status early-returns below) since hooks can't be called
+  // conditionally; it's simply unused on the non-"ready" render paths.
+  const bootValue = useMemo(
+    () => ({
+      api: boot.api,
+      tenant: boot.tenant,
+      table: boot.table,
+      resumeOrder: boot.resumeOrder ?? null,
+      // Menu fetch kicked off during boot (overlaps the boot calls) so the menu
+      // is usually already in flight / resolved by the time MenuProvider mounts.
+      menuPromise: boot.menuPromise ?? null,
+    }),
+    [boot.api, boot.tenant, boot.table, boot.resumeOrder, boot.menuPromise],
+  );
 
   if (boot.status === "loading") return <BootSplash />;
   if (boot.status === "invalid") return <InvalidQr reason={boot.reason} />;
+  if (boot.status === "resume-error")
+    return <ResumeError onRetry={() => setRetryNonce((n) => n + 1)} />;
   if (boot.status === "occupied")
     return (
       <TableInUse
@@ -190,17 +228,7 @@ export function BootProvider({ children }) {
   if (boot.status === "closed") return <SessionClosed />;
 
   return (
-    <BootContext.Provider
-      value={{
-        api: boot.api,
-        tenant: boot.tenant,
-        table: boot.table,
-        resumeOrder: boot.resumeOrder ?? null,
-        // Menu fetch kicked off during boot (overlaps the boot calls) so the menu
-        // is usually already in flight / resolved by the time MenuProvider mounts.
-        menuPromise: boot.menuPromise ?? null,
-      }}
-    >
+    <BootContext.Provider value={bootValue}>
       {children}
     </BootContext.Provider>
   );

@@ -34,6 +34,9 @@ interface AuthContextValue {
   /** Step two of a multi-tenant login: redeem the ticket for the chosen tenant. */
   selectTenant: (ticket: string, tenantId: string) => Promise<AuthUser>;
   logout: () => void;
+  /** Locally clear `mustChangePassword` right after a successful change —
+   *  avoids a redundant `GET /auth/me` round trip just to unblock the app. */
+  clearMustChangePassword: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -61,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Decode the JWT (no verification needed client-side — the API verifies it).
       try {
         const [, payload] = impToken.split(".");
+        if (!payload) throw new Error("Invalid token");
         const claims = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
         if (claims.imp && claims.slug) {
           setStoredToken(impToken);
@@ -146,9 +150,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  const clearMustChangePassword = useCallback(() => {
+    setUser((u) => (u ? { ...u, mustChangePassword: false } : u));
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, can, login, selectTenant, logout }),
-    [status, user, can, login, selectTenant, logout],
+    () => ({ status, user, can, login, selectTenant, logout, clearMustChangePassword }),
+    [status, user, can, login, selectTenant, logout, clearMustChangePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
