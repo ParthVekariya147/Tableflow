@@ -8,7 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createApiClient, type OrderStreamEvent } from "@amber/api-client";
+import {
+  ApiError,
+  createApiClient,
+  type OrderStreamEvent,
+} from "@amber/api-client";
 import type {
   Menu as DomainMenu,
   FloorTable,
@@ -257,6 +261,21 @@ interface AdminContextValue {
 
 const AdminContext = createContext<AdminContextValue | null>(null);
 
+/**
+ * A permission-gated list endpoint returns [] instead of throwing when the
+ * signed-in user lacks the permission (403). This keeps the store's initial
+ * load resilient for lower-privilege roles — e.g. a Kitchen user (kds.use only)
+ * can't read the floor/sales, but load must still finish and set `loaded` so
+ * the order stream (which the KDS board depends on) subscribes. Any other error
+ * still propagates so real failures surface.
+ */
+function emptyOn403<T>(p: Promise<T[]>): Promise<T[]> {
+  return p.catch((e) => {
+    if (e instanceof ApiError && e.status === 403) return [];
+    throw e;
+  });
+}
+
 export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // Scope every call to the *logged-in* tenant (read at call time) and carry the
   // bearer token — so the store follows whichever restaurant the user signed into.
@@ -300,8 +319,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     const [tenant, menu, floor, sales] = await Promise.all([
       fetchCurrentTenantCoalesced(() => api.tenant.current()),
       api.menu.get(),
-      api.tables.list(),
-      api.orders.sales(),
+      emptyOn403(api.tables.list()),
+      emptyOn403(api.orders.sales()),
     ]);
     if (seq !== syncSeqRef.current) return; // superseded by a newer sync
     setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency, tenant.gstNumber, tenant.upiId, tenant.upiMobile, tenant.name));
@@ -314,8 +333,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const refreshFloor = useCallback(async () => {
     const seq = ++syncSeqRef.current;
     const [floor, sales] = await Promise.all([
-      api.tables.list(),
-      api.orders.sales(),
+      emptyOn403(api.tables.list()),
+      emptyOn403(api.orders.sales()),
     ]);
     if (seq !== syncSeqRef.current) return; // superseded by a newer sync
     setState((s) => ({

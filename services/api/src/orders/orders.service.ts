@@ -78,7 +78,8 @@ export class OrdersService {
     orderId: string,
     type: "created" | "updated" | "closed",
   ): Promise<Order> {
-    const order = await this.get(tenantId, orderId);
+    // Trusted internal reload — not a guest request, so bypass the device gate.
+    const order = await this.get(tenantId, orderId, undefined, true);
     this.events.emit(tenantId, { type, orderId, order });
     return order;
   }
@@ -88,13 +89,18 @@ export class OrdersService {
    * If `deviceId` is supplied (a guest device) and the order is device-bound,
    * it must match — so a guest can't read/resume another device's session.
    */
-  async get(tenantId: string, id: string, deviceId?: string): Promise<Order> {
+  async get(
+    tenantId: string,
+    id: string,
+    deviceId?: string,
+    trusted = false,
+  ): Promise<Order> {
     const row = await this.prisma.order.findFirst({
       where: { id, tenantId },
       include: ROUND_INCLUDE,
     });
     if (!row) throw new NotFoundException(`Order not found: ${id}`);
-    this.assertDevice(row.deviceId, deviceId);
+    this.assertDevice(row.deviceId, deviceId, trusted);
     return toDomainOrder(row);
   }
 
@@ -328,6 +334,22 @@ export class OrdersService {
   }
 
   /**
+   * A single guest device's own live sessions (open/billed). Backs the
+   * device-scoped SSE stream so a guest sees ONLY their own order — never the
+   * whole floor or another guest's contact details. `deviceId` is the opaque
+   * per-device capability (never serialized back to clients), so only the owning
+   * device can request its own stream.
+   */
+  async listByDevice(tenantId: string, deviceId: string): Promise<Order[]> {
+    const rows = await this.prisma.order.findMany({
+      where: { tenantId, deviceId, status: { in: LIVE_STATUSES } },
+      orderBy: { createdAt: "desc" },
+      include: ROUND_INCLUDE,
+    });
+    return rows.map(toDomainOrder);
+  }
+
+  /**
    * Append one item to a session: bump the matching `placed` line in the latest
    * still-open round, else add a new line / open a fresh instant round. Mirrors
    * the customer "bring it" flow so staff can add on a guest's behalf.
@@ -337,7 +359,8 @@ export class OrdersService {
     orderId: string,
     dto: AddItemDto,
   ): Promise<Order> {
-    await this.assertOrder(tenantId, orderId);
+    // Staff route (JwtAuthGuard) — the caller is authenticated, not a guest.
+    await this.assertOrder(tenantId, orderId, undefined, true);
     // Independent lookups — run in parallel instead of sequentially.
     const [menuItem, rounds] = await Promise.all([
       this.prisma.menuItem.findFirst({ where: { id: dto.menuItemId, tenantId } }),
@@ -473,7 +496,8 @@ export class OrdersService {
 
   /** Abandon a session without payment (walkout / mistake). Frees the table. */
   async cancel(tenantId: string, orderId: string): Promise<Order> {
-    await this.assertOrder(tenantId, orderId);
+    // Staff route (JwtAuthGuard) — the caller is authenticated, not a guest.
+    await this.assertOrder(tenantId, orderId, undefined, true);
     await this.prisma.order.update({
       where: { id: orderId },
       data: { status: "closed", closedAt: new Date() },
@@ -488,8 +512,9 @@ export class OrdersService {
     taxRate: number,
     dto: CapturePaymentDto,
     deviceId?: string,
+    trusted = false,
   ): Promise<Payment> {
-    const order = await this.get(tenantId, orderId, deviceId);
+    const order = await this.get(tenantId, orderId, deviceId, trusted);
     if (order.status === "paid")
       throw new BadRequestException("Order already paid");
     // A cancelled/abandoned session is `closed`. Refuse to capture against it so
@@ -545,7 +570,7 @@ export class OrdersService {
     }
     // Broadcast the now-closed order so the floor frees the table and the guest
     // phone leaves the bill screen in real time.
-    const closed = await this.get(tenantId, orderId);
+    const closed = await this.get(tenantId, orderId, undefined, true);
     this.events.emit(tenantId, { type: "closed", orderId, order: closed });
     return toDomainPayment(payment);
   }
@@ -784,24 +809,36 @@ export class OrdersService {
     tenantId: string,
     orderId: string,
     deviceId?: string,
+    trusted = false,
   ): Promise<void> {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, tenantId },
       select: { id: true, deviceId: true },
     });
     if (!order) throw new NotFoundException(`Order not found: ${orderId}`);
-    this.assertDevice(order.deviceId, deviceId);
+    this.assertDevice(order.deviceId, deviceId, trusted);
   }
 
   /**
-   * Session-ownership guard. Only enforced when BOTH the order is device-bound
-   * and the caller presents a device id (a guest): a mismatch means a different
-   * device is trying to act on this session → 403. Staff (restaurant-admin) send
-   * no device id, so their calls are unaffected (auth proper is still deferred).
+   * Session-ownership guard for a guest device-bound order. A device-bound order
+   * may only be read/acted on by the device that opened it — the presented
+   * device id must be present AND match. A *missing* device id is a failed match,
+   * not a pass: otherwise an attacker could bypass the binding by simply omitting
+   * the `X-Device-Id` header (and enumerate/tamper with other guests' sessions).
+   *
+   * `trusted` skips the check for callers that are already authorised by other
+   * means: authenticated tenant staff (resolved from the bearer token on the
+   * shared public routes) and internal server-side reloads (e.g. refreshAndEmit,
+   * the post-payment re-fetch) which pass no device id but aren't guests.
    */
-  private assertDevice(orderDeviceId: string | null, deviceId?: string): void {
-    if (orderDeviceId && deviceId && orderDeviceId !== deviceId) {
-      throw new ForbiddenException("This session belongs to another device.");
-    }
+  private assertDevice(
+    orderDeviceId: string | null,
+    deviceId?: string,
+    trusted = false,
+  ): void {
+    if (trusted) return;
+    if (!orderDeviceId) return; // order isn't device-bound (e.g. staff walk-in)
+    if (deviceId && deviceId === orderDeviceId) return; // the owning device
+    throw new ForbiddenException("This session belongs to another device.");
   }
 }

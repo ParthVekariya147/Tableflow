@@ -8,13 +8,23 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
   Sse,
   UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
 import { SkipThrottle } from "@nestjs/throttler";
-import { defer, from, map, merge, type Observable } from "rxjs";
+import {
+  defer,
+  filter,
+  from,
+  map,
+  merge,
+  mergeMap,
+  of,
+  type Observable,
+} from "rxjs";
 import type {
   Order,
   Payment,
@@ -27,6 +37,18 @@ import { OrdersService } from "./orders.service.js";
 import { OrdersEvents, type OrderEvent } from "./orders.events.js";
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
+import {
+  PermissionsGuard,
+  RequirePermission,
+  RequireAnyPermission,
+} from "../auth/permissions.guard.js";
+import {
+  OrderStreamGuard,
+  type StreamRequest,
+} from "./order-stream.guard.js";
+import { JwtService } from "@nestjs/jwt";
+import { AuthService } from "../auth/auth.service.js";
+import type { JwtPayload } from "../auth/auth.types.js";
 import {
   addRoundSchema,
   createOrderSchema,
@@ -41,33 +63,95 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly events: OrdersEvents,
+    private readonly jwt: JwtService,
+    private readonly auth: AuthService,
   ) {}
+
+  /**
+   * Best-effort staff check for the routes shared by guests and staff
+   * (GET /orders/:id, POST /orders/:id/payment). These stay public so guests can
+   * use them with only a device id, but staff (admin/KDS) call them with a
+   * bearer token and no device id. A valid, tenant-matched token means the caller
+   * is authenticated staff → the device-binding gate is bypassed for them; a
+   * missing/invalid token falls back to guest rules (strict device match). Never
+   * throws — absence of a token is the normal guest case, not an error.
+   */
+  private async isStaff(
+    authHeader: string | undefined,
+    tenantId: string,
+  ): Promise<boolean> {
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7).trim()
+      : undefined;
+    if (!token) return false;
+    try {
+      const payload = await this.jwt.verifyAsync<JwtPayload>(token);
+      const user = payload.imp
+        ? await this.auth.resolveImpersonationUser(payload.tid, payload.slug ?? "")
+        : await this.auth.resolveAuthUser(payload.tid, payload.sub);
+      return user.isSuperAdmin || user.tenantId === tenantId;
+    } catch {
+      return false;
+    }
+  }
 
   /**
    * Live order stream (Server-Sent Events). Every mutation broadcasts here so
    * admin / customer / KDS reflect changes in real time. Declared before `:id`
    * so "stream" isn't read as an order id. EventSource can't set headers, so the
-   * tenant is resolved from `?tenant=` by TenantMiddleware. On (re)connect it
-   * first emits a `snapshot` of the live floor so a reconnecting client re-syncs.
+   * tenant is resolved from `?tenant=` and the credential from `?token=` (staff)
+   * or `?deviceId=` (guest) — see OrderStreamGuard, which authenticates the
+   * connection and sets `req.streamScope`. On (re)connect a `snapshot` is emitted
+   * first so a reconnecting client re-syncs.
+   *
+   * Scope by caller:
+   *  - staff → the whole tenant floor (same data as GET /orders);
+   *  - guest → ONLY that device's own live sessions, so the stream can't be used
+   *    to read the entire floor or other guests' contact details.
    * @SkipThrottle — single long-lived connection, not a request burst.
    */
   @SkipThrottle()
+  @UseGuards(OrderStreamGuard)
   @Sse("stream")
-  stream(@CurrentTenant() tenant: Tenant): Observable<MessageEvent> {
-    const snapshot = defer(() =>
-      from(this.orders.list(tenant.id)).pipe(
-        map(
-          (orders): MessageEvent => ({
-            data: { type: "snapshot", orders } satisfies OrderEvent,
-          }),
+  stream(
+    @CurrentTenant() tenant: Tenant,
+    @Req() req: StreamRequest,
+  ): Observable<MessageEvent> {
+    const scope = req.streamScope!;
+    if (scope.kind === "staff") {
+      const snapshot = defer(() =>
+        from(this.orders.list(tenant.id)).pipe(
+          map(
+            (orders): MessageEvent => ({
+              data: { type: "snapshot", orders } satisfies OrderEvent,
+            }),
+          ),
         ),
-      ),
+      );
+      return merge(snapshot, this.events.stream(tenant.id));
+    }
+    // Guest: resolve this device's own live sessions, snapshot them, and pass
+    // through only their events — never the rest of the floor.
+    const { deviceId } = scope;
+    return defer(() => from(this.orders.listByDevice(tenant.id, deviceId))).pipe(
+      mergeMap((own) => {
+        const ids = new Set(own.map((o) => o.id));
+        const snapshot: MessageEvent = {
+          data: { type: "snapshot", orders: own } satisfies OrderEvent,
+        };
+        const live = this.events
+          .stream(tenant.id)
+          .pipe(
+            filter((e) => e.data.type !== "snapshot" && ids.has(e.data.orderId)),
+          );
+        return merge(of(snapshot), live);
+      }),
     );
-    return merge(snapshot, this.events.stream(tenant.id));
   }
 
   /** Staff-only: list sessions (defaults to live: open + billed). Optional ?status=. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
   @Get()
   list(
     @CurrentTenant() tenant: Tenant,
@@ -86,7 +170,8 @@ export class OrdersController {
 
   /** Staff-only: completed sales (declared before :id so it isn't read as an id).
    *  Optional ?from=&to= ISO window for the Order History page; omitted = recent feed. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("orders.history")
   @Get("sales")
   sales(
     @CurrentTenant() tenant: Tenant,
@@ -98,7 +183,8 @@ export class OrdersController {
 
   /** Staff-only: aggregated analytics for the dashboard + Analytics page. Optional
    *  ?from=&to= ISO window (defaults to the last 24h). Declared before :id. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAnyPermission("analytics.view", "dashboard.view")
   @Get("analytics")
   analytics(
     @CurrentTenant() tenant: Tenant,
@@ -111,12 +197,14 @@ export class OrdersController {
   /** Public — the guest app polls its own order (device-id bound); staff also
    *  use this for a single order's detail. */
   @Get(":id")
-  get(
+  async get(
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
     @Headers("x-device-id") deviceId?: string,
+    @Headers("authorization") authHeader?: string,
   ): Promise<Order> {
-    return this.orders.get(tenant.id, id, deviceId);
+    const staff = await this.isStaff(authHeader, tenant.id);
+    return this.orders.get(tenant.id, id, deviceId, staff);
   }
 
   /**
@@ -130,7 +218,8 @@ export class OrdersController {
    * `paymentSchema.nullable()` can't parse (empty text ≠ `null`). Calling
    * Express's `res.json()` ourselves serializes `null` correctly.
    */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
   @Get(":id/payment")
   async getPayment(
     @CurrentTenant() tenant: Tenant,
@@ -191,7 +280,8 @@ export class OrdersController {
   }
 
   /** Staff-only: add an item to a session on the guest's behalf. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
   @Post(":id/items")
   addItem(
     @CurrentTenant() tenant: Tenant,
@@ -201,8 +291,10 @@ export class OrdersController {
     return this.orders.addItem(tenant.id, id, addItemSchema.parse(body));
   }
 
-  /** Staff-only: change a line's qty and/or advance its kitchen status (KDS). */
-  @UseGuards(JwtAuthGuard)
+  /** Staff-only: change a line's qty and/or advance its kitchen status (KDS).
+   *  Shared by the floor (tables.manage) and the kitchen board (kds.use). */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAnyPermission("kds.use", "tables.manage")
   @Patch(":id/items/:itemId")
   updateItem(
     @CurrentTenant() tenant: Tenant,
@@ -229,7 +321,8 @@ export class OrdersController {
   }
 
   /** Staff-only: abandon a session without payment. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
   @Post(":id/cancel")
   cancel(
     @CurrentTenant() tenant: Tenant,
@@ -238,22 +331,25 @@ export class OrdersController {
     return this.orders.cancel(tenant.id, id);
   }
 
-  /** Public — the guest's "Pay Online" (card) and staff's cash capture both call
-   *  this with no distinguishing credential today; see PRODUCTION_READINESS_AUDIT.md
-   *  C3 for the remaining follow-up (a guest-scoped session token). */
+  /** Public — the guest's "Pay Online" (card, device-bound) and staff's cash
+   *  capture (bearer token, no device id) both call this. Staff are resolved from
+   *  the token (bypass the device gate); a guest must present the owning device. */
   @Post(":id/payment")
-  payment(
+  async payment(
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
     @Body() body: unknown,
     @Headers("x-device-id") deviceId?: string,
+    @Headers("authorization") authHeader?: string,
   ): Promise<Payment> {
+    const staff = await this.isStaff(authHeader, tenant.id);
     return this.orders.capturePayment(
       tenant.id,
       id,
       tenant.taxRate,
       capturePaymentSchema.parse(body),
       deviceId,
+      staff,
     );
   }
 }

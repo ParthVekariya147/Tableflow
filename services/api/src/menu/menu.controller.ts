@@ -18,6 +18,10 @@ import { StorageService, isAllowedImageMime } from "../storage/storage.service.j
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import {
+  PermissionsGuard,
+  RequirePermission,
+} from "../auth/permissions.guard.js";
+import {
   createCategorySchema,
   createItemSchema,
   updateCategorySchema,
@@ -38,7 +42,8 @@ export class MenuController {
   }
 
   /** Staff-only: upload an item photo to storage; returns its public URL. */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Post("upload")
   @UseInterceptors(
     FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024 } }),
@@ -58,7 +63,8 @@ export class MenuController {
     return { url };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Post("categories")
   createCategory(
     @CurrentTenant() tenant: Tenant,
@@ -67,7 +73,8 @@ export class MenuController {
     return this.menu.createCategory(tenant.id, createCategorySchema.parse(body));
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Patch("categories/:id")
   updateCategory(
     @CurrentTenant() tenant: Tenant,
@@ -81,7 +88,8 @@ export class MenuController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Delete("categories/:id")
   async deleteCategory(
     @CurrentTenant() tenant: Tenant,
@@ -91,7 +99,8 @@ export class MenuController {
     return { ok: true };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Post("items")
   createItem(
     @CurrentTenant() tenant: Tenant,
@@ -100,7 +109,8 @@ export class MenuController {
     return this.menu.createItem(tenant.id, createItemSchema.parse(body));
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Patch("items/:id")
   updateItem(
     @CurrentTenant() tenant: Tenant,
@@ -110,7 +120,8 @@ export class MenuController {
     return this.menu.updateItem(tenant.id, id, updateItemSchema.parse(body));
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
   @Delete("items/:id")
   async deleteItem(
     @CurrentTenant() tenant: Tenant,

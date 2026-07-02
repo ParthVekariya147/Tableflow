@@ -36,7 +36,11 @@ const ServiceRequestsContext = createContext<ServiceRequestsContextValue | null>
  * one OrderHistoryPage etc. use directly), gated on being signed in.
  */
 export function ServiceRequestsProvider({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
+  const { status, can } = useAuth();
+  // Service requests are a tables.manage feature (matches the server: the stream
+  // + list + status routes all require it). Gate the subscription on it so a
+  // Kitchen-only user doesn't open a stream the server will 401.
+  const canSee = can("tables.manage");
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [muted, setMuted] = useState(() => {
     try {
@@ -51,7 +55,7 @@ export function ServiceRequestsProvider({ children }: { children: ReactNode }) {
   mutedRef.current = muted;
 
   useEffect(() => {
-    if (status !== "authed") {
+    if (status !== "authed" || !canSee) {
       setRequests([]);
       return;
     }
@@ -77,7 +81,7 @@ export function ServiceRequestsProvider({ children }: { children: ReactNode }) {
       }
     });
     return unsub;
-  }, [status]);
+  }, [status, canSee]);
 
   const toggleMuted = useCallback(() => {
     setMuted((prev) => {

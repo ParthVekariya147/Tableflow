@@ -18,6 +18,7 @@ import { ServiceRequestsEvents, type ServiceRequestEvent } from "./service-reque
 import { CurrentTenant } from "../tenant/current-tenant.decorator.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { PermissionsGuard, RequirePermission } from "../auth/permissions.guard.js";
+import { ServiceRequestStreamGuard } from "./service-request-stream.guard.js";
 import {
   createServiceRequestSchema,
   updateServiceRequestStatusSchema,
@@ -35,9 +36,12 @@ export class ServiceRequestsController {
    * read as a request id. EventSource can't set headers, so the tenant is
    * resolved from `?tenant=` by TenantMiddleware — same trick as
    * orders.controller.ts's stream(). Emits a snapshot of open requests on
-   * (re)connect, then created/updated as they happen.
+   * (re)connect, then created/updated as they happen. Staff-only: the guest app
+   * posts requests but never subscribes, so ServiceRequestStreamGuard requires a
+   * tenant-matched `tables.manage` token via `?token=`.
    */
   @SkipThrottle()
+  @UseGuards(ServiceRequestStreamGuard)
   @Sse("stream")
   stream(@CurrentTenant() tenant: Tenant): Observable<MessageEvent> {
     const snapshot = defer(() =>

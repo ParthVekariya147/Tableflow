@@ -573,9 +573,18 @@ export function createApiClient(config: ApiClientConfig) {
        */
       stream: (handler: (event: OrderStreamEvent) => void): (() => void) => {
         const slug = config.tenantSlug ?? config.getTenantSlug?.();
-        const url = `${config.baseUrl}/orders/stream${
-          slug ? `?tenant=${encodeURIComponent(slug)}` : ""
-        }`;
+        // EventSource can't set headers, so the credential rides in the query:
+        // a staff bearer token (full-floor stream) or, failing that, this guest
+        // device's id (stream scoped server-side to its own session). Without
+        // one the server returns 401 — the stream is no longer public.
+        const token = config.getToken?.();
+        const deviceId = config.getDeviceId?.();
+        const params = new URLSearchParams();
+        if (slug) params.set("tenant", slug);
+        if (token) params.set("token", token);
+        else if (deviceId) params.set("deviceId", deviceId);
+        const qs = params.toString();
+        const url = `${config.baseUrl}/orders/stream${qs ? `?${qs}` : ""}`;
         const source = new EventSource(url);
         source.onmessage = (msg) => {
           try {
@@ -706,9 +715,15 @@ export function createApiClient(config: ApiClientConfig) {
        *  orders.stream's EventSource handling (tenant via `?tenant=`). */
       stream: (handler: (event: ServiceRequestStreamEvent) => void): (() => void) => {
         const slug = config.tenantSlug ?? config.getTenantSlug?.();
-        const url = `${config.baseUrl}/service-requests/stream${
-          slug ? `?tenant=${encodeURIComponent(slug)}` : ""
-        }`;
+        // Staff-only feed: the bearer token rides in the query since EventSource
+        // can't set headers (server requires a tenant-matched tables.manage
+        // token — no longer public).
+        const token = config.getToken?.();
+        const params = new URLSearchParams();
+        if (slug) params.set("tenant", slug);
+        if (token) params.set("token", token);
+        const qs = params.toString();
+        const url = `${config.baseUrl}/service-requests/stream${qs ? `?${qs}` : ""}`;
         const source = new EventSource(url);
         source.onmessage = (msg) => {
           try {

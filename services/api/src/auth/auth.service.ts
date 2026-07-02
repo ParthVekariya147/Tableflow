@@ -16,6 +16,7 @@ import {
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TtlCache } from "../common/ttl-cache.js";
+import { timingSafeEqualStr } from "../common/timing-safe-equal.js";
 import type { JwtPayload, TicketPayload } from "./auth.types.js";
 import type { SupabaseClaims } from "./auth-request.js";
 
@@ -82,9 +83,12 @@ export class AuthService {
     }
 
     // PLATFORM_MASTER_PASSWORD lets super-admins log in as any tenant user
-    // without knowing that user's password (for support / impersonation via login).
+    // without knowing that user's password (for support / impersonation via
+    // login). Compared in constant time so it can't be recovered via a timing
+    // oracle, and every use is written to the audit log below.
     const masterPw = process.env.PLATFORM_MASTER_PASSWORD;
-    const isMasterLogin = masterPw && password === masterPw;
+    const isMasterLogin =
+      Boolean(masterPw) && timingSafeEqualStr(password, masterPw as string);
 
     if (!isMasterLogin) {
       if (!user.passwordHash) {
@@ -99,6 +103,25 @@ export class AuthService {
     }
     // Correct credentials — clear this email's failed-attempt counter.
     this.loginAttempts.delete(emailKey);
+
+    // A master-password login accesses an account without its owner's password,
+    // so it must leave an audit trail (mirrors POST /admin/impersonate). Recorded
+    // under the `impersonation` type with metadata marking the login path.
+    // Fire-and-forget: an audit-write hiccup must not block a support login.
+    if (isMasterLogin) {
+      this.prisma.auditLog
+        .create({
+          data: {
+            type: "impersonation",
+            actorId: user.id,
+            metadata: {
+              via: "master-password-login",
+              email: user.email,
+            } as never,
+          },
+        })
+        .catch(() => {});
+    }
 
     const memberships = await this.prisma.membership.findMany({
       where: { userId: user.id, active: true, tenant: { active: true } },

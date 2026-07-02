@@ -6,6 +6,7 @@ import { SupabaseAuthGuard } from "../auth/auth.guard.js";
 import { SuperAdminGuard } from "../auth/super-admin.guard.js";
 import { BillingService } from "../billing/billing.service.js";
 import { AdminService } from "./admin.service.js";
+import { timingSafeEqualStr } from "../common/timing-safe-equal.js";
 import type { AuditLogEntry, TenantCredential, TenantPayment } from "./admin.service.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 import {
@@ -92,7 +93,7 @@ export class AdminController {
   async impersonate(@Body() body: unknown): Promise<{ token: string }> {
     const { tenantSlug, masterPassword } = impersonateSchema.parse(body);
     const expected = process.env.PLATFORM_MASTER_PASSWORD;
-    if (!expected || masterPassword !== expected) {
+    if (!expected || !timingSafeEqualStr(masterPassword, expected)) {
       throw new ForbiddenException("Invalid master password");
     }
     const tenant = await this.billing
