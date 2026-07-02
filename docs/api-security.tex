@@ -238,7 +238,67 @@
 \apidoc{ep-health}{\GET}{/health}{\authPublic}{Liveness probe.}
 
 \section{Auth}
-\apidoc{ep-auth-login}{\POST}{/auth/login}{\authPublic}{Email+password login; returns JWT or a tenant-select ticket.}
+
+% ---- /auth/login (finding recorded) -----------------------------------
+\hypertarget{ep-auth-login}{}
+\subsection{\POST\ \texttt{/auth/login}}
+\noindent\textbf{Auth:} \authPublic \\[2pt]
+\textbf{Purpose:} Email+password login; returns JWT or a tenant-select ticket. \\[6pt]
+\textbf{Security test checklist:}
+\begin{itemize}[leftmargin=1.4em,itemsep=1pt,topsep=2pt]
+  \item[$\boxtimes$] AuthZ — access without/with wrong token or tenant
+  \item[$\square$] Tenant isolation — cross-tenant object access (IDOR)
+  \item[$\square$] Input validation / injection / malformed payload
+  \item[$\square$] Rate limiting / abuse
+\end{itemize}
+
+\textbf{Findings:}
+
+\textit{\textcolor{muted}{Informational — no vulnerability. Behaves as designed.}}
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt,topsep=2pt]
+  \item \textbf{Test performed.} Sent valid credentials for an Amber \& Grain
+        account (\code{admin@amberandgrain.com} / \code{demo1234}) while setting a
+        \emph{mismatched} tenant header \code{X-Tenant-Slug: green-bowl}.
+  \item \textbf{Observed.} \code{200 OK} with
+        \code{\{ kind: "authenticated", token, user \}}. The returned \code{user}
+        is scoped to the account's real tenant — \code{tenantSlug: "amber-grain"},
+        \code{tenantId: cmqujafom0000upz4zxoc5d7z}, role \code{Admin} — i.e. the
+        \code{green-bowl} header had \emph{no effect} on the result.
+  \item \textbf{Why this is expected.} \code{/auth/*} is explicitly excluded from
+        \code{TenantMiddleware} (\code{app.module.ts}:
+        \code{.exclude("admin/(.*)", "auth/(.*)", "health")}), so the
+        \code{X-Tenant-Slug} header is never read on this route. Login is
+        \emph{email-first / not tenant-scoped} by design: \code{AuthService.login}
+        looks the user up globally by email, verifies the password, then resolves
+        the user's own active memberships. With exactly one membership it issues a
+        token immediately; the tenant is taken from that membership, never from any
+        client-supplied header.
+  \item \textbf{Why it is not exploitable.} The issued JWT binds the tenant in its
+        \code{tid} claim (\code{issueToken} $\to$ \code{payload = \{ sub, tid \}}).
+        On every later request \code{JwtAuthGuard} resolves the user via
+        \code{resolveAuthUser(payload.tid, payload.sub)} — again from the token's
+        \code{tid} and the DB membership, \emph{not} from \code{X-Tenant-Slug}. A
+        forged/mismatched header therefore cannot cross a user into a tenant they
+        are not a member of: \code{resolveAuthUser} throws \code{401 "No access to
+        this restaurant"} if no active membership exists for the token's tenant.
+  \item \textbf{Note / possible confusion.} An account that belongs to
+        \emph{multiple} tenants does not return a token at all — it returns
+        \code{\{ kind: "select\_tenant", ticket, tenants[] \}} and the caller must
+        pick a tenant via \code{POST /auth/select-tenant}. The single-membership
+        Amber \& Grain admin skips that step, which is why a token came back
+        directly here.
+  \item \textbf{Residual observations (pre-existing, tracked elsewhere).}
+        \code{/auth/login} has only the global per-IP throttle (120 req/60s) plus a
+        per-email lockout (8 attempts / 15 min) — no CAPTCHA and no per-account
+        cross-IP limit; a distributed attacker faces no account-level friction.
+        Not related to the tenant-header behavior above.
+\end{itemize}
+
+\textbf{Verdict:} \textcolor{ok}{\textbf{Not a vulnerability}} — the tenant header
+is ignored on login by design, and tenant scoping is enforced from the JWT
+\code{tid} claim on all authenticated routes.
+\vspace{4pt}\hrule\vspace{8pt}
 \apidoc{ep-auth-select}{\POST}{/auth/select-tenant}{Public (5-min ticket)}{Redeem tenant-select ticket for a scoped JWT.}
 \apidoc{ep-auth-me}{\GET}{/auth/me}{\authJwt{JwtAuthGuard}}{Current authenticated user.}
 \apidoc{ep-auth-changepw}{\POST}{/auth/change-password}{\authJwt{JwtAuthGuard}}{Change own password.}

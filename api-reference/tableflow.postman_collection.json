@@ -1,0 +1,1120 @@
+{
+  "info": {
+    "name": "TableFlow (Amber & Grain) API",
+    "description": "Full API surface of @amber/api (NestJS, default http://localhost:3001).\n\n**Setup:**\n1. Set `baseUrl` / `tenantSlug` in the collection Variables tab.\n2. Run **Auth → Login** — the test script auto-saves `{{token}}` (or `{{ticket}}` for multi-tenant accounts → then run Select Tenant).\n3. Tenant-scoped routes send `X-Tenant-Slug: {{tenantSlug}}`. Guest order routes also send `X-Device-Id: {{deviceId}}` (device-bound sessions).\n\nSeeded logins (password `demo1234`): admin@amberandgrain.com, manager@amberandgrain.com, kitchen@amberandgrain.com, admin@greenbowl.com, admin@bellapizza.com, owner@ambergroup.com (multi-tenant → tenant picker).\n\nMoney is always **integer cents**. SSE stream endpoints work in Postman but stay open — cancel manually.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3001" },
+    { "key": "tenantSlug", "value": "amber-grain" },
+    { "key": "token", "value": "" },
+    { "key": "ticket", "value": "" },
+    { "key": "deviceId", "value": "postman-device-1" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "Email-first login (NOT tenant-scoped — no X-Tenant-Slug header). Login returns either {kind:'authenticated', token, user} or {kind:'select_tenant', ticket, tenants[]} for multi-tenant accounts.",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.token) {",
+                  "  pm.collectionVariables.set('token', data.token);",
+                  "  console.log('token saved to {{token}}');",
+                  "}",
+                  "if (data.kind === 'select_tenant') {",
+                  "  pm.collectionVariables.set('ticket', data.ticket);",
+                  "  console.log('multi-tenant account — ticket saved, now call Select Tenant with a tenantId from:', JSON.stringify(data.tenants));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@amberandgrain.com\",\n  \"password\": \"demo1234\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          }
+        },
+        {
+          "name": "Select tenant (step 2 of multi-tenant login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.token) { pm.collectionVariables.set('token', data.token); console.log('token saved'); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticket\": \"{{ticket}}\",\n  \"tenantId\": \"<tenant id from the login response>\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/select-tenant", "host": ["{{baseUrl}}"], "path": ["auth", "select-tenant"] }
+          }
+        },
+        {
+          "name": "Me (current user)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] }
+          }
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"demo1234\",\n  \"newPassword\": \"newpassword123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/change-password", "host": ["{{baseUrl}}"], "path": ["auth", "change-password"] }
+          }
+        },
+        {
+          "name": "Sync profile (super-admin bootstrap)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer <supabase access token>", "description": "Bearer = SUPABASE access token (not the API JWT) — verified via Supabase Admin API" }
+            ],
+            "url": { "raw": "{{baseUrl}}/auth/sync-profile", "host": ["{{baseUrl}}"], "path": ["auth", "sync-profile"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tenant",
+      "item": [
+        {
+          "name": "Get current tenant",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": { "raw": "{{baseUrl}}/tenant", "host": ["{{baseUrl}}"], "path": ["tenant"] }
+          }
+        },
+        {
+          "name": "Update current tenant (settings.manage)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Amber & Grain\",\n  \"currency\": \"USD\",\n  \"taxRate\": 0.1,\n  \"gstNumber\": \"\",\n  \"upiId\": \"\",\n  \"upiMobile\": \"\",\n  \"theme\": {\n    \"colors\": { \"primary\": \"#b45309\" },\n    \"mode\": \"light\"\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tenant", "host": ["{{baseUrl}}"], "path": ["tenant"] }
+          }
+        },
+        {
+          "name": "Get tenant by slug (public)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/tenants/:slug",
+              "host": ["{{baseUrl}}"],
+              "path": ["tenants", ":slug"],
+              "variable": [{ "key": "slug", "value": "amber-grain" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Menu",
+      "item": [
+        {
+          "name": "Get menu",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": { "raw": "{{baseUrl}}/menu", "host": ["{{baseUrl}}"], "path": ["menu"] }
+          }
+        },
+        {
+          "name": "Upload item photo",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [], "description": "image mimetype, max 5 MB → returns { url }" }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/menu/upload", "host": ["{{baseUrl}}"], "path": ["menu", "upload"] }
+          }
+        },
+        {
+          "name": "Create category",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Desserts\",\n  \"sortOrder\": 10\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/menu/categories", "host": ["{{baseUrl}}"], "path": ["menu", "categories"] }
+          }
+        },
+        {
+          "name": "Update category (rename / reorder)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sweet Treats\",\n  \"sortOrder\": 5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/menu/categories/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["menu", "categories", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Delete category (blocked while it holds items)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/menu/categories/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["menu", "categories", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Create item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"<category id>\",\n  \"name\": \"Margherita Pizza\",\n  \"description\": \"San Marzano tomato, fior di latte, basil\",\n  \"price\": 1450,\n  \"badge\": \"Popular\",\n  \"available\": true,\n  \"dietary\": \"veg\",\n  \"jain\": false,\n  \"sortOrder\": 1,\n  \"modifierGroups\": [\n    {\n      \"name\": \"Size\",\n      \"inputType\": \"single\",\n      \"required\": true,\n      \"options\": [\n        { \"name\": \"Regular\", \"priceDelta\": 0 },\n        { \"name\": \"Large\", \"priceDelta\": 400 }\n      ]\n    },\n    {\n      \"name\": \"Extras\",\n      \"inputType\": \"multiple\",\n      \"maxSelect\": 3,\n      \"options\": [\n        { \"name\": \"Extra cheese\", \"priceDelta\": 150 },\n        { \"name\": \"Olives\", \"priceDelta\": 100 }\n      ]\n    },\n    {\n      \"name\": \"Special instructions\",\n      \"inputType\": \"text\",\n      \"maxLength\": 120,\n      \"placeholder\": \"Allergies, spice level...\",\n      \"options\": []\n    }\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/menu/items", "host": ["{{baseUrl}}"], "path": ["menu", "items"] }
+          }
+        },
+        {
+          "name": "Update item (modifierGroups = replace-on-save)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 1550,\n  \"available\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/menu/items/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["menu", "items", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Delete item",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/menu/items/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["menu", "items", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tables",
+      "item": [
+        {
+          "name": "List tables (floor + live sessions)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": { "raw": "{{baseUrl}}/tables", "host": ["{{baseUrl}}"], "path": ["tables"] }
+          }
+        },
+        {
+          "name": "Resolve table by QR token (guest entry)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/tables/qr/:token",
+              "host": ["{{baseUrl}}"],
+              "path": ["tables", "qr", ":token"],
+              "variable": [{ "key": "token", "value": "", "description": "the qrToken from the table QR code" }]
+            }
+          }
+        },
+        {
+          "name": "Create table",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"T12\",\n  \"seats\": 4,\n  \"room\": \"Main Hall\",\n  \"sortOrder\": 12\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/tables", "host": ["{{baseUrl}}"], "path": ["tables"] }
+          }
+        },
+        {
+          "name": "Update table",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"T12 (window)\",\n  \"seats\": 6\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tables/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["tables", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Regenerate QR token (invalidates printed QR)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tables/:id/qr",
+              "host": ["{{baseUrl}}"],
+              "path": ["tables", ":id", "qr"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Delete table (blocked while occupied / with history)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tables/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["tables", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "description": "An Order = one table session holding Rounds. Guest calls are device-bound: X-Device-Id is stored on create and must match on later reads/writes (403 otherwise). Staff calls omit X-Device-Id.",
+      "item": [
+        {
+          "name": "SSE order stream (snapshot + live events)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "text/event-stream" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders/stream?tenant={{tenantSlug}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "stream"],
+              "query": [{ "key": "tenant", "value": "{{tenantSlug}}", "description": "EventSource can't set headers, so tenant rides as a query param" }]
+            },
+            "description": "Stays open — first frame is {type:'snapshot', orders}, then created/updated/closed events. Cancel the request manually."
+          }
+        },
+        {
+          "name": "List orders (?status=open|billed|paid|closed)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders?status=open",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders"],
+              "query": [{ "key": "status", "value": "open" }]
+            }
+          }
+        },
+        {
+          "name": "List open table ids",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": { "raw": "{{baseUrl}}/orders/open-table-ids", "host": ["{{baseUrl}}"], "path": ["orders", "open-table-ids"] }
+          }
+        },
+        {
+          "name": "Sales feed (?from=&to= ISO window)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders/sales?from=2026-07-01T00:00:00Z&to=2026-07-02T23:59:59Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "sales"],
+              "query": [
+                { "key": "from", "value": "2026-07-01T00:00:00Z", "description": "optional — omit both for the recent feed" },
+                { "key": "to", "value": "2026-07-02T23:59:59Z" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Analytics summary (?from=&to=, default last 24h)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders/analytics?from=2026-06-25T00:00:00Z&to=2026-07-02T23:59:59Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", "analytics"],
+              "query": [
+                { "key": "from", "value": "2026-06-25T00:00:00Z" },
+                { "key": "to", "value": "2026-07-02T23:59:59Z" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get order by id",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}", "description": "guest calls only — must match the order's device; staff omit it", "disabled": true }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Get order payment",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "payment"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Create order for table (guest reserve / staff walk-in)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}", "description": "binds the session to this device" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableId\": \"<table id>\",\n  \"customerName\": \"Parth Vekariya\",\n  \"customerPhone\": \"+91 98765 43210\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] },
+            "description": "409 if the table already has an open/billed order (single-occupancy guard). customerName/Phone optional (staff walk-in) but format-validated when present."
+          }
+        },
+        {
+          "name": "Reclaim session (lost device, phone = proof)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}", "description": "the NEW device to re-bind the order to" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableId\": \"<table id>\",\n  \"customerPhone\": \"+91 98765 43210\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/orders/reclaim", "host": ["{{baseUrl}}"], "path": ["orders", "reclaim"] }
+          }
+        },
+        {
+          "name": "Add round (guest 'bring these' / 'bring it')",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"bundled\",\n  \"items\": [\n    {\n      \"menuItemId\": \"<menu item id>\",\n      \"name\": \"Margherita Pizza\",\n      \"unitPrice\": 1450,\n      \"qty\": 2,\n      \"notes\": \"extra crispy\",\n      \"modifiers\": [\n        { \"optionId\": \"<modifier option id>\", \"groupName\": \"Size\" },\n        { \"groupName\": \"Special instructions\", \"textValue\": \"no basil\" }\n      ]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/rounds",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "rounds"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "type: 'instant' | 'bundled'. Server re-resolves each modifier optionId and recomputes priceDelta from the DB (client numbers ignored)."
+          }
+        },
+        {
+          "name": "Add single item (staff)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"menuItemId\": \"<menu item id>\",\n  \"qty\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/items",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "items"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Update item (qty / qtyDelta / kitchen status)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"preparing\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/items/:itemId",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "items", ":itemId"],
+              "variable": [
+                { "key": "id", "value": "" },
+                { "key": "itemId", "value": "" }
+              ]
+            },
+            "description": "Provide ONE of qty (absolute, 0 = remove) or qtyDelta (+/-N atomic), and/or status: placed|preparing|ready|served|cancelled. 409 if the order is closed/paid."
+          }
+        },
+        {
+          "name": "Request bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/bill",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "bill"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Cancel order (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "cancel"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Capture payment (closes the order)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "X-Device-Id", "value": "{{deviceId}}", "description": "needed for guest card capture; staff cash capture omits it", "disabled": true },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"method\": \"cash\",\n  \"tip\": 0,\n  \"tendered\": 5000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orders/:id/payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["orders", ":id", "payment"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "method: cash | card. Server recomputes subtotal/tax(tenant.taxRate)/total, cancelled lines excluded. 400 if already paid, 409 if closed."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Requests",
+      "description": "Guest attention requests (water / call_staff / call_manager) — a notification channel, never a kitchen ticket. Create is public (guest); list/update are staff (tables.manage).",
+      "item": [
+        {
+          "name": "SSE service-request stream",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "text/event-stream" }],
+            "url": {
+              "raw": "{{baseUrl}}/service-requests/stream?tenant={{tenantSlug}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["service-requests", "stream"],
+              "query": [{ "key": "tenant", "value": "{{tenantSlug}}" }]
+            },
+            "description": "First frame = snapshot of open (pending + acknowledged) requests, then created/updated events. Stays open."
+          }
+        },
+        {
+          "name": "Create service request (guest, public)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tableId\": \"<table id>\",\n  \"type\": \"water\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/service-requests", "host": ["{{baseUrl}}"], "path": ["service-requests"] },
+            "description": "type: water | call_staff | call_manager. Dedupes — re-returns the existing pending row of the same type for that table."
+          }
+        },
+        {
+          "name": "List service requests (staff, ?status=)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/service-requests?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["service-requests"],
+              "query": [{ "key": "status", "value": "pending", "description": "pending | acknowledged | resolved" }]
+            }
+          }
+        },
+        {
+          "name": "Acknowledge / resolve (staff)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"acknowledged\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/service-requests/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["service-requests", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "description": "Custom per-tenant roles. All routes require team.manage. Protected (Admin) roles can only be edited by protected-role actors.",
+      "item": [
+        {
+          "name": "List roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/roles", "host": ["{{baseUrl}}"], "path": ["roles"] }
+          }
+        },
+        {
+          "name": "Create role",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Floor Supervisor\",\n  \"permissions\": [\"tables.manage\", \"orders.manage\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/roles", "host": ["{{baseUrl}}"], "path": ["roles"] },
+            "description": "Permission keys come from the fixed PERMISSIONS catalog in @amber/domain."
+          }
+        },
+        {
+          "name": "Update role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Shift Lead\",\n  \"permissions\": [\"tables.manage\", \"orders.manage\", \"menu.manage\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/roles/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["roles", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Delete role (blocked if protected / has members)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/roles/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["roles", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Members",
+      "description": "Team management. All routes require team.manage. New users get temp password 'changeme123'. Last-admin lockout + Admin-tier guards apply.",
+      "item": [
+        {
+          "name": "List members",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/members", "host": ["{{baseUrl}}"], "path": ["members"] }
+          }
+        },
+        {
+          "name": "Add member (creates user if new)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"waiter@amberandgrain.com\",\n  \"name\": \"New Waiter\",\n  \"roleId\": \"<role id>\",\n  \"permissions\": []\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/members", "host": ["{{baseUrl}}"], "path": ["members"] },
+            "description": "permissions [] = inherit the role; non-empty = the member's COMPLETE effective set."
+          }
+        },
+        {
+          "name": "Update member (role / override / active)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"roleId\": \"<role id>\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Remove member",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Super Admin",
+      "description": "Cross-tenant platform routes (/admin/*) — excluded from TenantMiddleware, no X-Tenant-Slug.",
+      "item": [
+        {
+          "name": "List tenants",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/admin/tenants", "host": ["{{baseUrl}}"], "path": ["admin", "tenants"] }
+          }
+        },
+        {
+          "name": "Create tenant (onboarding)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"new-restaurant\",\n  \"name\": \"New Restaurant\",\n  \"currency\": \"USD\",\n  \"taxRate\": 0.1,\n  \"theme\": {\n    \"colors\": { \"primary\": \"#0f766e\" },\n    \"mode\": \"light\"\n  },\n  \"ownerEmail\": \"owner@newrestaurant.com\",\n  \"ownerName\": \"Owner Name\",\n  \"ownerPassword\": \"password123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/tenants", "host": ["{{baseUrl}}"], "path": ["admin", "tenants"] }
+          }
+        },
+        {
+          "name": "Get tenant by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Update tenant",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Renamed Restaurant\",\n  \"active\": true,\n  \"taxRate\": 0.12\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Tenant payments",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id/payments",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id", "payments"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Credentials overview",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/admin/credentials", "host": ["{{baseUrl}}"], "path": ["admin", "credentials"] }
+          }
+        },
+        {
+          "name": "Reset owner password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"<user id>\",\n  \"newPassword\": \"newpassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id/reset-owner-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id", "reset-owner-password"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Impersonate tenant (master password)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantSlug\": \"amber-grain\",\n  \"masterPassword\": \"<PLATFORM_MASTER_PASSWORD from services/api/.env>\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/impersonate", "host": ["{{baseUrl}}"], "path": ["admin", "impersonate"] },
+            "description": "Returns a 30-min impersonation token for the tenant. Audit-logged."
+          }
+        },
+        {
+          "name": "Platform analytics",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/admin/analytics", "host": ["{{baseUrl}}"], "path": ["admin", "analytics"] }
+          }
+        },
+        {
+          "name": "Audit log",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/admin/audit-log?limit=50&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "audit-log"],
+              "query": [
+                { "key": "type", "value": "", "disabled": true },
+                { "key": "tenantId", "value": "", "disabled": true },
+                { "key": "from", "value": "", "disabled": true },
+                { "key": "to", "value": "", "disabled": true },
+                { "key": "limit", "value": "50" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Billing",
+      "description": "SaaS plans + tenant subscriptions (/admin/plans, /admin/tenants/:id/subscription are platform routes; /billing/me is tenant-scoped).",
+      "item": [
+        {
+          "name": "List plans",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/admin/plans", "host": ["{{baseUrl}}"], "path": ["admin", "plans"] }
+          }
+        },
+        {
+          "name": "Create plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Pro\",\n  \"priceCents\": 4900,\n  \"interval\": \"month\",\n  \"limits\": {\n    \"maxTables\": 50,\n    \"maxOrdersPerMonth\": 5000\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/plans", "host": ["{{baseUrl}}"], "path": ["admin", "plans"] },
+            "description": "interval: month | year"
+          }
+        },
+        {
+          "name": "Update plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceCents\": 5900,\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/plans/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "plans", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Set tenant subscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"<plan id>\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id/subscription",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id", "subscription"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Get tenant subscription",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id/subscription",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id", "subscription"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Update subscription status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\",\n  \"cancelAtPeriodEnd\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/tenants/:id/subscription",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "tenants", ":id", "subscription"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "status: trialing | active | past_due | canceled. Provide at least one field."
+          }
+        },
+        {
+          "name": "My subscription (tenant-scoped)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "X-Tenant-Slug", "value": "{{tenantSlug}}" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/billing/me", "host": ["{{baseUrl}}"], "path": ["billing", "me"] }
+          }
+        }
+      ]
+    }
+  ]
+}
