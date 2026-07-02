@@ -1,4 +1,8 @@
-import { themeConfigSchema, type Tenant as DomainTenant } from "@amber/domain";
+import {
+  themeConfigSchema,
+  printerSettingsSchema,
+  type Tenant as DomainTenant,
+} from "@amber/domain";
 import type { Tenant as PrismaTenant } from "@prisma/client";
 
 /** Map a Prisma Tenant row to the shared domain Tenant shape. */
@@ -13,7 +17,9 @@ export function toDomainTenant(row: PrismaTenant): DomainTenant {
     upiId: row.upiId ?? undefined,
     upiMobile: row.upiMobile ?? undefined,
     active: row.active,
-    // theme is stored as JSON; validate/normalize through the domain schema.
+    // theme/printer are stored as JSON; validate/normalize through the domain schema.
     theme: themeConfigSchema.parse(row.theme),
+    printer: printerSettingsSchema.parse(row.printer ?? {}),
+    kitchenPrinter: printerSettingsSchema.parse(row.kitchenPrinter ?? {}),
   };
 }

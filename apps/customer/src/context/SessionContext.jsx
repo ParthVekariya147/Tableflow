@@ -41,7 +41,7 @@ function newId(prefix) {
  * the base for the API (which snapshots base unitPrice + each modifier delta).
  * `modifiers`: [{ optionId?, groupName, name, price, priceCents, textValue? }].
  */
-function makeLine(item, qty, modifiers = []) {
+function makeLine(item, qty, modifiers = [], note = "") {
   const deltaCents = modifiers.reduce((s, m) => s + (m.priceCents || 0), 0);
   const baseCents = item.priceCents ?? Math.round((item.price ?? 0) * 100);
   const unitCents = baseCents + deltaCents;
@@ -56,6 +56,7 @@ function makeLine(item, qty, modifiers = []) {
     priceCents: unitCents,
     price: unitCents / 100,
     modifiers,
+    note: note || "",
     img: item.img,
     icon: item.icon,
     swatch: item.swatch,
@@ -94,6 +95,7 @@ function ordersToLocalRounds(order) {
           price: (i.unitPrice + deltaCents) / 100,
           status: i.status,
           modifiers,
+          note: i.notes ?? "",
         };
       }),
     }))
@@ -190,15 +192,16 @@ export function SessionProvider({ children }) {
     }, 2800);
   }, []);
 
-  // Add to My Order queue. Plain items (no modifiers) merge with an existing
-  // plain line of the same item; modified items always become their own line.
-  const addToOrder = useCallback((item, qty = 1, modifiers = []) => {
+  // Add to My Order queue. Plain items (no modifiers, no note) merge with an
+  // existing plain line of the same item; modified/noted items always become
+  // their own line.
+  const addToOrder = useCallback((item, qty = 1, modifiers = [], note = "") => {
     // Requires a live session — no orderId means nothing to attach to.
     if (sessionEndedRef.current || !orderIdRef.current) return;
     setMyOrder((prev) => {
-      if (modifiers.length === 0) {
+      if (modifiers.length === 0 && !note) {
         const existing = prev.find(
-          (x) => x.id === item.id && (x.modifiers?.length ?? 0) === 0,
+          (x) => x.id === item.id && (x.modifiers?.length ?? 0) === 0 && !x.note,
         );
         if (existing) {
           return prev.map((x) =>
@@ -206,7 +209,7 @@ export function SessionProvider({ children }) {
           );
         }
       }
-      return [...prev, makeLine(item, qty, modifiers)];
+      return [...prev, makeLine(item, qty, modifiers, note)];
     });
     showToast(`Added to My Order`, "add_shopping_cart");
   }, [showToast]);
@@ -219,6 +222,13 @@ export function SessionProvider({ children }) {
 
   const removeFromOrder = useCallback((lineKey) => {
     setMyOrder((prev) => prev.filter((x) => x.lineKey !== lineKey));
+  }, []);
+
+  // Edit the kitchen note on a not-yet-sent cart line.
+  const updateOrderNote = useCallback((lineKey, note) => {
+    setMyOrder((prev) =>
+      prev.map((x) => (x.lineKey === lineKey ? { ...x, note } : x)),
+    );
   }, []);
 
   // Push a round to the kitchen (KDS). Fire-and-forget: if the relay is down,
@@ -266,6 +276,7 @@ export function SessionProvider({ children }) {
           // Base unit price; the server re-prices each modifier from the DB.
           unitPrice: i.basePriceCents ?? i.priceCents ?? Math.round((i.price ?? 0) * 100),
           qty: i.qty,
+          notes: i.note || undefined,
           modifiers: (i.modifiers ?? []).map((m) => ({
             optionId: m.optionId,
             groupName: m.groupName,
@@ -278,9 +289,21 @@ export function SessionProvider({ children }) {
       .catch(() => {});
   }, [api]);
 
+  // Guest service request (water / call staff / call manager) — a Quick
+  // Action tap. Deliberately NOT bringIt: this never creates a Round/Order
+  // item or touches the KDS, it's a separate notification channel straight
+  // to staff. The server dedupes identical pending requests per table.
+  const sendServiceRequest = useCallback(
+    async (type) => {
+      if (!table) throw new Error("No table — please rescan the QR code.");
+      await api.serviceRequests.create({ tableId: table.id, type });
+    },
+    [api, table],
+  );
+
   // Bring it — instant single item to kitchen. Guarded on a live orderId so a
   // refreshed/settled client can't fire a phantom ticket at the KDS.
-  const bringIt = useCallback((item, qty = 1, modifiers = []) => {
+  const bringIt = useCallback((item, qty = 1, modifiers = [], note = "") => {
     if (sessionEndedRef.current || !orderIdRef.current) return;
     if (sendingRoundRef.current) return; // double-tap guard — see sendingRoundRef
     sendingRoundRef.current = true;
@@ -289,7 +312,7 @@ export function SessionProvider({ children }) {
       id: newId("rnd"),
       type: "instant",
       timestamp: new Date(),
-      items: [makeLine(item, qty, modifiers)],
+      items: [makeLine(item, qty, modifiers, note)],
     };
     setRounds((prev) => [round, ...prev]);
     publishRound(round);
@@ -537,18 +560,18 @@ export function SessionProvider({ children }) {
   // value it actually reads changes.
   const value = useMemo(() => ({
     tableNumber, sessionStarted, startSession, sessionStartTime,
-    myOrder, addToOrder, updateOrderQty, removeFromOrder,
+    myOrder, addToOrder, updateOrderQty, removeFromOrder, updateOrderNote,
     myOrderTotal, myOrderCount,
-    rounds, bringIt, bringThese,
+    rounds, bringIt, bringThese, sendServiceRequest,
     billTotal, taxRate, billRequested, requestBill, payBill,
     sessionEnded, sessionCancelled, awaitingCash, paidMethod,
     toast, showToast,
     sheetItem, setSheetItem,
   }), [
     tableNumber, sessionStarted, startSession, sessionStartTime,
-    myOrder, addToOrder, updateOrderQty, removeFromOrder,
+    myOrder, addToOrder, updateOrderQty, removeFromOrder, updateOrderNote,
     myOrderTotal, myOrderCount,
-    rounds, bringIt, bringThese,
+    rounds, bringIt, bringThese, sendServiceRequest,
     billTotal, taxRate, billRequested, requestBill, payBill,
     sessionEnded, sessionCancelled, awaitingCash, paidMethod,
     toast, showToast,

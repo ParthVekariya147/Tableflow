@@ -1,27 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { QRCodeCanvas } from "qrcode.react";
+import { buildUpiPaymentUrl } from "@amber/domain";
 import { Icon } from "../components/Icon";
-import { useAdmin, billTotals } from "../store/AdminStore";
+import { useAdmin, billTotals, itemUnitPrice } from "../store/AdminStore";
 import type { PaymentMethod } from "../data/types";
-
-// ── UPI deep-link builder ─────────────────────────────────────────────────────
-
-function buildUpiUrl({
-  upiId,
-  name,
-  amount,
-  note,
-}: {
-  upiId: string;
-  name: string;
-  amount: number; // in rupees (decimal)
-  note: string;
-}) {
-  // `pa` (the UPI VPA) must NOT be percent-encoded — the @ must stay literal
-  // or UPI apps reject the QR as invalid. Only pn/tn (human text) are encoded.
-  return `upi://pay?pa=${upiId}&pn=${encodeURIComponent(name)}&am=${amount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
-}
 
 // ── Payment method config ─────────────────────────────────────────────────────
 
@@ -71,14 +54,13 @@ export function BillingPage() {
   const gratuity = Math.round(totals.subtotal * 0.2);
   const tenderedCents = Math.round((parseFloat(tendered) || 0) * 100);
   const change = method === "cash" ? Math.max(0, tenderedCents - totals.total) : 0;
-  const totalRupees = totals.total / 100;
 
-  // UPI deep link (amount in minor → rupees for the URL)
+  // UPI deep link
   const upiUrl = state.upiId
-    ? buildUpiUrl({
+    ? buildUpiPaymentUrl({
         upiId: state.upiId,
-        name: state.tenantName ?? "Restaurant",
-        amount: totalRupees,
+        payeeName: state.tenantName ?? "Restaurant",
+        amountCents: totals.total,
         note: `${table.label} bill`,
       })
     : null;
@@ -95,10 +77,18 @@ export function BillingPage() {
   async function complete() {
     if (paying) return;
     setPaying(true);
-    await dispatch({ type: "COMPLETE_PAYMENT", tableId: activeTable.id, method, amountCents: bill.total });
-    navigate(`/tables/${activeTable.id}/complete`, {
-      state: { method, totalCents: bill.total, tableLabel: activeTable.label },
+    await dispatch({
+      type: "COMPLETE_PAYMENT",
+      tableId: activeTable.id,
+      method,
+      amountCents: bill.total,
+      tenderedCents: method === "cash" ? tenderedCents : undefined,
     });
+    const orderId = activeTable.session?.orderId;
+    navigate(
+      `/tables/${activeTable.id}/complete${orderId ? `?order=${encodeURIComponent(orderId)}` : ""}`,
+      { state: { method, totalCents: bill.total, tableLabel: activeTable.label } },
+    );
   }
 
   async function copyUpiId() {
@@ -143,15 +133,19 @@ export function BillingPage() {
                   Round {round.idx} · {round.type === "instant" ? "Bring it" : "Bring these"}
                 </p>
                 {round.items.map((i) => (
-                  <div
-                    key={i.id}
-                    className="flex items-baseline justify-between py-xs font-body-md text-body-md text-on-surface"
-                  >
-                    <span>
-                      <span className="font-data-mono text-on-surface-variant">{i.qty}×</span>{" "}
-                      {i.name}
-                    </span>
-                    <span className="font-data-mono">{money(i.priceCents * i.qty)}</span>
+                  <div key={i.id} className="py-xs">
+                    <div className="flex items-baseline justify-between font-body-md text-body-md text-on-surface">
+                      <span>
+                        <span className="font-data-mono text-on-surface-variant">{i.qty}×</span>{" "}
+                        {i.name}
+                      </span>
+                      <span className="font-data-mono">{money(itemUnitPrice(i) * i.qty)}</span>
+                    </div>
+                    {i.modifiers && i.modifiers.length > 0 && (
+                      <p className="pl-lg font-body-md text-[11px] text-on-surface-variant">
+                        {i.modifiers.map((m) => (m.textValue ? `"${m.textValue}"` : m.name)).join(", ")}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

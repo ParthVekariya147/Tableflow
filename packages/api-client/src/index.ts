@@ -20,6 +20,9 @@ import {
   analyticsSummarySchema,
   roundTypeSchema,
   modifierInputTypeSchema,
+  serviceRequestSchema,
+  serviceRequestTypeSchema,
+  serviceRequestStatusSchema,
   loginResponseSchema,
   loginResultSchema,
   authUserSchema,
@@ -47,6 +50,8 @@ import {
   type Sale,
   type AnalyticsSummary,
   type ItemStatus,
+  type ServiceRequest,
+  type ServiceRequestStatus,
   type PaymentMethod,
   type Plan,
   type SubscriptionWithPlan,
@@ -263,6 +268,30 @@ function parseOrderStreamEvent(raw: unknown): OrderStreamEvent | null {
     const order = orderSchema.safeParse(r.order);
     if (!order.success || typeof r.orderId !== "string") return null;
     return { type: r.type, orderId: r.orderId, order: order.data };
+  }
+  return null;
+}
+
+/**
+ * A live service-request event from `GET /service-requests/stream` (SSE).
+ * `snapshot` arrives once per (re)connect with the currently-open requests;
+ * the rest carry a single created/updated request. Mirrors OrderStreamEvent.
+ */
+export type ServiceRequestStreamEvent =
+  | { type: "snapshot"; requests: ServiceRequest[] }
+  | { type: "created" | "updated"; request: ServiceRequest };
+
+/** Validate a raw SSE frame into a typed ServiceRequestStreamEvent, or null if bad. */
+function parseServiceRequestStreamEvent(raw: unknown): ServiceRequestStreamEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as { type?: unknown; requests?: unknown; request?: unknown };
+  if (r.type === "snapshot") {
+    const requests = z.array(serviceRequestSchema).safeParse(r.requests);
+    return requests.success ? { type: "snapshot", requests: requests.data } : null;
+  }
+  if (r.type === "created" || r.type === "updated") {
+    const request = serviceRequestSchema.safeParse(r.request);
+    return request.success ? { type: r.type, request: request.data } : null;
   }
   return null;
 }
@@ -530,6 +559,12 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/orders/${encodeURIComponent(id)}`, {
           schema: orderSchema,
         }),
+      /** The captured Payment for an order (method/tax/tip/tendered breakdown),
+       *  or null if unpaid — lets a client rebuild a receipt after a refresh. */
+      getPayment: (id: string): Promise<Payment | null> =>
+        request(config, `/orders/${encodeURIComponent(id)}/payment`, {
+          schema: paymentSchema.nullable(),
+        }),
       /**
        * Subscribe to the tenant's live order stream (SSE). Calls `handler` for
        * each validated event and returns an unsubscribe fn. EventSource can't
@@ -629,6 +664,62 @@ export function createApiClient(config: ApiClientConfig) {
           body: input,
           schema: paymentSchema,
         }),
+    },
+
+    /**
+     * Guest service requests (water / call staff / call manager) — a
+     * separate, lightweight notification channel from Order/KDS. Guests
+     * create; staff list/acknowledge/resolve.
+     */
+    serviceRequests: {
+      /** Guest taps a Quick Action. Server dedupes identical pending requests
+       *  per table, so re-tapping is safe. */
+      create: (input: {
+        tableId: string;
+        type: z.infer<typeof serviceRequestTypeSchema>;
+      }): Promise<ServiceRequest> =>
+        request(config, "/service-requests", {
+          method: "POST",
+          body: input,
+          schema: serviceRequestSchema,
+        }),
+      /** Staff-only: open requests (defaults to pending + acknowledged). */
+      list: (status?: ServiceRequestStatus): Promise<ServiceRequest[]> =>
+        request(
+          config,
+          status
+            ? `/service-requests?status=${encodeURIComponent(status)}`
+            : "/service-requests",
+          { schema: z.array(serviceRequestSchema) },
+        ),
+      /** Staff-only: acknowledge/resolve a request. */
+      updateStatus: (
+        id: string,
+        status: ServiceRequestStatus,
+      ): Promise<ServiceRequest> =>
+        request(config, `/service-requests/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: { status },
+          schema: serviceRequestSchema,
+        }),
+      /** Subscribe to the tenant's live service-request stream (SSE). Mirrors
+       *  orders.stream's EventSource handling (tenant via `?tenant=`). */
+      stream: (handler: (event: ServiceRequestStreamEvent) => void): (() => void) => {
+        const slug = config.tenantSlug ?? config.getTenantSlug?.();
+        const url = `${config.baseUrl}/service-requests/stream${
+          slug ? `?tenant=${encodeURIComponent(slug)}` : ""
+        }`;
+        const source = new EventSource(url);
+        source.onmessage = (msg) => {
+          try {
+            const event = parseServiceRequestStreamEvent(JSON.parse(msg.data));
+            if (event) handler(event);
+          } catch {
+            /* ignore malformed frames */
+          }
+        };
+        return () => source.close();
+      },
     },
 
     /** Cross-tenant operations (super-admin only). */

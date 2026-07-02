@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard", perm: "dashboard.view", end: true },
   { to: "/menu", label: "Menu Management", icon: "restaurant_menu", perm: "menu.manage" },
   { to: "/tables", label: "Tables", icon: "table_restaurant", perm: "tables.manage" },
+  { to: "/billing", label: "Billing", icon: "point_of_sale", perm: "tables.manage" },
   { to: "/kds", label: "Kitchen Display", icon: "skillet", perm: "kds.use" },
   { to: "/history", label: "Order History", icon: "history", perm: "orders.history" },
   { to: "/analytics", label: "Sales Analytics", icon: "analytics", perm: "analytics.view" },

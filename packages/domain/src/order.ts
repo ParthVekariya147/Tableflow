@@ -110,7 +110,10 @@ export const ITEM_STATUS_FLOW: readonly ItemStatus[] = [
 export function orderSubtotal(order: Pick<Order, "rounds">): number {
   return order.rounds.reduce(
     (sum, round) =>
-      sum + round.items.reduce((s, i) => s + orderItemUnitPrice(i) * i.qty, 0),
+      sum +
+      round.items
+        .filter((i) => i.status !== "cancelled")
+        .reduce((s, i) => s + orderItemUnitPrice(i) * i.qty, 0),
     0,
   );
 }

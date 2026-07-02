@@ -1,8 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTenant } from "@amber/ui";
+import { SERVICE_REQUEST_META, type ServiceRequest } from "@amber/domain";
 import { Icon } from "./Icon";
 import { useAuth } from "../context/AuthContext";
+import { useAdmin } from "../store/AdminStore";
+import { useServiceRequests } from "../notifications/useServiceRequests";
 import { NAV_ITEMS } from "../lib/nav";
 
 const NAV_PREF_KEY = "amber-admin-nav";
@@ -12,6 +15,10 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   const { user, can, logout } = useAuth();
   // The active tenant's brand (name + logo) — set by TenantThemeGate.
   const tenant = useTenant();
+  // Live count of tables awaiting their bill, badged on the Billing nav item so
+  // staff notice a rush of checkout requests without opening the page.
+  const { state } = useAdmin();
+  const awaitingBillCount = state.tables.filter((t) => t.status === "bill").length;
 
   // Hide, don't grey out: render only the destinations this user can reach.
   const nav = NAV_ITEMS.filter((item) => can(item.perm));
@@ -68,6 +75,11 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
                 <>
                   <Icon name={item.icon} fill={isActive} />
                   <span className="font-label-md text-label-md">{item.label}</span>
+                  {item.to === "/billing" && awaitingBillCount > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ffb300] px-xs font-label-md text-[11px] font-bold text-[#4e342e]">
+                      {awaitingBillCount}
+                    </span>
+                  )}
                 </>
               )}
             </NavLink>
@@ -115,6 +127,137 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   );
 }
 
+/** Short "Xm ago" / "Xs ago" label, re-derived from a live tick so it counts up. */
+function timeAgo(iso: string, now: number): string {
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.round(m / 60)}h ago`;
+}
+
+/** Bell + dropdown for live guest service requests (water / call staff /
+ *  call manager) — a notification channel fully separate from Order/KDS. */
+function NotificationBell() {
+  const { can } = useAuth();
+  const { requests, pendingCount, acknowledge, resolve, muted, toggleMuted } =
+    useServiceRequests();
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Only re-render the "Xm ago" labels while the panel is actually open.
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [open]);
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  if (!can("tables.manage")) return null;
+
+  async function handleAcknowledge(r: ServiceRequest) {
+    try {
+      await acknowledge(r.id);
+    } catch {
+      /* the stream will re-sync state either way */
+    }
+  }
+  async function handleResolve(r: ServiceRequest) {
+    try {
+      await resolve(r.id);
+    } catch {
+      /* the stream will re-sync state either way */
+    }
+  }
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="relative rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10"
+        aria-label="Service requests"
+      >
+        <Icon name="notifications" />
+        {pendingCount > 0 && (
+          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-[10px] font-bold text-on-error">
+            {pendingCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-outline-variant bg-surface shadow-lg">
+          <div className="flex items-center justify-between border-b border-outline-variant px-md py-sm">
+            <span className="font-label-md text-label-md font-bold text-on-surface">
+              Service requests
+            </span>
+            <button
+              onClick={toggleMuted}
+              title={muted ? "Unmute new-request sound" : "Mute new-request sound"}
+              className="rounded-full p-1 text-on-surface-variant transition-colors hover:bg-surface-container-low hover:text-primary"
+            >
+              <Icon name={muted ? "notifications_off" : "volume_up"} size={18} />
+            </button>
+          </div>
+          {requests.length === 0 ? (
+            <p className="px-md py-lg text-center text-body-md text-on-surface-variant">
+              Nothing needs attention.
+            </p>
+          ) : (
+            <ul className="max-h-80 overflow-y-auto">
+              {requests.map((r) => {
+                const meta = SERVICE_REQUEST_META[r.type];
+                return (
+                  <li
+                    key={r.id}
+                    className="flex items-center gap-sm border-b border-outline-variant px-md py-sm last:border-0"
+                  >
+                    <Icon name={meta.icon} size={20} className="shrink-0 text-primary" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-body-md text-body-md font-medium text-on-surface">
+                        Table {r.tableLabel} — {meta.label}
+                      </p>
+                      <p className="text-[11px] text-on-surface-variant">
+                        {timeAgo(r.createdAt, now)}
+                        {r.status === "acknowledged" ? " · Acknowledged" : ""}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-xs">
+                      {r.status === "pending" && (
+                        <button
+                          onClick={() => handleAcknowledge(r)}
+                          className="rounded-full border border-outline-variant px-sm py-xs text-[11px] font-bold text-on-surface-variant hover:bg-surface-container-low"
+                        >
+                          Ack
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleResolve(r)}
+                        className="rounded-full bg-primary px-sm py-xs text-[11px] font-bold text-on-primary hover:opacity-90"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopBar({
   navOpen,
   onToggleNav,
@@ -158,10 +301,7 @@ function TopBar({
       </div>
 
       <div className="flex items-center gap-md">
-        <button className="relative rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10">
-          <Icon name="notifications" />
-          <span className="absolute right-2 top-1 h-2 w-2 rounded-full bg-error" />
-        </button>
+        <NotificationBell />
         <button className="rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10">
           <Icon name="sync" />
         </button>

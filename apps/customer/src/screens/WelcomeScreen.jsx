@@ -1,62 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { SERVICE_REQUEST_TYPES, SERVICE_REQUEST_META } from "@amber/domain";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
 import { useBoot } from "../context/BootContext";
 import { useMoney } from "../money";
 import FoodImage from "../components/FoodImage";
 
-// ── Synthetic quick-action items (no menu item required) ──────────────────
-const QUICK_ACTIONS = [
-  {
-    id: "sys_water",
-    key: "water",
-    icon: "water_drop",
-    label: "Water",
-    sublabel: "Still water · Free",
-    swatch: "from-sky-100 to-blue-200",
-    item: {
-      id: "sys_water",
-      name: "Still Water",
-      price: 0,
-      priceCents: 0,
-      icon: "water_drop",
-      swatch: "from-sky-100 to-blue-200",
-    },
-  },
-  {
-    id: "sys_staff",
-    key: "staff",
-    icon: "notifications_active",
-    label: "Call Staff",
-    sublabel: "We'll come to you",
-    swatch: "from-amber-100 to-orange-200",
-    item: {
-      id: "sys_staff",
-      name: "Staff requested",
-      price: 0,
-      priceCents: 0,
-      icon: "notifications_active",
-      swatch: "from-amber-100 to-orange-200",
-    },
-  },
-  {
-    id: "sys_manager",
-    key: "manager",
-    icon: "support_agent",
-    label: "Manager",
-    sublabel: "Wait for manager",
-    swatch: "from-purple-100 to-violet-200",
-    item: {
-      id: "sys_manager",
-      name: "Manager requested",
-      price: 0,
-      priceCents: 0,
-      icon: "support_agent",
-      swatch: "from-purple-100 to-violet-200",
-    },
-  },
-];
+// Swatch per request type — kept alongside the shared label/icon metadata
+// (@amber/domain's SERVICE_REQUEST_META) since the gradient is a customer-app
+// styling detail, not part of the cross-app contract.
+const QUICK_ACTION_SWATCH = {
+  water: "from-sky-100 to-blue-200",
+  call_staff: "from-amber-100 to-orange-200",
+  call_manager: "from-purple-100 to-violet-200",
+};
+
+// ── Quick Actions — guest service requests, NOT menu items. Tapping one
+// posts to /service-requests (api.serviceRequests.create), a channel fully
+// separate from Order/Round/KDS — see SessionContext's sendServiceRequest.
+const QUICK_ACTIONS = SERVICE_REQUEST_TYPES.map((type) => ({
+  type,
+  ...SERVICE_REQUEST_META[type],
+  swatch: QUICK_ACTION_SWATCH[type],
+}));
 
 // ── Menu item card ────────────────────────────────────────────────────────
 function ItemCard({ item, onBringIt, onAdd, added, money }) {
@@ -146,13 +113,13 @@ function QuickCard({ action, onTap, sent }) {
 // ── Main screen ───────────────────────────────────────────────────────────
 export default function WelcomeScreen() {
   const navigate = useNavigate();
-  const { tableNumber, bringIt, addToOrder, myOrderCount } = useSession();
+  const { tableNumber, bringIt, addToOrder, myOrderCount, sendServiceRequest, showToast } = useSession();
   const { welcome } = useMenu();
   const { tenant } = useBoot();
   const money = useMoney();
   const [added, setAdded] = useState(new Set());
   const [sent, setSent] = useState(new Set());
-  // Pending "sent" reset timers, keyed by action.key — cleared on unmount so
+  // Pending "sent" reset timers, keyed by action.type — cleared on unmount so
   // a screen change before the 4s tick doesn't call setState on an unmounted
   // component.
   const sentTimersRef = useRef(new Map());
@@ -165,16 +132,21 @@ export default function WelcomeScreen() {
     };
   }, []);
 
-  function handleQuickTap(action) {
-    if (sent.has(action.key)) return;
-    bringIt(action.item, 1);
-    setSent((prev) => new Set(prev).add(action.key));
-    // Reset the "sent" tick after 4 s so they can re-request
+  async function handleQuickTap(action) {
+    if (sent.has(action.type)) return;
+    // Optimistic — the server dedupes identical pending requests per table,
+    // so a double-tap before this resolves is safe either way.
+    setSent((prev) => new Set(prev).add(action.type));
     const id = setTimeout(() => {
-      sentTimersRef.current.delete(action.key);
-      setSent((prev) => { const n = new Set(prev); n.delete(action.key); return n; });
+      sentTimersRef.current.delete(action.type);
+      setSent((prev) => { const n = new Set(prev); n.delete(action.type); return n; });
     }, 4000);
-    sentTimersRef.current.set(action.key, id);
+    sentTimersRef.current.set(action.type, id);
+    try {
+      await sendServiceRequest(action.type);
+    } catch {
+      showToast("Couldn't send — please try again", "error");
+    }
   }
 
   function handleBringIt(item) {
@@ -225,10 +197,10 @@ export default function WelcomeScreen() {
           <div className="flex gap-3">
             {QUICK_ACTIONS.map((action) => (
               <QuickCard
-                key={action.key}
+                key={action.type}
                 action={action}
                 onTap={handleQuickTap}
-                sent={sent.has(action.key)}
+                sent={sent.has(action.type)}
               />
             ))}
             {/* Full Menu shortcut */}

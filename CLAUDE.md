@@ -72,6 +72,14 @@ All shapes are Zod schemas with inferred types. Key entities:
   `customerName?` / `customerPhone?` (captured for the bill/receipt). Helpers: `ITEM_STATUS_FLOW`,
   `orderSubtotal`, `formatMoney`.
 - `common.ts` — id/money/timestamp/slug primitives.
+- `service-request.ts` — `ServiceRequest` (`{ id, tenantId, tableId, tableLabel,
+  orderId?, type, status, createdAt, acknowledgedAt?, resolvedAt? }`) — a guest's
+  request for staff attention (`water` | `call_staff` | `call_manager`),
+  deliberately **not** an Order/Round/OrderItem — it never touches the kitchen.
+  `status`: `pending → acknowledged → resolved`. `SERVICE_REQUEST_META` is the
+  single source of truth for each type's label/icon, shared by the customer
+  Quick Actions UI and the admin notification bell — an icon is always looked
+  up from the request's `type`, never a menu-item fallback. See flow 8.
 - `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row).
 - `analytics.ts` — `AnalyticsSummary` (revenue/orders/avgTicket + deltas, revenue
   series, top items, category split, peak hours) for the dashboard/analytics page.
@@ -145,6 +153,12 @@ All shapes are Zod schemas with inferred types. Key entities:
   `GET /orders/stream` **SSE live event bus** (see below), `GET /orders/:id`,
   `POST /orders`, `/:id/rounds`, `/:id/items` add, `PATCH /:id/items/:itemId` qty/status,
   `/:id/bill`, `/:id/cancel`, `/:id/payment` capture),
+  `service-requests/` (`POST /service-requests` public guest create — dedupes:
+  returns the existing row instead of a duplicate if that table already has a
+  `pending` request of the same type; `GET /service-requests?status=` and
+  `PATCH /service-requests/:id` staff-only, `@RequirePermission("tables.manage")`;
+  `GET /service-requests/stream` SSE, same `?tenant=` fallback as the orders
+  stream — see flow 8),
   `admin/` (`GET|POST /admin/tenants`). `prisma/` is a global module.
   Item-status PATCH stamps the per-stage timestamps; **it 409s if the order is
   `closed`/`paid`** (terminal) so a stale KDS board can't resurrect a dead order —
@@ -234,7 +248,7 @@ All shapes are Zod schemas with inferred types. Key entities:
 
 ## The typed client — `@amber/api-client` (`packages/api-client/src/`)
 `createApiClient({ baseUrl, tenantSlug?, getTenantSlug?, getToken?, getDeviceId?, fetch? })`
-→ resource methods (`tenant`, `menu`, `tables`, `orders`, `admin`). Central
+→ resource methods (`tenant`, `menu`, `tables`, `orders`, `serviceRequests`, `admin`). Central
 `request()` (`http.ts`) attaches `X-Tenant-Slug` + bearer token and **validates
 responses against domain schemas**. The tenant slug resolves as
 `opts.tenantSlug ?? config.tenantSlug ?? config.getTenantSlug?.()` — the
@@ -259,6 +273,10 @@ for a different tenant. `ApiError` for non-2xx.
   (tenant via `?tenant=` since EventSource can't set headers), validates each frame
   (`snapshot`/`created`/`updated`/`closed`) against `orderSchema`, and returns an
   unsubscribe fn — mirrors `createHttpKdsTransport`'s EventSource handling.
+- **Service requests:** `serviceRequests.create({tableId,type})`,
+  `serviceRequests.list(status?)`, `serviceRequests.updateStatus(id,status)`, and
+  `serviceRequests.stream(handler)` (identical EventSource pattern to
+  `orders.stream`, its own `/service-requests/stream` connection) — see flow 8.
 
 ## Apps
 - **customer** (`apps/customer`) — the guest ordering app, **wired to the live API
@@ -311,6 +329,14 @@ for a different tenant. `ApiError` for non-2xx.
   switch / text by `inputType`), live-recomputes the price as options are picked, blocks
   add until required groups are satisfied, and carries the chosen modifiers through the
   cart → round → `addRound` (effective per-unit price = base + Σ deltas). See `MODIFIERS.md`.
+  **Quick Actions** (`screens/WelcomeScreen.jsx`) — Water / Call Staff / Manager —
+  are guest **service requests**, not menu items: tapping one calls
+  `sendServiceRequest(type)` (`context/SessionContext.jsx`) →
+  `api.serviceRequests.create({tableId, type})`. They never call `bringIt` and
+  never touch Order/Round/KDS (previously they were faked as zero-price menu
+  items routed through `bringIt`, which both mis-modeled them as kitchen orders
+  and hardcoded a delivery-truck toast icon for every "bring it" tap). Labels/
+  icons come from `@amber/domain`'s `SERVICE_REQUEST_META`. See flow 8.
   ⚠️ The live **KDS board still flows through the relay** (`src/kitchen.js` →
   `createHttpKdsTransport` :4001), separate from the persisted API — so KDS status
   changes don't yet write back to the Order. Unifying KDS on the API is the next step.
@@ -437,6 +463,24 @@ for a different tenant. `ApiError` for non-2xx.
   (hardcoded dummy tickets) has been removed. `tenant/defaultTenant.ts` supplies the
   slug (`amber-grain`) + theme; base URL via `VITE_API_URL` (default `:3001`),
   customer PWA origin via `VITE_CUSTOMER_URL` (default `:5173`, for QR links).
+  **Notification bell** (`components/Shell.tsx` `NotificationBell`, `tables.manage`-
+  gated): a real, live badge + dropdown for guest **service requests** (water / call
+  staff / call manager) — replaces the old decorative bell (a hardcoded static red
+  dot wired to nothing). Backed by `notifications/useServiceRequests.tsx`
+  (`ServiceRequestsProvider`, mounted in `main.tsx` alongside `AdminStoreProvider`),
+  which subscribes to `api.serviceRequests.stream` via the shared `lib/api.ts`
+  client. Acknowledge/Resolve call `api.serviceRequests.updateStatus`; the stream
+  echo is what actually updates the list (no local optimistic state). A new
+  `created` event (never a `snapshot`, so reconnects don't re-chime) plays a
+  synthesized two-tone chime (`notifications/sound.ts`'s
+  `playServiceRequestChime`, Web Audio API — no audio asset), mutable via a
+  speaker icon in the bell dropdown (persisted to `localStorage`). **Also
+  surfaced on `/tables`:** `TablesPage.tsx`'s `TableCard` reads the same
+  `useServiceRequests()` state filtered to its own `tableId` and renders a
+  request badge per open item (tap a pending one to acknowledge inline) plus a
+  pulsing card border (reusing the KDS `pulse-ready` animation) while any
+  request on that table is still `pending` — so staff scanning the floor grid
+  see which tables need attention without opening the bell. See flow 8.
 - **super-admin** — TS shell wired to `@amber/ui` + `@amber/api-client`, ready to
   build out (tenant onboarding/analytics).
 
@@ -601,6 +645,41 @@ order mutation broadcasts and all clients subscribe over SSE.
   ~20s + focus/visibility) to self-heal a dropped stream (mobile backgrounding).
 - ⚠️ KDS still rides its own relay (flow 4); folding it onto this stream + retiring
   the relay is the remaining step. Auth still deferred (tenant-scoped, no token).
+
+### 8. Guest service requests (water / call staff / call manager)
+A guest's request for staff attention is a **`ServiceRequest`**, deliberately kept
+separate from Order/Round/OrderItem/KDS (flow 4) — it's a notification, not a
+kitchen ticket. Mirrors flow 7's SSE architecture end-to-end:
+- **Create.** `WelcomeScreen.jsx`'s Quick Actions (Water / Call Staff / Manager) →
+  `SessionContext.jsx` `sendServiceRequest(type)` → `api.serviceRequests.create({
+  tableId, type })` → `POST /service-requests` (public, no device binding — not
+  sensitive per-device state). `ServiceRequestsService.create` **dedupes**: a
+  table can only have one `pending` request of a given type at a time, so a
+  guest mashing the button re-returns the same row instead of piling up
+  duplicates (the client's 4s "sent" cooldown in `WelcomeScreen.jsx` is just a
+  UX debounce on top of this — the server dedupe is authoritative). It also
+  opportunistically links the table's live `Order`, if any, via `orderId`.
+- **Emit.** `service-requests.events.ts`'s `ServiceRequestsEvents` — an
+  in-process per-tenant rxjs `Subject`, identical shape to `OrdersEvents` (flow
+  7) — `emit`s `created`/`updated` after every create/acknowledge/resolve.
+- **Stream.** `service-requests.controller.ts` `@Sse("stream")` →
+  `GET /service-requests/stream`: prefixed with a `{type:"snapshot", requests}`
+  of currently-open (pending + acknowledged) requests on (re)connect; tenant via
+  `?tenant=` (EventSource can't set headers, same `TenantMiddleware` fallback).
+- **Subscribe (admin).** `notifications/useServiceRequests.tsx`
+  (`ServiceRequestsProvider`, mounted in `main.tsx`) opens
+  `api.serviceRequests.stream`, gated on being signed in. `components/Shell.tsx`'s
+  `NotificationBell` (`tables.manage`-gated) renders the live badge count + a
+  dropdown listing each open request with its `SERVICE_REQUEST_META` icon/label
+  and Acknowledge/Resolve buttons → `api.serviceRequests.updateStatus(id, status)`.
+  A `resolved` update drops the row off the list; the UI never applies a status
+  change locally — it waits for the stream to echo it back, same principle as
+  the rest of the realtime surface.
+- Icons/labels are looked up **only** from `@amber/domain`'s
+  `SERVICE_REQUEST_META[type]`, shared by both apps — this is what fixed the bug
+  where every "bring it" tap (including Water) showed a hardcoded delivery-truck
+  toast icon, a symptom of the old design routing these through the food-order
+  `bringIt` path instead of their own channel.
 
 ## Conventions & gotchas
 - Money is **integer cents** in the domain/API. The legacy customer screens still

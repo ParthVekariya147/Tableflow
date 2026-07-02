@@ -64,6 +64,16 @@ export interface MenuItem {
   modifierGroups?: ModifierGroup[];
 }
 
+export interface OrderItemModifier {
+  id: string;
+  optionId: string | null;
+  groupName: string;
+  name: string;
+  /** Per-unit price change, in cents; may be negative. */
+  priceDelta: number;
+  textValue?: string;
+}
+
 export interface OrderItem {
   id: string;
   menuItemId: string;
@@ -72,6 +82,7 @@ export interface OrderItem {
   qty: number;
   note?: string;
   status: ItemStatus;
+  modifiers?: OrderItemModifier[];
 }
 
 export interface Round {
@@ -87,6 +98,8 @@ export interface TableSession {
   orderId?: string;
   openedAt: number;
   rounds: Round[];
+  /** epoch ms when the guest requested the bill (set once `status` becomes "bill"). */
+  billRequestedAt?: number;
 }
 
 export interface Table {

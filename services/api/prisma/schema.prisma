@@ -38,6 +38,12 @@ model Tenant {
   active    Boolean  @default(true)
   // ThemeConfig (colors/typography/logo/mode) as JSON — see @amber/domain.
   theme     Json
+  // PrinterSettings (agent URL/secret + printer connection config) as JSON —
+  // see @amber/domain. Nullable: absent = never configured, mapper defaults to {}.
+  printer   Json?
+  // Optional SECOND print-agent connection for a kitchen printer (KOTs), same
+  // shape as `printer`. Nullable: absent = never configured, mapper defaults to {}.
+  kitchenPrinter Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -58,6 +64,7 @@ model Tenant {
   roles           Role[]
   subscription    Subscription?
   auditLogs       AuditLog[]
+  serviceRequests ServiceRequest[]
 }
 
 // ── Identity & access ──────────────────────────────────────────────────────
@@ -167,6 +174,7 @@ model Table {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   room      Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
   orders    Order[]
+  serviceRequests ServiceRequest[]
 
   @@index([tenantId])
   @@index([roomId])
@@ -331,6 +339,41 @@ enum ItemStatus {
   cancelled
 }
 
+// ── Guest service requests (water / call staff / call manager) ────────────
+// Deliberately separate from Order/Round/OrderItem: a request for staff
+// attention is not a kitchen order and never touches the KDS.
+
+enum ServiceRequestType {
+  water
+  call_staff
+  call_manager
+}
+
+enum ServiceRequestStatus {
+  pending
+  acknowledged
+  resolved
+}
+
+model ServiceRequest {
+  id             String               @id @default(cuid())
+  tenantId       String
+  tableId        String
+  /** Best-effort link to the table's live session, if one exists. */
+  orderId        String?
+  type           ServiceRequestType
+  status         ServiceRequestStatus @default(pending)
+  createdAt      DateTime             @default(now())
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  table          Table                @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  order          Order?               @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
 model Order {
   id        String      @id @default(cuid())
   tenantId  String
@@ -360,6 +403,7 @@ model Order {
   rounds    Round[]
   payment   Payment?
   review    Review?
+  serviceRequests ServiceRequest[]
 
   @@index([tenantId])
   @@index([tenantId, status]) // live-table / active-session lookups

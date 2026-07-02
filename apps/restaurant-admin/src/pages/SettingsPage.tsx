@@ -46,6 +46,13 @@ const CARDS: Card[] = [
     desc: "Configure UPI for instant QR-code billing at checkout.",
     ready: true,
   },
+  {
+    to: "/settings/printer",
+    icon: "print",
+    title: "Printer",
+    desc: "Connect a thermal receipt printer via a local print agent.",
+    ready: true,
+  },
 ];
 
 /**

@@ -27,4 +27,5 @@ export const defaultTenant: Tenant = {
       fontLinks: [],
     },
   },
+  printer: {},
 };

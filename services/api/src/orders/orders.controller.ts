@@ -8,9 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   Sse,
   UseGuards,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { SkipThrottle } from "@nestjs/throttler";
 import { defer, from, map, merge, type Observable } from "rxjs";
 import type {
@@ -115,6 +117,28 @@ export class OrdersController {
     @Headers("x-device-id") deviceId?: string,
   ): Promise<Order> {
     return this.orders.get(tenant.id, id, deviceId);
+  }
+
+  /**
+   * Staff-only: the payment captured for this order (method/tax/tip/tendered
+   * breakdown), if any — lets a client rebuild a receipt after a refresh
+   * instead of relying solely on the in-memory result of `/payment`.
+   *
+   * Uses `@Res()` directly (bypassing Nest's automatic response handling)
+   * because Nest sends an EMPTY body — not the JSON literal `null` — when a
+   * handler's return value is `null`/`undefined`, which the api-client's
+   * `paymentSchema.nullable()` can't parse (empty text ≠ `null`). Calling
+   * Express's `res.json()` ourselves serializes `null` correctly.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get(":id/payment")
+  async getPayment(
+    @CurrentTenant() tenant: Tenant,
+    @Param("id") id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const payment = await this.orders.getPayment(tenant.id, id);
+    res.json(payment);
   }
 
   /**

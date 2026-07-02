@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "../components/Icon";
-import { useAdmin, billTotals } from "../store/AdminStore";
+import { useAdmin, billTotals, itemUnitPrice } from "../store/AdminStore";
 import { elapsed } from "../lib/money";
-import type { ItemStatus, Round } from "../data/types";
+import type { ItemStatus, MenuItem, ModifierGroup, OrderItemModifier, Round } from "../data/types";
 
 const ROUND_STATE: Record<string, { label: string; chip: string }> = {
   placed: { label: "Placed", chip: "bg-secondary-container/40 text-on-secondary-container" },
@@ -122,9 +122,14 @@ export function TableSessionPage() {
                           <div className="flex items-center gap-sm">
                             <span className="font-title-lg text-title-lg text-on-surface">{item.name}</span>
                             <span className="font-data-mono text-data-mono text-on-surface-variant">
-                              {money(item.priceCents)}
+                              {money(itemUnitPrice(item))}
                             </span>
                           </div>
+                          {item.modifiers && item.modifiers.length > 0 && (
+                            <p className="mt-base font-body-md text-[12px] text-on-surface-variant">
+                              {item.modifiers.map((m) => (m.textValue ? `"${m.textValue}"` : m.name)).join(", ")}
+                            </p>
+                          )}
                           {item.note && (
                             <p className="mt-base font-body-md text-body-md text-on-surface-variant">
                               {item.note}
@@ -158,7 +163,7 @@ export function TableSessionPage() {
                             </button>
                           </div>
                           <span className="min-w-[4rem] text-right font-data-mono text-data-mono font-semibold text-on-surface">
-                            {money(item.priceCents * item.qty)}
+                            {money(itemUnitPrice(item) * item.qty)}
                           </span>
                           <button
                             onClick={() =>
@@ -286,43 +291,160 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** One staged line in the "Add Item" drawer — not sent to the API until "Add" is pressed. */
+interface StagedLine {
+  key: string;
+  menuItemId: string;
+  qty: number;
+  modifiers: OrderItemModifier[];
+  notes?: string;
+}
+
+let stagedLineSeq = 0;
+function newLineKey() {
+  stagedLineSeq += 1;
+  return `staged_${stagedLineSeq}`;
+}
+
 function ItemPicker({
   onClose,
   onConfirm,
 }: {
   onClose: () => void;
   /** Called once with every selected line when staff confirms the batch. */
-  onConfirm: (items: Array<{ menuItemId: string; qty: number }>) => void;
+  onConfirm: (
+    items: Array<{ menuItemId: string; qty: number; notes?: string; modifiers?: OrderItemModifier[] }>,
+  ) => void;
 }) {
   const { state, money } = useAdmin();
   const [query, setQuery] = useState("");
+  const [configuring, setConfiguring] = useState<MenuItem | null>(null);
   // Staged locally — nothing hits the API until "Add" is pressed, so picking
   // N items is one request instead of N.
-  const [selected, setSelected] = useState<Record<string, number>>({});
+  const [lines, setLines] = useState<StagedLine[]>([]);
+
   const items = state.items.filter(
     (i) => i.available && i.name.toLowerCase().includes(query.toLowerCase()),
   );
+  const categorized = state.categories
+    .map((c) => ({ category: c, items: items.filter((i) => i.categoryId === c.id) }))
+    .filter((g) => g.items.length > 0);
+  const otherItems = items.filter((i) => !state.categories.some((c) => c.id === i.categoryId));
 
-  function bump(itemId: string, delta: number) {
-    setSelected((prev) => {
-      const next = Math.max(0, (prev[itemId] ?? 0) + delta);
-      const copy = { ...prev };
-      if (next === 0) delete copy[itemId];
-      else copy[itemId] = next;
-      return copy;
+  function hasRequiredModifiers(item: MenuItem) {
+    return (item.modifierGroups ?? []).some((g) => g.required);
+  }
+
+  /** Bump the plain (no modifiers/note) staged line for an item — the fast path
+   *  for items that don't need any customization. */
+  function bumpBare(item: MenuItem, delta: number) {
+    setLines((prev) => {
+      const idx = prev.findIndex(
+        (l) => l.menuItemId === item.id && l.modifiers.length === 0 && !l.notes,
+      );
+      if (idx === -1) {
+        if (delta <= 0) return prev;
+        return [...prev, { key: newLineKey(), menuItemId: item.id, qty: 1, modifiers: [] }];
+      }
+      const qty = prev[idx]!.qty + delta;
+      if (qty <= 0) return prev.filter((_, i) => i !== idx);
+      return prev.map((l, i) => (i === idx ? { ...l, qty } : l));
     });
   }
 
-  const entries = Object.entries(selected);
-  const totalCount = entries.reduce((sum, [, qty]) => sum + qty, 0);
-  const totalCents = entries.reduce((sum, [itemId, qty]) => {
-    const item = state.items.find((i) => i.id === itemId);
-    return sum + (item?.priceCents ?? 0) * qty;
+  function bareQtyFor(itemId: string) {
+    return lines.find((l) => l.menuItemId === itemId && l.modifiers.length === 0 && !l.notes)?.qty ?? 0;
+  }
+
+  function addConfiguredLine(item: MenuItem, qty: number, modifiers: OrderItemModifier[], notes: string) {
+    setLines((prev) => [
+      ...prev,
+      { key: newLineKey(), menuItemId: item.id, qty, modifiers, notes: notes || undefined },
+    ]);
+  }
+
+  function removeLine(key: string) {
+    setLines((prev) => prev.filter((l) => l.key !== key));
+  }
+
+  const totalCount = lines.reduce((sum, l) => sum + l.qty, 0);
+  const totalCents = lines.reduce((sum, l) => {
+    const item = state.items.find((i) => i.id === l.menuItemId);
+    const modDelta = l.modifiers.reduce((s, m) => s + m.priceDelta, 0);
+    return sum + ((item?.priceCents ?? 0) + modDelta) * l.qty;
   }, 0);
 
   function confirm() {
-    if (totalCount === 0) return;
-    onConfirm(entries.map(([menuItemId, qty]) => ({ menuItemId, qty })));
+    if (lines.length === 0) return;
+    onConfirm(
+      lines.map((l) => ({ menuItemId: l.menuItemId, qty: l.qty, notes: l.notes, modifiers: l.modifiers })),
+    );
+  }
+
+  function renderItemRow(item: MenuItem) {
+    const bareQty = bareQtyFor(item.id);
+    const requiresConfig = hasRequiredModifiers(item);
+    return (
+      <li key={item.id}>
+        <div
+          className={`flex w-full items-center gap-md rounded-lg border p-sm text-left transition-colors ${
+            bareQty > 0
+              ? "border-primary/40 bg-primary-container/10"
+              : "border-transparent hover:border-outline-variant hover:bg-surface-container-low"
+          }`}
+        >
+          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.swatch}`}>
+            <Icon name={item.icon} size={24} className="text-on-background/50" />
+          </div>
+          <button
+            onClick={() => (requiresConfig ? setConfiguring(item) : bumpBare(item, 1))}
+            className="flex-1 text-left"
+          >
+            <div className="font-body-lg text-body-lg font-medium text-on-surface">{item.name}</div>
+            <div className="font-data-mono text-data-mono text-on-surface-variant">
+              {money(item.priceCents)}
+            </div>
+          </button>
+          <div className="flex items-center gap-xs">
+            {!requiresConfig &&
+              (bareQty > 0 ? (
+                <div className="flex items-center gap-xs">
+                  <button
+                    onClick={() => bumpBare(item, -1)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                  >
+                    <Icon name="remove" size={16} />
+                  </button>
+                  <span className="w-5 text-center font-data-mono text-data-mono text-on-surface">
+                    {bareQty}
+                  </span>
+                  <button
+                    onClick={() => bumpBare(item, 1)}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                  >
+                    <Icon name="add" size={16} />
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => bumpBare(item, 1)}>
+                  <Icon name="add_circle" className="text-primary" />
+                </button>
+              ))}
+            <button
+              onClick={() => setConfiguring(item)}
+              title="Modifiers / note / quantity"
+              className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors ${
+                requiresConfig
+                  ? "border-primary text-primary hover:bg-primary-container/20"
+                  : "border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+              }`}
+            >
+              <Icon name="tune" size={16} />
+            </button>
+          </div>
+        </div>
+      </li>
+    );
   }
 
   return (
@@ -354,59 +476,55 @@ function ItemPicker({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-md">
-          <ul className="flex flex-col gap-xs">
-            {items.map((item) => {
-              const qty = selected[item.id] ?? 0;
-              return (
-                <li key={item.id}>
-                  <div
-                    className={`flex w-full items-center gap-md rounded-lg border p-sm text-left transition-colors ${
-                      qty > 0
-                        ? "border-primary/40 bg-primary-container/10"
-                        : "border-transparent hover:border-outline-variant hover:bg-surface-container-low"
-                    }`}
-                  >
-                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${item.swatch}`}>
-                      <Icon name={item.icon} size={24} className="text-on-background/50" />
+          {categorized.map(({ category, items: catItems }) => (
+            <div key={category.id} className="mb-md last:mb-0">
+              <h3 className="mb-xs px-sm font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
+                {category.name}
+              </h3>
+              <ul className="flex flex-col gap-xs">{catItems.map(renderItemRow)}</ul>
+            </div>
+          ))}
+          {otherItems.length > 0 && (
+            <div className="mb-md last:mb-0">
+              <h3 className="mb-xs px-sm font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
+                Other
+              </h3>
+              <ul className="flex flex-col gap-xs">{otherItems.map(renderItemRow)}</ul>
+            </div>
+          )}
+        </div>
+        {lines.length > 0 && (
+          <div className="max-h-40 shrink-0 overflow-y-auto border-t border-outline-variant bg-surface px-md py-sm">
+            <ul className="flex flex-col gap-xs">
+              {lines.map((l) => {
+                const item = state.items.find((i) => i.id === l.menuItemId);
+                return (
+                  <li key={l.key} className="flex items-center justify-between gap-sm text-left">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-body-md text-body-md text-on-surface">
+                        {l.qty}× {item?.name ?? "Item"}
+                      </span>
+                      {(l.modifiers.length > 0 || l.notes) && (
+                        <p className="truncate font-body-md text-[12px] text-on-surface-variant">
+                          {[
+                            ...l.modifiers.map((m) => (m.textValue ? `"${m.textValue}"` : m.name)),
+                            ...(l.notes ? [`Note: ${l.notes}`] : []),
+                          ].join(", ")}
+                        </p>
+                      )}
                     </div>
                     <button
-                      onClick={() => bump(item.id, 1)}
-                      className="flex-1 text-left"
+                      onClick={() => removeLine(l.key)}
+                      className="shrink-0 rounded-full p-xs text-on-surface-variant hover:bg-surface-container-high hover:text-error"
                     >
-                      <div className="font-body-lg text-body-lg font-medium text-on-surface">{item.name}</div>
-                      <div className="font-data-mono text-data-mono text-on-surface-variant">
-                        {money(item.priceCents)}
-                      </div>
+                      <Icon name="close" size={16} />
                     </button>
-                    {qty > 0 ? (
-                      <div className="flex items-center gap-xs">
-                        <button
-                          onClick={() => bump(item.id, -1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
-                        >
-                          <Icon name="remove" size={16} />
-                        </button>
-                        <span className="w-5 text-center font-data-mono text-data-mono text-on-surface">
-                          {qty}
-                        </span>
-                        <button
-                          onClick={() => bump(item.id, 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
-                        >
-                          <Icon name="add" size={16} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => bump(item.id, 1)}>
-                        <Icon name="add_circle" className="text-primary" />
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
         {totalCount > 0 && (
           <div className="shrink-0 border-t border-outline-variant bg-surface p-md">
             <button
@@ -418,6 +536,207 @@ function ItemPicker({
           </div>
         )}
       </aside>
+      {configuring && (
+        <ItemConfigurator
+          item={configuring}
+          money={money}
+          onClose={() => setConfiguring(null)}
+          onAdd={(qty, modifiers, notes) => {
+            addConfiguredLine(configuring, qty, modifiers, notes);
+            setConfiguring(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Initial selection state per group: "" for single/text, [] for multiple/toggle. */
+function initSelections(groups: ModifierGroup[]) {
+  const s: Record<string, string | string[]> = {};
+  for (const g of groups) {
+    s[g.id ?? g.name] = g.inputType === "single" || g.inputType === "text" ? "" : [];
+  }
+  return s;
+}
+
+/** Modal for picking an item's modifiers + quantity + kitchen note before it's
+ *  staged in the Add Item drawer — mirrors the customer app's ItemSheet so
+ *  staff can record the same "spice level" / "extra naan" / special-instruction
+ *  detail a guest could when placing a walk-in or phone order. */
+function ItemConfigurator({
+  item,
+  money,
+  onClose,
+  onAdd,
+}: {
+  item: MenuItem;
+  money: (cents: number) => string;
+  onClose: () => void;
+  onAdd: (qty: number, modifiers: OrderItemModifier[], notes: string) => void;
+}) {
+  const groups = item.modifierGroups ?? [];
+  const [qty, setQty] = useState(1);
+  const [sel, setSel] = useState<Record<string, string | string[]>>(() => initSelections(groups));
+  const [notes, setNotes] = useState("");
+
+  const setSingle = (gid: string, optionId: string) =>
+    setSel((s) => ({ ...s, [gid]: s[gid] === optionId ? "" : optionId }));
+  const toggleMany = (gid: string, optionId: string, max?: number | null) =>
+    setSel((s) => {
+      const cur = (s[gid] as string[]) ?? [];
+      if (cur.includes(optionId)) return { ...s, [gid]: cur.filter((x) => x !== optionId) };
+      if (max != null && cur.length >= max) return s;
+      return { ...s, [gid]: [...cur, optionId] };
+    });
+  const setText = (gid: string, value: string) => setSel((s) => ({ ...s, [gid]: value }));
+
+  const chosen: OrderItemModifier[] = [];
+  let valid = true;
+  for (const g of groups) {
+    const gid = g.id ?? g.name;
+    if (g.inputType === "text") {
+      const text = ((sel[gid] as string) ?? "").trim();
+      if (text) {
+        chosen.push({ id: newLineKey(), optionId: null, groupName: g.name, name: "", priceDelta: 0, textValue: text });
+      } else if (g.required) valid = false;
+    } else {
+      const ids = g.inputType === "single" ? (sel[gid] ? [sel[gid] as string] : []) : ((sel[gid] as string[]) ?? []);
+      for (const id of ids) {
+        const opt = g.options.find((o) => o.id === id);
+        if (opt) {
+          chosen.push({
+            id: newLineKey(),
+            optionId: opt.id ?? null,
+            groupName: g.name,
+            name: opt.name,
+            priceDelta: opt.priceCents,
+          });
+        }
+      }
+      const min = g.required ? Math.max(g.minSelect ?? 0, 1) : g.minSelect ?? 0;
+      if (ids.length < min) valid = false;
+    }
+  }
+
+  const unitPrice = item.priceCents + chosen.reduce((s, m) => s + m.priceDelta, 0);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-on-background/30 p-md backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-sm flex-col overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-outline-variant px-lg py-md">
+          <div>
+            <h3 className="font-title-lg text-title-lg text-on-surface">{item.name}</h3>
+            <p className="font-data-mono text-data-mono text-on-surface-variant">{money(unitPrice)}</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-xs text-on-surface-variant hover:bg-surface-container-high">
+            <Icon name="close" />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-lg">
+          {groups.map((g) => {
+            const gid = g.id ?? g.name;
+            return (
+              <div key={gid} className="mb-lg">
+                <div className="mb-xs flex items-center justify-between">
+                  <h4 className="font-label-lg text-label-lg text-on-surface">{g.name}</h4>
+                  <span className="font-label-md text-[11px] text-on-surface-variant">
+                    {g.required ? "Required" : "Optional"}
+                    {g.inputType === "multiple" && g.maxSelect ? ` · up to ${g.maxSelect}` : ""}
+                  </span>
+                </div>
+                {g.inputType === "text" ? (
+                  <textarea
+                    rows={2}
+                    maxLength={g.maxLength ?? undefined}
+                    value={(sel[gid] as string) ?? ""}
+                    onChange={(e) => setText(gid, e.target.value)}
+                    placeholder={g.placeholder || "Add a note…"}
+                    className="w-full resize-none rounded-lg border border-outline-variant bg-surface px-md py-sm font-body-md text-on-surface outline-none focus:border-primary"
+                  />
+                ) : (
+                  <div className="flex flex-col gap-xs">
+                    {g.options
+                      .filter((o) => o.available !== false)
+                      .map((o) => {
+                        const selectedIds =
+                          g.inputType === "single" ? (sel[gid] ? [sel[gid] as string] : []) : ((sel[gid] as string[]) ?? []);
+                        const on = o.id != null && selectedIds.includes(o.id);
+                        const onPick = () =>
+                          o.id != null &&
+                          (g.inputType === "single" ? setSingle(gid, o.id) : toggleMany(gid, o.id, g.maxSelect));
+                        return (
+                          <button
+                            key={o.id ?? o.name}
+                            onClick={onPick}
+                            className={`flex items-center justify-between rounded-lg border px-md py-sm text-left transition-colors ${
+                              on ? "border-primary bg-primary-container/10" : "border-outline-variant hover:bg-surface-container-low"
+                            }`}
+                          >
+                            <span className="font-body-md text-on-surface">{o.name}</span>
+                            <span className="font-data-mono text-[12px] text-on-surface-variant">
+                              {o.priceCents > 0 ? `+${money(o.priceCents)}` : o.priceCents < 0 ? money(o.priceCents) : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="mb-lg">
+            <h4 className="mb-xs font-label-lg text-label-lg text-on-surface">Note for the kitchen</h4>
+            <textarea
+              rows={2}
+              maxLength={200}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g. less spicy, no onion…"
+              className="w-full resize-none rounded-lg border border-outline-variant bg-surface px-md py-sm font-body-md text-on-surface outline-none focus:border-primary"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="font-label-lg text-label-lg text-on-surface">Quantity</span>
+            <div className="flex items-center gap-md rounded-lg border border-outline-variant">
+              <button
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                className="flex h-8 w-8 items-center justify-center text-on-surface-variant hover:bg-surface-container-low"
+              >
+                <Icon name="remove" size={18} />
+              </button>
+              <span className="w-6 text-center font-data-mono text-data-mono text-on-surface">{qty}</span>
+              <button
+                onClick={() => setQty((q) => q + 1)}
+                className="flex h-8 w-8 items-center justify-center text-on-surface-variant hover:bg-surface-container-low"
+              >
+                <Icon name="add" size={18} />
+              </button>
+            </div>
+          </div>
+          {!valid && (
+            <p className="mt-md text-center font-body-md text-[12px] text-error">
+              Please complete the required options above.
+            </p>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-outline-variant p-lg">
+          <button
+            onClick={() => valid && onAdd(qty, chosen, notes.trim())}
+            disabled={!valid}
+            className="flex w-full items-center justify-center gap-xs rounded-lg bg-primary py-sm font-label-lg text-label-lg text-on-primary shadow-sm transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Add · {money(unitPrice * qty)}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

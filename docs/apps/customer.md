@@ -115,6 +115,28 @@ This id is sent as `X-Device-Id` on every guest API call. The server (`orders.se
 
 See `MODIFIERS.md` for full modifier spec.
 
+## Guest Service Requests (Quick Actions)
+
+`WelcomeScreen.jsx`'s Quick Actions — **Water**, **Call Staff**, **Manager** —
+are guest **service requests**, deliberately NOT menu items or kitchen orders:
+
+- Labels/icons come from `@amber/domain`'s `SERVICE_REQUEST_META` (one source
+  of truth shared with the admin's notification bell), mapped over
+  `SERVICE_REQUEST_TYPES` (`water` | `call_staff` | `call_manager`).
+- Tapping one calls `sendServiceRequest(type)` (`SessionContext.jsx`) →
+  `api.serviceRequests.create({ tableId, type })` → `POST /service-requests`.
+  This never calls `bringIt`/`bringThese` and never creates a Round/OrderItem —
+  it's a separate SSE channel (`GET /service-requests/stream`) straight to
+  restaurant-admin's notification bell + a per-table badge on `/tables`.
+- The server dedupes: a table can only have one `pending` request of a given
+  type at a time, so re-tapping is safe. The client keeps a 4s "Sent ✓"
+  cooldown on top of that purely as a UX debounce.
+- Previously these were faked as zero-price `MenuItem`s routed through
+  `bringIt`, which both mis-modeled them as kitchen orders (they showed up as
+  KDS tickets and session bill lines) and hit `bringIt`'s hardcoded
+  `local_shipping` (delivery-truck) toast icon for every "bring it" tap,
+  including Water. Splitting them into their own model fixed both.
+
 ## KDS Status
 
 **`src/screens/StatusScreen.jsx`** — per-item kitchen status (`placed → preparing → ready → served`). Driven by the KDS relay SSE subscription (via `src/kitchen.js`).
@@ -133,7 +155,8 @@ Once booted, `TenantThemeProvider` (from `@amber/ui`) injects the tenant's brand
 | File | What it does |
 |---|---|
 | `src/context/BootContext.jsx` | QR parse, parallel boot calls, resume logic |
-| `src/context/SessionContext.jsx` | Order lifecycle, round sending, bill/pay, SSE |
+| `src/context/SessionContext.jsx` | Order lifecycle, round sending, bill/pay, SSE, `sendServiceRequest()` |
+| `src/screens/WelcomeScreen.jsx` | Quick Actions (guest service requests) + drink/bite carousels |
 | `src/context/MenuContext.jsx` | Menu load from boot prefetch |
 | `src/screens/SplashScreen.jsx` | Reserve form + occupancy race guard |
 | `src/screens/SessionEndScreen.jsx` | Terminal screen (above router) |

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, slugSchema } from "./common.js";
+import { printerSettingsSchema } from "./printer.js";
 
 /**
  * The Tenant is the center of the platform: each restaurant is one row.
@@ -83,6 +84,16 @@ export const tenantSchema = z.object({
   /** Mobile number registered with UPI (digits only, no country code prefix needed). */
   upiMobile: z.string().optional(),
   theme: themeConfigSchema,
+  /** Front-desk print-agent connection config (Settings → Printer) — guest receipts/bills. */
+  printer: printerSettingsSchema.default({}),
+  /**
+   * Optional SECOND print-agent connection for a kitchen printer — Kitchen
+   * Order Tickets (`Kot`), not guest receipts. A tenant with one printer only
+   * configures `printer`; this is additive. Same connection-config shape as
+   * `printer` (agent URL/secret/connection type/paper width) — `sections`/
+   * `footerMessage` are unused for KOTs (fixed, non-branded ticket format).
+   */
+  kitchenPrinter: printerSettingsSchema.default({}),
   active: z.boolean().default(true),
 });
 
@@ -100,6 +111,8 @@ export const updateTenantRequestSchema = z
     upiId: z.string().optional(),
     upiMobile: z.string().optional(),
     theme: themeConfigSchema,
+    printer: printerSettingsSchema,
+    kitchenPrinter: printerSettingsSchema,
   })
   .partial();
 

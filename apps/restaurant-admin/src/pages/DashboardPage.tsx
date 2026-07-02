@@ -147,12 +147,12 @@ export function DashboardPage() {
                 : `${awaitingBill.map((t) => t.label).join(", ")} waiting on the bill`}
             </span>
           </div>
-          {awaitingBill[0] && (
+          {awaitingBill.length > 0 && (
             <Link
-              to={`/tables/${awaitingBill[0].id}/billing`}
+              to="/billing"
               className="ml-auto rounded-full border border-[#ffe082] px-md py-sm font-label-md text-label-md text-[#f57f17] transition-colors hover:bg-[#ffe082]/20"
             >
-              Resolve
+              {awaitingBill.length > 1 ? `Resolve (${awaitingBill.length})` : "Resolve"}
             </Link>
           )}
         </div>
@@ -166,6 +166,12 @@ export function DashboardPage() {
         <div className="grid grid-cols-1 gap-md">
           <QuickLink to="/menu" icon="restaurant_menu" title="Update Menu" sub="Manage 86 lists & specials" />
           <QuickLink to="/tables" icon="table_restaurant" title="Check Tables" sub="Floor plan & seating" />
+          <QuickLink
+            to="/billing"
+            icon="point_of_sale"
+            title="Billing Queue"
+            sub={awaitingBill.length === 0 ? "No tables waiting" : `${awaitingBill.length} table${awaitingBill.length > 1 ? "s" : ""} waiting`}
+          />
           <QuickLink to="/analytics" icon="analytics" title="View Reports" sub="End of shift summaries" />
         </div>
       </div>

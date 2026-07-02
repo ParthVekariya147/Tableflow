@@ -9,8 +9,8 @@ Multi-tenant restaurant ordering platform. One codebase, many branded tenants. E
 - **Frontend:** Vite + React 19 (apps), `@amber/ui` (theme engine), `@amber/api-client` (typed HTTP client)
 - **Backend:** NestJS 10 + Prisma 6 + PostgreSQL (Supabase)
 - **Validation:** Zod in `@amber/domain` (shared contract for API + clients)
-- **Realtime:** SSE (`GET /orders/stream`) via rxjs `Subject` per tenant
-- **Auth:** Supabase (deferred on most routes — see Gaps)
+- **Realtime:** SSE (`GET /orders/stream`, `GET /service-requests/stream`) via rxjs `Subject` per tenant
+- **Auth:** two separate systems. restaurant-admin = email+password → JWT + custom per-tenant RBAC roles (`auth/`, `roles/`, `members/` modules). super-admin (platform) = Supabase session + impersonation. Most tenant-scoped data routes (`menu/`, `tables/`, `orders/`, `service-requests/`) still rely on `X-Tenant-Slug` only — see Gaps.
 
 ## Packages (internal `@amber/*`)
 | Package | Path | Role |
@@ -53,6 +53,19 @@ pnpm --filter @amber/customer dev   # per-app
 4. `api.orders.stream(handler)` in api-client opens EventSource
 5. Admin + Customer subscribe; KDS board is still on a separate relay
 
+**Guest service requests (water / call staff / call manager):** a parallel,
+lightweight SSE channel — deliberately NOT an Order/Round/OrderItem, so it
+never touches the kitchen. `ServiceRequest` (`packages/domain/src/
+service-request.ts`) → `services/api/src/service-requests/` (same
+controller/service/events/mapper shape as `orders/`) → `GET
+/service-requests/stream`. Guest taps a Quick Action on `WelcomeScreen.jsx` →
+`api.serviceRequests.create({tableId, type})` (server dedupes: one `pending`
+request per table+type). Admin's `notifications/useServiceRequests.tsx`
+subscribes and drives: a live badge/dropdown on `Shell.tsx`'s bell (with a
+synthesized chime + mute toggle, `notifications/sound.ts`), AND a pulsing
+badge directly on the matching table's card in `TablesPage.tsx` — so staff see
+it on the floor grid, not just the bell.
+
 **KDS Seam:** `KdsTransport` interface in `packages/api-client/src/kds.ts` decouples the board UI from data source. Today = `tools/kds-relay.mjs` (in-memory). Swap → change one line in `apps/restaurant-admin/src/kds/kdsClient.ts`.
 
 **Device binding:** Guest sends `X-Device-Id` (minted via `crypto.getRandomValues` in `apps/customer/src/device.js`). Stored on `Order.deviceId`. `assertDevice()` in `orders.service.ts` 403s mismatched devices. Never returned to clients.
@@ -66,6 +79,7 @@ pnpm --filter @amber/customer dev   # per-app
 - `orders/orders.service.ts` — core business logic, all order mutations
 - `orders/orders.events.ts` — per-tenant rxjs pub/sub
 - `orders/orders.controller.ts` — SSE stream endpoint
+- `service-requests/service-requests.service.ts` — guest service requests (water/call staff/call manager), dedupe + SSE, decoupled from orders
 - `admin/admin.service.ts` — platform analytics + tenant mgmt
 - `auth/auth.service.ts` — JWT verify, impersonation, rate-limit
 - `billing/billing.service.ts` — plans + subscriptions
@@ -73,6 +87,7 @@ pnpm --filter @amber/customer dev   # per-app
 
 ### Domain (`packages/domain/src/`)
 - `order.ts` — Order, Round, OrderItem, ItemStatus, helpers
+- `service-request.ts` — ServiceRequest, SERVICE_REQUEST_META (icon/label per type)
 - `menu.ts` — MenuItem, ModifierGroup, ModifierOption
 - `billing.ts` — Plan, Subscription, SubscriptionStatus
 - `auth.ts` — AuthUser, Membership, Role, ImpersonationToken
@@ -80,9 +95,12 @@ pnpm --filter @amber/customer dev   # per-app
 
 ### Admin (`apps/restaurant-admin/src/`)
 - `store/AdminStore.tsx` — central API-backed store + SSE subscription
-- `lib/auth.ts` — impersonation token management
-- `lib/supabase.ts` — Supabase client
+- `context/AuthContext.tsx` — JWT session (login/selectTenant/logout), `can(permission)`
+- `lib/auth-token.ts` / `lib/auth-tenant.ts` — persisted bearer token / tenant slug
+- `components/RequirePermission.tsx` — route guard (anon → `/login`; no perm → `homeRouteFor()`)
 - `kds/useKds.ts` — board state + order-stream reconciliation
+- `notifications/useServiceRequests.tsx` — service-request stream, mute-able chime
+- `notifications/sound.ts` — synthesized notification chime (Web Audio API)
 
 ### Customer (`apps/customer/src/`)
 - `context/BootContext.jsx` — QR parse + tenant/table/occupancy resolution
@@ -90,7 +108,7 @@ pnpm --filter @amber/customer dev   # per-app
 - `context/MenuContext.jsx` — menu loading from boot prefetch
 
 ## Known Gaps / Deferred
-- **Auth:** Most tenant routes are unauthenticated (rely on `X-Tenant-Slug` only). `AuthGuard` exists for `/admin/*` and `/auth/*`. Full RBAC deferred.
+- **Auth:** restaurant-admin's RBAC (JWT + custom roles/permissions, `auth/`+`roles/`+`members/`) is fully implemented and enforced both client-side (nav/routes) and server-side (on `roles`/`members` themselves). But `menu/`, `tables/`, `orders/`, `service-requests/` — the actual tenant data routes — are **not yet** `@RequirePermission`-gated server-side; they still rely on `X-Tenant-Slug` alone. `/admin/*` (super-admin, platform) uses a separate Supabase-based `SupabaseAuthGuard` + `super-admin.guard.ts`.
 - **KDS unification:** KDS relay (`tools/kds-relay.mjs`) is separate from the order SSE stream. Folding KDS onto the API stream = next major step.
 - **Category reorder:** Edit/delete done. Reorder endpoint not yet built.
 - **Menu placements:** Schema exists (`MenuPlacement`), API not wired.

@@ -19,6 +19,7 @@ Shell-wrapped (RequireSession guard):
   /history       → OrderHistoryPage
   /analytics     → AnalyticsPage
   /settings/billing → PlanBillingPage
+  /settings/printer → PrinterPage
   /kds           → KdsPage (in-shell, manager view)
 
 Full-screen (no shell):
@@ -100,6 +101,7 @@ Subscribes to `api.orders.stream` (SSE):
   - Copy link button
   - Download PNG button
   - **Regenerate** — behind a confirm/warn modal (rotating token invalidates printed codes)
+- **Service-request badges** — reads `useServiceRequests()` filtered to the card's `tableId`; each open request (water/call staff/call manager) renders as a small pill (tap a `pending` one to acknowledge inline), and the whole card **pulses** (reusing the KDS `pulse-ready` animation) while any request on that table is still `pending` — so staff scanning the floor grid see it without opening the bell.
 
 ### TableSessionPage (`/tables/:id`)
 - Shows live order items grouped by round
@@ -134,6 +136,44 @@ Subscribes to `api.orders.stream` (SSE):
 - Shows subscription status (`trialing | active | past_due | canceled`)
 - Calls `api.billing.me()`
 
+### PrinterPage (`/settings/printer`)
+Configures receipt printing — see `PRINT_RECEIPT_PLAN.md` for the full architecture.
+Loads/saves `Tenant.printer` via `api.tenant.current()` / `api.tenant.update({ printer })`,
+same shape as `PaymentsPage`. Fields: print-agent URL, an optional security key
+(`agentSecret`, sent as `X-Agent-Secret` — a "Generate" button fills a random
+default; an inline warning shows while it's empty, since open mode is only
+safe when the agent and printer stay on the browser's own PC), connection
+type (network/USB/Bluetooth) with the fields relevant to each, and paper
+width. **Test Connection** hits the agent's `GET /health` (no secret needed).
+**Print Test Receipt** calls `printTestReceipt()` (`lib/printAgent.ts`) to
+verify the exact connection before relying on it at checkout.
+
+Printing itself happens elsewhere: `BillingPage`'s `complete()` navigates to
+`PaymentCompletePage` with the paid order's id in the URL (`?order=`, so it
+survives a refresh — router state is only a fast-path hint). `PaymentCompletePage`
+rebuilds the receipt from `api.orders.get(id)` (line items) +
+`api.orders.getPayment(id)` (method/tax/tip/tendered breakdown — a new
+endpoint) + the tenant's printer settings, then calls
+`printReceipt()`/`printAgent.printReceipt(...)`, replacing the old bare
+`window.print()` stub. A persistent "Print Again" button covers reprints and
+paper jams alike; failures are surfaced distinctly (agent unreachable /
+wrong security key / printer offline / not configured).
+
+**Receipt Layout designer**: also on this page, a draggable (native HTML5
+DnD, no added dependency), toggle-able ordered list of 9 receipt sections
+(logo, name/GST, table/check info, line items, totals, payment method, UPI
+payment QR, "rate us" QR, footer message) — order in the array is print
+order. Persisted as `printer.sections` (falls back to
+`DEFAULT_RECEIPT_SECTIONS` if unset). Logo/UPI-ID/review-link aren't edited
+here — they're owned by Branding/Payments/Profile — this only controls
+whether and where they print; a row shows an inline hint + link to the
+relevant settings page when it's toggled on but its data isn't configured. A
+live preview (real `QRCodeCanvas` for the QR sections, the tenant's actual
+name/logo/GST, sample line items) re-renders instantly next to the form as
+sections are toggled/reordered — the real "Print Test Receipt" button
+remains the way to verify actual hardware output. See `PRINT_RECEIPT_PLAN.md`
+§11.
+
 ## KDS — Kitchen Display System
 
 ### `src/kds/KdsPage.tsx`
@@ -153,21 +193,107 @@ Available at two routes:
 ### `src/kds/kdsClient.ts`
 Creates `KdsTransport` pointed at `VITE_KDS_URL` (default `:4001`). Change this one line to point at a real API endpoint when the relay is retired.
 
-## Authentication & Authorization
+## Notification Bell — Guest Service Requests
 
-**`src/components/RequireSession.tsx`** — route guard; redirects to `/login` if no Supabase session.
+`components/Shell.tsx`'s `NotificationBell` (`tables.manage`-gated) replaces
+what used to be a purely decorative bell (a hardcoded static red dot wired to
+nothing). It's backed by `notifications/useServiceRequests.tsx`
+(`ServiceRequestsProvider`, mounted in `main.tsx` alongside
+`AdminStoreProvider`), which:
 
-**`src/lib/supabase.ts`** — Supabase client, `getCachedAccessToken()`, `signOut()`.
+- Subscribes to `api.serviceRequests.stream` (its own SSE connection,
+  separate from `/orders/stream`) via the shared `lib/api.ts` client.
+- Shows a live badge count (`pendingCount`) + dropdown of open requests
+  (table, type icon/label from `@amber/domain`'s `SERVICE_REQUEST_META`, "Xm
+  ago"), with Acknowledge/Resolve buttons calling
+  `api.serviceRequests.updateStatus`. The list only updates from the SSE echo
+  — no local optimistic state.
+- Plays a synthesized two-tone chime (`notifications/sound.ts`, Web Audio
+  API — no audio asset) on every genuinely **new** request (a `created`
+  event, never on a reconnect's `snapshot`). Mute/unmute via a speaker icon in
+  the dropdown header, persisted to `localStorage`.
+- The same live state also drives per-table badges on `TablesPage` (see
+  below) — the bell and the floor grid share one subscription/provider.
 
-**`src/lib/auth.ts`** — Impersonation support:
-- `captureImpersonationFromUrl()` — reads `?impersonationToken=` on boot, stores in `localStorage`
-- `getAuthToken()` — returns impersonation token OR Supabase access token
-- `getActiveTenantSlug()` — from impersonation JWT payload or `defaultTenant.slug`
-- `isImpersonating()` / `clearImpersonation()`
+## Authentication & Authorization (RBAC)
 
-**`src/components/ImpersonationBanner.tsx`** — orange banner when `isImpersonating()`. Shows acting tenant name and an "Exit" button (clears token + reloads).
+This app is **not** Supabase-session-based — it's email+password → JWT, with
+custom per-tenant roles (Microsoft-style RBAC). The old Supabase-session flow
+(`RequireSession.tsx`, `lib/supabase.ts`) has been fully removed.
 
-**`src/components/BillingLockoutGate.tsx`** — wraps shell content. When subscription status is `past_due` or `canceled`, blocks all pages except `/settings/billing`.
+**`src/context/AuthContext.tsx`** (`useAuth()`) owns the session:
+- `login(email, password)` → `POST /auth/login`. Resolves to either
+  `{kind:"authenticated", user}` (the account has one restaurant — token +
+  user are persisted and the session is established) or
+  `{kind:"select_tenant", ticket, tenants}` (several restaurants — `LoginPage`
+  renders a tenant picker instead of navigating).
+- `selectTenant(ticket, tenantId)` → `POST /auth/select-tenant` — step two of
+  a multi-tenant login, redeems the short-lived ticket for a real token.
+- Session restore on mount: a persisted bearer token (`lib/auth-token.ts`,
+  `localStorage` key `amber-admin-token`) is verified via `GET /auth/me`; an
+  invalid/expired token (401/403) is cleared and the user is bounced to
+  `anon`. Also handles `?impersonationToken=` in the URL (from super-admin's
+  "impersonate" action) by decoding the JWT client-side (no verification
+  needed — the API verifies it) and establishing the session from it, then
+  stripping the param from the URL/history.
+- `can(permission)` — `!!user?.permissions.includes(permission)` — the single
+  source of truth for every permission check in this app (nav filtering,
+  route guards). `AuthUser.permissions` is the user's fully-resolved effective
+  set (role permissions merged with any per-user override), computed
+  server-side on every request.
+- The active **tenant slug** is persisted separately (`lib/auth-tenant.ts`,
+  `localStorage` key `amber-admin-tenant`) and read by both api-clients
+  (`lib/api.ts` + `store/AdminStore.tsx`) via a `getTenantSlug` hook, so the
+  whole app follows whichever tenant the logged-in user belongs to — there's
+  no hardcoded tenant.
+
+**`src/components/RequirePermission.tsx`** — wraps every route in `App.tsx`.
+Anonymous → redirect to `/login` (preserving the attempted location).
+Authenticated but lacking the route's permission → redirected to the user's
+own home route (`homeRouteFor`, `lib/nav.ts` — their highest-priority allowed
+nav item, e.g. a Kitchen-only user always lands on `/kds`) rather than shown
+the page — **hide, don't tease**. No allowed destination at all → a neutral
+"you don't have access" screen (no redirect loop).
+
+**`src/components/Shell.tsx`**'s `SideNav` filters `NAV_ITEMS` (`lib/nav.ts`)
+through `can()` the same way — a user only ever sees the sidebar entries they
+can open.
+
+**Permission catalog** (`@amber/domain`'s `PERMISSIONS` — a closed set):
+`dashboard.view`, `menu.manage`, `tables.manage`, `kds.use`, `orders.history`,
+`analytics.view`, `settings.manage`, `team.manage`. Roles are NOT a fixed
+enum — Admins create/rename/edit custom roles bundling these keys
+(`/settings/roles` → `RolesPage.tsx`, `team.manage`-gated) and manage team
+members' role + per-user permission overrides (`/settings/team` →
+`TeamPage.tsx`, `components/PermissionChecklist.tsx`).
+
+**Admin-tier guard:** a `protected` role (the seeded Admin role) can't be
+deleted or edited by a non-protected actor, and a non-Admin with
+`team.manage` (e.g. a Manager) can't add/edit/remove a member on a protected
+role or promote anyone into one. `TeamPage`/`RolesPage` mirror this
+client-side via `useAuth().user.roleProtected` (showing a lock/Admin chip
+instead of edit controls); the API enforces the same rule server-side
+regardless.
+
+**Forced password change:** while `AuthUser.mustChangePassword` is true (a
+member still on the seeded default `changeme123`), `App.tsx` renders
+`ChangePasswordPage` in place of the whole router — no route or permission
+combination can bypass it.
+
+⚠️ **Dead code, not wired into the app:** `src/lib/auth.ts`,
+`src/components/ImpersonationBanner.tsx`, and
+`src/components/BillingLockoutGate.tsx` still exist as files (leftovers from
+before the JWT/RBAC rewrite — the old impersonation-banner / Supabase-driven
+billing lockout) but are no longer imported or rendered anywhere.
+Impersonation is now handled directly inside `AuthContext.tsx`'s mount effect
+instead. Safe to delete; kept only because nobody has cleaned them up yet.
+
+**Two separate auth systems on the API side** (`services/api/src/auth/`):
+this app's staff routes use `JwtAuthGuard` + `PermissionsGuard`
+(`@RequirePermission(...)`); the platform's `/admin/*` (super-admin app, not
+this one) uses a completely different `SupabaseAuthGuard` +
+`super-admin.guard.ts` pair. `POST /auth/sync-profile` (Supabase-gated) exists
+only for that super-admin bootstrap path, not for restaurant-admin logins.
 
 ## Item Editor — `src/components/ItemPanel.tsx`
 
@@ -189,7 +315,7 @@ See `MODIFIERS.md` for full modifier system spec.
 
 ## API Client Usage
 
-The store uses the singleton from **`src/lib/api.ts`** — same client instance shared with individual pages that make direct API calls (OrderHistoryPage, AnalyticsPage, PlanBillingPage). All calls use `getAuthToken()` from `src/lib/auth.ts`.
+The store uses the singleton from **`src/lib/api.ts`** — same client instance shared with individual pages that make direct API calls (OrderHistoryPage, AnalyticsPage, PaymentsPage). Both this client and `store/AdminStore.tsx`'s own client use `getToken: getStoredToken` (`lib/auth-token.ts`) and `getTenantSlug: getStoredTenantSlug` (`lib/auth-tenant.ts`) — read at call time, so a long-lived client follows whichever tenant/user is currently logged in without being recreated.
 
 ## Local View-Model Types — `src/data/types.ts`
 
@@ -201,9 +327,10 @@ These mirror `@amber/domain` but add UI-specific fields (`icon`, `swatch`, `pric
 VITE_API_URL       # default http://localhost:3001
 VITE_KDS_URL       # default http://localhost:4001
 VITE_CUSTOMER_URL  # default http://localhost:5173 — baked into QR URLs
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
 ```
+No Supabase env vars — this app has no Supabase dependency at all (that was
+the old auth flow; see Authentication & Authorization above). Only the
+super-admin app still talks to Supabase.
 
 ## Known Issues / Deferred
 
@@ -211,4 +338,12 @@ VITE_SUPABASE_ANON_KEY
 - `/kds` board tickets do not support multi-station routing
 - 86'd items (unavailable) count on Dashboard is derived from menu state only
 - Real-time KDS stage changes don't yet reflect on the guest Status screen
-- Full RBAC (role-based access by membership role) is deferred; any logged-in user sees everything
+- RBAC is enforced **client-side** here for nav/route gating; the API already
+  enforces it on `roles`/`members` (incl. the Admin-tier guard) — `menu/`,
+  `tables/`, `orders/`, `service-requests/` routes are not yet
+  `@RequirePermission`-annotated server-side (still rely on `X-Tenant-Slug`
+  only), though the guard/decorator already exist and are proven elsewhere.
+- Receipt printing supports one printer per tenant (no kitchen-station
+  routing — see `FEATURES.md`) and only prints from `PaymentCompletePage`
+  post-payment; a pre-payment "print a copy" button on `BillingPage` was
+  scoped out of the initial cut (see `PRINT_RECEIPT_PLAN.md` §6.3).

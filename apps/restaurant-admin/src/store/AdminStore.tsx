@@ -19,6 +19,8 @@ import type {
   AdminState,
   MenuItem,
   ModifierGroup,
+  OrderItem,
+  OrderItemModifier,
   PaymentMethod,
   Round,
   Table,
@@ -81,12 +83,23 @@ type Action =
   | {
       type: "ADD_ORDER_ITEMS";
       tableId: string;
-      items: Array<{ menuItemId: string; qty: number }>;
+      items: Array<{
+        menuItemId: string;
+        qty: number;
+        notes?: string;
+        modifiers?: OrderItemModifier[];
+      }>;
     }
   | { type: "CHANGE_QTY"; tableId: string; roundId: string; itemId: string; delta: number }
   | { type: "CANCEL_ITEM"; tableId: string; roundId: string; itemId: string }
   | { type: "CANCEL_ORDER"; tableId: string }
-  | { type: "COMPLETE_PAYMENT"; tableId: string; method: PaymentMethod; amountCents: number };
+  | {
+      type: "COMPLETE_PAYMENT";
+      tableId: string;
+      method: PaymentMethod;
+      amountCents: number;
+      tenderedCents?: number;
+    };
 
 const EMPTY_STATE: AdminState = {
   taxRate: defaultTenant.taxRate ?? 0,
@@ -116,6 +129,14 @@ function mapRound(r: DomainOrder["rounds"][number]): Round {
       qty: i.qty,
       note: i.notes,
       status: i.status,
+      modifiers: i.modifiers.map((m) => ({
+        id: m.id,
+        optionId: m.optionId,
+        groupName: m.groupName,
+        name: m.name,
+        priceDelta: m.priceDelta,
+        textValue: m.textValue,
+      })),
     })),
   };
 }
@@ -125,6 +146,7 @@ function mapSession(order: DomainOrder): TableSession {
     orderId: order.id,
     openedAt: Date.parse(order.createdAt),
     rounds: order.rounds.map(mapRound),
+    billRequestedAt: order.billRequestedAt ? Date.parse(order.billRequestedAt) : undefined,
   };
 }
 
@@ -545,6 +567,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
                 name: menuItem.name,
                 unitPrice: menuItem.priceCents,
                 qty: sel.qty,
+                notes: sel.notes || undefined,
+                modifiers: sel.modifiers?.map((m) => ({
+                  optionId: m.optionId ?? undefined,
+                  groupName: m.groupName,
+                  name: m.name,
+                  priceDelta: m.priceDelta,
+                  textValue: m.textValue,
+                })),
               };
             })
             .filter((i): i is NonNullable<typeof i> => i !== null);
@@ -593,7 +623,12 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           const orderId = orderIdFor(action.tableId);
           if (orderId)
             // Server recomputes subtotal/tax from the order; amountCents is advisory.
-            await api.orders.capturePayment(orderId, { method: action.method });
+            // tenderedCents (cash only) is persisted so a later receipt reprint
+            // can still show change due.
+            await api.orders.capturePayment(orderId, {
+              method: action.method,
+              tendered: action.tenderedCents,
+            });
           return;
         }
       }
@@ -735,12 +770,19 @@ export function useMoney(): (cents: number) => string {
 
 // ── Derived selectors (unchanged contract) ────────────────────────────────
 
-/** Subtotal in cents for a session's non-cancelled items. */
+/** Per-unit price including modifier deltas, in cents — mirrors @amber/domain's orderItemUnitPrice. */
+export function itemUnitPrice(item: OrderItem): number {
+  return (
+    item.priceCents + (item.modifiers ?? []).reduce((s, m) => s + m.priceDelta, 0)
+  );
+}
+
+/** Subtotal in cents for a session's non-cancelled items (incl. modifier deltas). */
 export function sessionSubtotal(rounds: Round[]): number {
   return rounds
     .flatMap((r) => r.items)
     .filter((i) => i.status !== "cancelled")
-    .reduce((sum, i) => sum + i.priceCents * i.qty, 0);
+    .reduce((sum, i) => sum + itemUnitPrice(i) * i.qty, 0);
 }
 
 export function sessionItemCount(rounds: Round[]): number {

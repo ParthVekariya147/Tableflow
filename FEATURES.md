@@ -118,13 +118,20 @@ Receipt grouped by round, subtotal, **GST 10% hardcoded**, total; "Request Bill"
 Shell-wrapped pages (Dashboard, Menu, Tables, Analytics, KDS) + full-screen Login,
 Billing, Payment-complete. All on the in-memory `AdminStore` seed.
 
-### R1. Manager login / auth — 🟡
-Login form (email + password) → just navigates in; "Forgot password" link.
-- **Data needed:**
-  - User: `id`, `email`, `passwordHash`, `name`, `isSuperAdmin`, `active` 🗄️
-  - Membership: `userId`, `tenantId`, `role` (owner|manager|server|kitchen), `active` 🗄️
-  - 🆕 **auth tokens / sessions** (JWT or session table), password reset tokens — none modeled
-  - 🆕 the `/admin/*` API + restaurant-admin API both need an **auth guard** (TODO in CLAUDE.md)
+### R1. Manager login / auth — ✅
+Email-first login (`POST /auth/login`) → bcrypt-verified → JWT, with a
+tenant-picker step (`select-tenant`) when one account belongs to several
+restaurants. Full custom-role RBAC on top (see §4 "Auth & roles" below) —
+"Forgot password" is still just a link (no reset flow yet).
+- **Data:**
+  - User: `id`, `email`, `passwordHash`, `name`, `isSuperAdmin`, `mustChangePassword`, `active` 🗄️
+  - Role: **per-tenant table** (`name`, `permissions[]`, `protected`) — NOT a fixed enum 🗄️
+  - Membership: `userId`, `tenantId`, `roleId`, optional per-user `permissions[]` override, `active` 🗄️
+  - JWT is stateless (12h access tokens, `JWT_SECRET`); no session/refresh-token table.
+  - 🆕 password-reset tokens — still not modeled.
+  - 🆕 `menu/`, `tables/`, `orders/`, `service-requests/` still rely on
+    `X-Tenant-Slug` only (not `@RequirePermission`-gated yet), unlike
+    `auth/`/`roles/`/`members/` which are fully guarded.
 
 ### R2. Dashboard / overview — 🟡
 Today's revenue, active tables (+capacity %), orders in progress, **86'd-items alert**,
@@ -245,14 +252,14 @@ Platform-wide dashboards (GMV across tenants, growth, top restaurants).
 | Concern | Status | Data / notes |
 |---------|--------|--------------|
 | Multi-tenancy scoping | ✅ schema, 🟡 wiring | every row has `tenantId` 🗄️; `X-Tenant-Slug` middleware; RLS-ready. Apps don't all send tenant yet. |
-| Auth & roles | ⛔ | `User`/`Membership`/`Role` modeled 🗄️; **no guard, no tokens, no password reset** (🆕). Login is fake in both admin apps. |
+| Auth & roles | ✅ restaurant-admin, ⛔ password reset | `User`/`Role`(per-tenant, custom)/`Membership` 🗄️; email+password → JWT + `@RequirePermission` RBAC (`auth/`, `roles/`, `members/` modules; enforced client-side in restaurant-admin's nav/routes too). super-admin uses a **separate** Supabase-session + impersonation flow. No password-reset flow yet (🆕); `menu/`/`tables/`/`orders/`/`service-requests/` still ungated server-side (rely on `X-Tenant-Slug` only). |
 | Money | ⚠️ inconsistent | cents in API/admin/domain; **floats in customer** — unify on cents. |
 | Item status set | ⚠️ inconsistent | unify on `placed/preparing/ready/served/cancelled` (domain `order.ts` missing `ready`). |
 | Realtime | 🟡 | KDS relay + customer subscribe exist client-side; **API has no realtime endpoint** (🆕 SSE/WS per order + per kitchen). |
 | Image/asset storage | 🆕 | menu images are base64 data URLs today; need object storage + URL strategy. |
 | Snapshots for history | ✅ design | `OrderItem`/`OrderItemModifier`/`Payment` snapshot name+price so menu/tax edits don't rewrite history 🗄️. |
 | Audit log / activity feed | 🆕 | Dashboard feed is synthesized; no durable event/audit table. |
-| Notifications | 🆕 | "bill requested", "order ready", "staff on the way" are UI-only; no notification model/channel. |
+| Notifications | ✅ | **Guest service requests** (water / call staff / call manager) now have a real model + channel: `ServiceRequest` 🗄️ (own table, not Order/Round/OrderItem) + `service-requests/` module + SSE stream, surfaced as a live badge/dropdown (+ chime) on restaurant-admin's bell and as a pulsing per-table badge on `/tables`. "bill requested"/"order ready" are still UI-only signals (see `billRequestedAt` row below / KDS relay), not routed through this channel. |
 | Bill-requested signal | 🆕 | needed by customer Bill screen + admin Dashboard "Awaiting Bill" + Tables `bill` status; **not in schema**. |
 | Guest ratings/feedback | 🆕 | customer confirmation collects stars; **no model**. |
 | Tips/gratuity | partial | `Payment.tip` exists 🗄️; neither app captures it into the field yet. |
@@ -265,12 +272,13 @@ Platform-wide dashboards (GMV across tenants, growth, top restaurants).
 ## 5. Suggested entity checklist for the DB design
 
 **Already in `schema.prisma` (validate & reuse):**
-`Tenant`, `User`, `Membership` (Role), `Room`, `Table`, `MenuCategory`, `MenuItem`,
+`Tenant`, `User`, `Role` (per-tenant, custom), `Membership`, `Room`, `Table`, `MenuCategory`, `MenuItem`,
 `ModifierGroup`, `ModifierOption`, `Order` (OrderStatus), `Round` (RoundType),
-`OrderItem` (ItemStatus incl. `ready`), `OrderItemModifier`, `Payment` (PaymentMethod).
+`OrderItem` (ItemStatus incl. `ready`), `OrderItemModifier`, `Payment` (PaymentMethod),
+`ServiceRequest` (ServiceRequestType: water/call_staff/call_manager, ServiceRequestStatus).
 
 **Gaps to add / decide (🆕):**
-1. **Auth**: session/token store, password-reset tokens (or rely on stateless JWT + revend list).
+1. ~~**Auth**: session/token store~~ — ✅ done, stateless JWT (12h access tokens, no revocation list). Still open: **password-reset tokens** (no reset flow yet).
 2. **Bill-requested** signal on `Order` (e.g. `billRequestedAt` timestamp) — unblocks 3 features.
 3. **Guest rating/feedback** model (order, stars, comment, createdAt).
 4. **Tip capture** wiring (field exists; ensure flows populate it) + **amount tendered/change** if needed on receipts.
@@ -278,7 +286,7 @@ Platform-wide dashboards (GMV across tenants, growth, top restaurants).
 6. **Featured item** flag (menu) if "featured" should be deliberate.
 7. **Kitchen station / routing** (+ assign items/categories to stations) and **per-stage timestamps** for KDS timers + analytics.
 8. **Activity/audit log** for the dashboard feed and accountability (cancels, voids, actor).
-9. **Notifications** channel/log (bill requested, order ready, staff paged).
+9. ~~**Notifications** channel/log~~ — ✅ done for guest service requests (`ServiceRequest` model, see §4 above). Bill-requested/order-ready are still ad hoc signals on `Order`/KDS, not funneled through this channel.
 10. **SaaS billing**: `Subscription`/`Plan`, `Invoice`, usage metrics, processor IDs (super-admin S4).
 11. **Online payment** provider refs/status on `Payment` (txn id, provider, captured/refunded).
 12. **Image/asset** URL strategy (replace base64 data URLs).

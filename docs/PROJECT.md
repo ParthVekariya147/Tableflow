@@ -17,7 +17,8 @@ D:\Tableflow\
 │   ├── ui/                    # @amber/ui — TenantThemeProvider + CSS token engine
 │   └── config/                # @amber/config — Tailwind preset, tsconfig bases, ESLint
 ├── services/
-│   └── api/                   # @amber/api — NestJS + Prisma backend — port 3001
+│   ├── api/                   # @amber/api — NestJS + Prisma backend — port 3001
+│   └── print-agent/           # @amber/print-agent — local HTTP→thermal-printer bridge, port 9200
 ├── tools/
 │   ├── dev.mjs                # One-command dev orchestrator
 │   ├── kds-relay.mjs          # In-memory KDS relay — port 4001
@@ -29,6 +30,7 @@ D:\Tableflow\
 ├── PLATFORM_PLAN.md           # Platform architecture + phased rollout
 ├── PENDING_TASKS.md           # Outstanding work
 ├── CHANGES.md                 # Changelog
+├── PRINT_RECEIPT_PLAN.md      # Thermal receipt printing architecture + plan
 └── REALTIME-SYNC-PLAN.md      # Plan for unifying KDS onto SSE stream
 ```
 
@@ -46,7 +48,7 @@ apps/customer/
 │   ├── session-store.js       # localStorage session persistence
 │   ├── context/
 │   │   ├── BootContext.jsx    # QR parse → tenant/table/occupancy resolution
-│   │   ├── SessionContext.jsx # Full guest session lifecycle
+│   │   ├── SessionContext.jsx # Full guest session lifecycle + sendServiceRequest()
 │   │   └── MenuContext.jsx    # Menu load from boot prefetch
 │   ├── screens/
 │   │   ├── SplashScreen.jsx   # Reserve form (name + phone)
@@ -98,21 +100,29 @@ apps/restaurant-admin/
 │   │   ├── useKds.ts          # Board state + order-stream reconciliation
 │   │   ├── useTick.ts         # Interval re-render for age timers
 │   │   └── kdsClient.ts      # KdsTransport → relay
+│   ├── notifications/
+│   │   ├── useServiceRequests.tsx  # ServiceRequestsProvider — live bell state, mute toggle
+│   │   └── sound.ts                # Synthesized notification chime (Web Audio API)
 │   ├── components/
-│   │   ├── Shell.tsx          # Sidebar + topbar layout
+│   │   ├── Shell.tsx          # Sidebar + topbar layout + NotificationBell
 │   │   ├── ItemPanel.tsx      # Full item editor modal + modifier builder
-│   │   ├── BillingLockoutGate.tsx # Block when subscription past_due/canceled
-│   │   ├── ImpersonationBanner.tsx # Orange banner for impersonated sessions
-│   │   ├── RequireSession.tsx # Route guard → /login
+│   │   ├── RequirePermission.tsx # Route guard: anon → /login, lacking perm → homeRouteFor()
 │   │   ├── DietaryMark.tsx
 │   │   ├── Icon.tsx           # Material Symbols wrapper
 │   │   └── Toggle.tsx
+│   │   # ⚠️ BillingLockoutGate.tsx / ImpersonationBanner.tsx still exist but are
+│   │   #   dead code (pre-RBAC leftovers) — not imported/rendered anywhere.
+│   ├── context/
+│   │   └── AuthContext.tsx    # JWT session (login/selectTenant/logout), can(permission)
 │   ├── lib/
-│   │   ├── api.ts             # Singleton ApiClient
-│   │   ├── auth.ts            # Impersonation token management
-│   │   ├── supabase.ts        # Supabase client + signOut
+│   │   ├── api.ts             # Singleton ApiClient (getToken + getTenantSlug hooks)
+│   │   ├── auth-token.ts      # Bearer token in localStorage
+│   │   ├── auth-tenant.ts     # Logged-in tenant slug in localStorage
+│   │   ├── nav.ts             # NAV_ITEMS + homeRouteFor(permissions)
 │   │   ├── money.ts           # money(cents), timeAgo(epochMs)
 │   │   └── tableQr.ts        # tableQrUrl(slug, qrToken)
+│   │   # ⚠️ auth.ts / supabase.ts do not exist here — this app has no Supabase
+│   │   #   dependency (see docs/apps/restaurant-admin.md § Authentication).
 │   ├── data/
 │   │   └── types.ts           # Local view-model types (MenuItem, Table, etc.)
 │   └── tenant/
@@ -182,18 +192,36 @@ services/api/
 │   │   ├── orders.events.ts          # Per-tenant rxjs Subject (pub/sub)
 │   │   ├── orders.mapper.ts
 │   │   └── orders.dto.ts
+│   ├── service-requests/             # Guest "water/call staff/call manager" — NOT an Order
+│   │   ├── service-requests.controller.ts  # SSE stream + create/list/updateStatus
+│   │   ├── service-requests.service.ts     # Dedupe (1 pending per table+type) + status stamps
+│   │   ├── service-requests.events.ts      # Per-tenant rxjs Subject (mirrors orders.events.ts)
+│   │   ├── service-requests.mapper.ts
+│   │   └── service-requests.dto.ts
 │   ├── admin/
 │   │   ├── admin.controller.ts       # /admin/* cross-tenant endpoints
 │   │   ├── admin.service.ts          # createTenant, updateTenant, platformAnalytics, auditLog
 │   │   └── admin.dto.ts
-│   ├── auth/
-│   │   ├── auth.controller.ts        # POST /auth/sync-profile
-│   │   ├── auth.service.ts           # JWT verify, impersonation, rate-limit
-│   │   ├── auth.guard.ts             # AuthGuard (bearer token)
-│   │   ├── super-admin.guard.ts      # Guards /admin/*
-│   │   ├── current-user.decorator.ts
+│   ├── auth/                         # TWO parallel auth mechanisms — see docs/apps/restaurant-admin.md
+│   │   ├── auth.controller.ts        # POST /auth/login, /auth/select-tenant, GET /auth/me,
+│   │   │                             #   POST /auth/change-password (all JWT), POST /auth/sync-profile (Supabase)
+│   │   ├── auth.service.ts           # bcrypt login, tenant-select tickets, JWT issue/verify, Supabase sync
+│   │   ├── jwt-auth.guard.ts         # JwtAuthGuard — restaurant-admin staff (email+password → JWT)
+│   │   ├── permissions.guard.ts      # PermissionsGuard + @RequirePermission() decorator (RBAC)
+│   │   ├── auth.guard.ts             # SupabaseAuthGuard — super-admin platform ops only
+│   │   ├── super-admin.guard.ts      # Guards /admin/* (Supabase + isSuperAdmin)
+│   │   ├── current-user.decorator.ts # @CurrentUser() → AuthUser (JWT path)
 │   │   ├── current-auth-claims.decorator.ts
+│   │   ├── auth.dto.ts               # LoginDto, SelectTenantDto, ChangePasswordDto
 │   │   └── auth-request.ts
+│   ├── roles/                        # Custom per-tenant roles (RBAC) — team.manage-only
+│   │   ├── roles.controller.ts       # GET/POST/PATCH/DELETE /roles
+│   │   ├── roles.service.ts          # Protected-role + last-admin-lockout guards
+│   │   └── roles.dto.ts
+│   ├── members/                      # Team management (RBAC) — team.manage-only
+│   │   ├── members.controller.ts     # GET/POST/PATCH/DELETE /members
+│   │   ├── members.service.ts        # Add/role-change/permission-override, Admin-tier guard
+│   │   └── members.dto.ts
 │   ├── billing/
 │   │   ├── billing.controller.ts     # GET /billing/me
 │   │   ├── billing.service.ts        # Plans + subscriptions + audit log writes
@@ -211,6 +239,24 @@ services/api/
 └── package.json
 ```
 
+### `services/print-agent/`
+```
+services/print-agent/
+├── src/
+│   ├── index.ts                # Express bootstrap — port 9200, open CORS, GET /health (no auth)
+│   ├── auth.ts                 # requireAgentSecret — 401s /print* when AGENT_SECRET is set
+│   ├── routes/
+│   │   └── print.ts            # POST /print, POST /print/test (both behind auth.ts)
+│   └── printer/
+│       ├── connect.ts          # PrinterSettings → node-thermal-printer interface string
+│       └── render.ts           # Receipt → node-thermal-printer draw calls
+├── README.md                    # Install/run instructions, incl. setting AGENT_SECRET
+└── package.json
+```
+Standalone local service — NOT deployed with the cloud API; it runs on-site (the
+same PC as the browser, or another device near the printer) per restaurant. See
+`PRINT_RECEIPT_PLAN.md` for the full architecture and rationale.
+
 ### `packages/`
 ```
 packages/
@@ -220,6 +266,7 @@ packages/
 │   ├── menu.ts         # Menu, MenuItem, ModifierGroup, ModifierOption
 │   ├── table.ts        # Table, FloorTable
 │   ├── order.ts        # Order, Round, OrderItem — ItemStatus, helpers
+│   ├── service-request.ts  # ServiceRequest, SERVICE_REQUEST_META (icon/label per type)
 │   ├── payment.ts      # Payment, Sale
 │   ├── analytics.ts    # AnalyticsSummary and sub-types
 │   ├── auth.ts         # AuthUser, Membership, Role, ImpersonationToken
@@ -294,7 +341,8 @@ Guest phone  ──scan QR──►  BootContext (parse slug/qrToken)
 
 ```
 Tenant
-  ├── User (via Membership, role: owner|manager|server|kitchen)
+  ├── Role (per-tenant, NOT a fixed enum — Admin-named, {name, permissions[], protected})
+  │     └── Membership ──► User (roleId + optional per-user permissions[] override)
   ├── Room ──► Table (qrToken UUID)
   ├── MenuCategory ──► MenuItem
   │                        └── ModifierGroup ──► ModifierOption
@@ -305,6 +353,8 @@ Tenant
   │     │               └── OrderItemModifier (snapshots group/name/priceDelta)
   │     ├── Payment (cash|card — one per order)
   │     └── Review
+  ├── ServiceRequest (type: water|call_staff|call_manager; status: pending|acknowledged|resolved)
+  │     └── optional orderId link to the table's live Order (best-effort, not required)
   ├── Subscription ──► Plan
   └── AuditLog
 ```
@@ -332,6 +382,7 @@ Tenant-scoped (X-Tenant-Slug or ?tenant=):
   GET  /orders/analytics           aggregated analytics (?from=&to=)
   GET  /orders/stream              SSE event bus
   GET  /orders/:id
+  GET  /orders/:id/payment         captured Payment for an order, or null (receipt reprints)
   POST /orders                     create (409 if table occupied)
   POST /orders/:id/rounds          add round (modifier validation server-side)
   POST /orders/:id/items           add item
@@ -339,10 +390,20 @@ Tenant-scoped (X-Tenant-Slug or ?tenant=):
   POST /orders/:id/bill            request bill
   POST /orders/:id/cancel
   POST /orders/:id/payment         capture payment
+  POST /service-requests           guest creates (water/call staff/call manager); dedupes pending
+  GET  /service-requests           staff list (tables.manage), optional ?status=
+  PATCH /service-requests/:id      staff acknowledge/resolve (tables.manage)
+  GET  /service-requests/stream    SSE event bus (separate from /orders/stream)
   GET  /billing/me                 tenant subscription
+  GET/POST/PATCH/DELETE /roles     custom-role CRUD (JwtAuthGuard + team.manage)
+  GET/POST/PATCH/DELETE /members   team management (JwtAuthGuard + team.manage)
 
-Auth (no tenant scope):
-  POST /auth/sync-profile
+Auth (email-first login, NOT tenant-scoped — excluded from TenantMiddleware):
+  POST /auth/login                 bcrypt by email → JWT (or a tenant-picker ticket)
+  POST /auth/select-tenant         redeem ticket → JWT (step 2 of a multi-tenant login)
+  GET  /auth/me                    JwtAuthGuard — current AuthUser from the token
+  POST /auth/change-password       JwtAuthGuard — self-service password change
+  POST /auth/sync-profile          SupabaseAuthGuard — super-admin first-login bootstrap only
 
 Admin (cross-tenant, SuperAdmin guard):
   GET/POST    /admin/tenants

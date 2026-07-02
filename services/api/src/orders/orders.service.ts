@@ -551,6 +551,18 @@ export class OrdersService {
   }
 
   /**
+   * The payment captured for an order, if any — lets a client rebuild a full
+   * receipt (method/tax/tip/tendered breakdown) after a refresh, when it only
+   * has the order id (not the in-memory Payment returned at capture time).
+   */
+  async getPayment(tenantId: string, orderId: string): Promise<Payment | null> {
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId, tenantId },
+    });
+    return payment ? toDomainPayment(payment) : null;
+  }
+
+  /**
    * Completed sales (most recent first). Without a range it returns the recent
    * 50 (dashboard feed). With a `from`/`to` window it returns every sale in that
    * window (capped at 1000) so the Order History page can show a full day/range.

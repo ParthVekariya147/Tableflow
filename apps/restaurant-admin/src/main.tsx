@@ -11,15 +11,18 @@ import App from "./App";
 import { AdminStoreProvider } from "./store/AdminStore";
 import { AuthProvider } from "./context/AuthContext";
 import { TenantThemeGate } from "./context/TenantThemeGate";
+import { ServiceRequestsProvider } from "./notifications/useServiceRequests";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AuthProvider>
       <TenantThemeGate>
         <AdminStoreProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
+          <ServiceRequestsProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ServiceRequestsProvider>
         </AdminStoreProvider>
       </TenantThemeGate>
     </AuthProvider>

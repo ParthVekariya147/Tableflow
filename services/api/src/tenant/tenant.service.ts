@@ -42,6 +42,9 @@ export class TenantService {
     if (input.upiId !== undefined) data.upiId = input.upiId || null;
     if (input.upiMobile !== undefined) data.upiMobile = input.upiMobile || null;
     if (input.theme !== undefined) data.theme = input.theme as Prisma.InputJsonValue;
+    if (input.printer !== undefined) data.printer = input.printer as Prisma.InputJsonValue;
+    if (input.kitchenPrinter !== undefined)
+      data.kitchenPrinter = input.kitchenPrinter as Prisma.InputJsonValue;
     const row = await this.prisma.tenant.update({ where: { id: tenantId }, data });
     this.invalidateCache(row.slug);
     return toDomainTenant(row);

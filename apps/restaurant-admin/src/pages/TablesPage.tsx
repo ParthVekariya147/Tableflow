@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { QRCodeCanvas } from "qrcode.react";
+import { SERVICE_REQUEST_META, type ServiceRequest } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { useAdmin } from "../store/AdminStore";
+import { useServiceRequests } from "../notifications/useServiceRequests";
 import { tableQrUrl } from "../lib/tableQr";
 import type { Table, TableStatus } from "../data/types";
 
@@ -20,6 +22,7 @@ type Filter = "all" | "free" | "occupied";
 
 export function TablesPage() {
   const { state } = useAdmin();
+  const { requests } = useServiceRequests();
   const [filter, setFilter] = useState<Filter>("all");
   const [qrTable, setQrTable] = useState<Table | null>(null);
   const [editTable, setEditTable] = useState<Table | null>(null);
@@ -70,6 +73,7 @@ export function TablesPage() {
           <TableCard
             key={t.id}
             table={t}
+            requests={requests.filter((r) => r.tableId === t.id)}
             onQr={() => setQrTable(t)}
             onEdit={() => setEditTable(t)}
           />
@@ -159,16 +163,20 @@ function AddModal({ onClose }: { onClose: () => void }) {
 
 function TableCard({
   table,
+  requests,
   onQr,
   onEdit,
 }: {
   table: Table;
+  requests: ServiceRequest[];
   onQr: () => void;
   onEdit: () => void;
 }) {
   const navigate = useNavigate();
   const { dispatch } = useAdmin();
+  const { acknowledge } = useServiceRequests();
   const meta = STATUS_META[table.status];
+  const hasOpenRequest = requests.length > 0;
 
   async function primaryAction() {
     if (table.status === "free") {
@@ -186,17 +194,51 @@ function TableCard({
   const actionLabel =
     table.status === "free" ? "Open Session" : table.status === "bill" ? "Checkout" : "Details";
 
+  const hasPendingRequest = requests.some((r) => r.status === "pending");
+
   return (
-    <div className="flex h-full flex-col rounded-card border border-outline-variant bg-surface-container-lowest p-md shadow-card transition-colors hover:border-primary">
+    <div
+      className={`flex h-full flex-col rounded-card bg-surface-container-lowest p-md shadow-card transition-colors ${
+        hasPendingRequest
+          ? "border-2 border-transparent pulse-ready"
+          : "border border-outline-variant hover:border-primary"
+      }`}
+    >
       <div className="mb-md flex items-start justify-between">
         <div className="font-headline-md text-headline-md text-on-background">{table.label}</div>
         <span className={`flex items-center gap-xs rounded-full px-3 py-1 font-label-md text-label-md ${meta.chip}`}>
           <span className={`h-2 w-2 rounded-full ${meta.dot}`} /> {meta.label}
         </span>
       </div>
-      <div className="mb-lg flex items-center gap-xs font-body-md text-body-md text-on-surface-variant">
+      <div className="mb-md flex items-center gap-xs font-body-md text-body-md text-on-surface-variant">
         <Icon name="group" size={18} /> {table.seats} Seats
       </div>
+      {hasOpenRequest && (
+        <div className="mb-lg flex flex-wrap gap-xs">
+          {requests.map((r) => {
+            const reqMeta = SERVICE_REQUEST_META[r.type];
+            return (
+              <button
+                key={r.id}
+                onClick={() => r.status === "pending" && void acknowledge(r.id)}
+                title={
+                  r.status === "pending"
+                    ? `${reqMeta.label} — tap to acknowledge`
+                    : `${reqMeta.label} — acknowledged`
+                }
+                className={`flex items-center gap-xs rounded-full px-2 py-1 font-label-md text-[11px] font-bold transition-colors ${
+                  r.status === "pending"
+                    ? "bg-error-container text-on-error-container hover:opacity-80"
+                    : "bg-surface-container-high text-on-surface-variant"
+                }`}
+              >
+                <Icon name={reqMeta.icon} size={14} />
+                {reqMeta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="mt-auto flex items-center justify-between border-t border-outline-variant/50 pt-md">
         <div className="flex gap-xs text-on-surface-variant">
           <button onClick={onQr} title="QR Token" className="p-1 transition-colors hover:text-primary">

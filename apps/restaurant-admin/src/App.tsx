@@ -25,6 +25,9 @@ const TableSessionPage = lazy(() =>
 const BillingPage = lazy(() =>
   import("./pages/BillingPage").then((m) => ({ default: m.BillingPage })),
 );
+const BillingQueuePage = lazy(() =>
+  import("./pages/BillingQueuePage").then((m) => ({ default: m.BillingQueuePage })),
+);
 const PaymentCompletePage = lazy(() =>
   import("./pages/PaymentCompletePage").then((m) => ({ default: m.PaymentCompletePage })),
 );
@@ -53,6 +56,9 @@ const RestaurantProfilePage = lazy(() =>
   import("./pages/RestaurantProfilePage").then((m) => ({
     default: m.RestaurantProfilePage,
   })),
+);
+const PrinterPage = lazy(() =>
+  import("./pages/PrinterPage").then((m) => ({ default: m.PrinterPage })),
 );
 const KdsPage = lazy(() =>
   import("./kds/KdsPage").then((m) => ({ default: m.KdsPage })),
@@ -153,6 +159,14 @@ export default function App() {
             }
           />
           <Route
+            path="/billing"
+            element={
+              <RequirePermission permission="tables.manage">
+                <BillingQueuePage />
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/history"
             element={
               <RequirePermission permission="orders.history">
@@ -221,6 +235,14 @@ export default function App() {
             element={
               <RequirePermission permission="settings.manage">
                 <RestaurantProfilePage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/printer"
+            element={
+              <RequirePermission permission="settings.manage">
+                <PrinterPage />
               </RequirePermission>
             }
           />

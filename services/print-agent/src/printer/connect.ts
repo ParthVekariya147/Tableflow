@@ -1,0 +1,47 @@
+import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
+import type { PrinterSettings } from "@amber/domain";
+
+/** Thrown for a missing/incomplete connection config — a 400, not a printer failure. */
+export class PrinterConfigError extends Error {}
+
+/**
+ * Builds a node-thermal-printer instance for the given connection config.
+ * Network talks raw ESC/POS over TCP directly to the printer's IP. USB and
+ * Bluetooth both resolve to the OS-level print queue — the practical, reliable
+ * path once the printer is installed (USB) or paired (Bluetooth) at the OS
+ * level and exposed as a named printer/port; `usbPath`/`bluetoothPort` are
+ * that system identifier, not a raw device/MAC address.
+ */
+export function buildPrinter(settings: PrinterSettings): ThermalPrinter {
+  return new ThermalPrinter({
+    type: PrinterTypes.EPSON,
+    interface: resolveInterface(settings),
+    width: settings.paperWidth === "58mm" ? 32 : 48,
+    removeSpecialCharacters: false,
+  });
+}
+
+function resolveInterface(settings: PrinterSettings): string {
+  switch (settings.connectionType) {
+    case "network": {
+      if (!settings.networkHost) {
+        throw new PrinterConfigError("Network printer host is not configured");
+      }
+      return `tcp://${settings.networkHost}:${settings.networkPort ?? 9100}`;
+    }
+    case "usb": {
+      if (!settings.usbPath) {
+        throw new PrinterConfigError("USB printer is not configured");
+      }
+      return `printer:${settings.usbPath}`;
+    }
+    case "bluetooth": {
+      if (!settings.bluetoothPort) {
+        throw new PrinterConfigError("Bluetooth printer is not configured");
+      }
+      return `printer:${settings.bluetoothPort}`;
+    }
+    default:
+      throw new PrinterConfigError(`Unknown connection type: ${String(settings.connectionType)}`);
+  }
+}

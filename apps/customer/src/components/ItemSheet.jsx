@@ -18,6 +18,7 @@ export default function ItemSheet() {
   const money = useMoney();
   const [qty, setQty] = useState(1);
   const [sel, setSel] = useState({});
+  const [note, setNote] = useState("");
 
   const groups = sheetItem?.modifierGroups ?? [];
 
@@ -25,6 +26,7 @@ export default function ItemSheet() {
   useEffect(() => {
     setQty(1);
     setSel(initSelections(sheetItem?.modifierGroups ?? []));
+    setNote("");
   }, [sheetItem?.id]);
 
   if (!sheetItem) return null;
@@ -67,12 +69,12 @@ export default function ItemSheet() {
 
   const handleBringIt = () => {
     if (!valid) return;
-    bringIt(item, qty, chosen);
+    bringIt(item, qty, chosen, note.trim());
     close();
   };
   const handleAddToOrder = () => {
     if (!valid) return;
-    addToOrder(item, qty, chosen);
+    addToOrder(item, qty, chosen, note.trim());
     close();
   };
 
@@ -163,6 +165,19 @@ export default function ItemSheet() {
                     })}
               </div>
             ))}
+
+            {/* Note for the kitchen */}
+            <div className="mb-5">
+              <h3 className="text-[14px] font-bold text-on-surface mb-2">Note for the kitchen</h3>
+              <textarea
+                rows={2}
+                maxLength={200}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="e.g. less spicy, no onion…"
+                className="w-full resize-none rounded-2xl border border-outline-variant bg-surface-container px-4 py-3 text-[14px] text-on-surface outline-none focus:border-primary"
+              />
+            </div>
 
             {/* Qty selector */}
             <div className="flex items-center justify-between mb-5">
