@@ -1,0 +1,326 @@
+% =====================================================================
+%  Amber & Grain — API Security Testing Dossier
+%  Compile:  pdflatex api-security.tex   (run twice for hyperlinks/TOC)
+%  One entry per API endpoint. The summary table links into each
+%  endpoint's section. Fill in the per-endpoint test findings as you go.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amssymb}
+\usepackage[table]{xcolor}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+
+% ---- Colours -----------------------------------------------------------
+\definecolor{brand}{HTML}{B45309}      % amber
+\definecolor{ink}{HTML}{1F2937}
+\definecolor{muted}{HTML}{6B7280}
+\definecolor{ok}{HTML}{15803D}
+\definecolor{warn}{HTML}{B91C1C}
+\definecolor{rowalt}{HTML}{FAF5EC}
+\definecolor{codebg}{HTML}{F3F4F6}
+
+% ---- Hyperlinks --------------------------------------------------------
+\usepackage[colorlinks=true,linkcolor=brand,urlcolor=brand,
+            citecolor=brand,bookmarks=true,bookmarksnumbered=true]{hyperref}
+
+% ---- Headers / footers -------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\color{muted}Amber \& Grain — API Security Dossier}
+\rhead{\small\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---- Section styling ---------------------------------------------------
+\titleformat{\section}{\Large\bfseries\color{brand}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{ink}}{}{0em}{}
+
+% ---- Helper macros -----------------------------------------------------
+% HTTP method badge
+\newcommand{\GET}{\textcolor{ok}{\texttt{GET}}}
+\newcommand{\POST}{\textcolor{brand}{\texttt{POST}}}
+\newcommand{\PATCH}{\textcolor{brand}{\texttt{PATCH}}}
+\newcommand{\DELETE}{\textcolor{warn}{\texttt{DELETE}}}
+\newcommand{\SSE}{\textcolor{muted}{\texttt{SSE}}}
+
+% inline code
+\newcommand{\code}[1]{\colorbox{codebg}{\texttt{\small #1}}}
+
+% Auth tags
+\newcommand{\authPublic}{\textcolor{warn}{\textbf{Public}}}
+\newcommand{\authDevice}{\textcolor{muted}{Device-bound (\code{X-Device-Id})}}
+\newcommand{\authJwt}[1]{JWT + \code{#1}}
+\newcommand{\authSuper}{\textcolor{brand}{Super-admin}}
+
+% One endpoint block. #1=label #2=method #3=path #4=auth #5=purpose
+\newcommand{\apidoc}[5]{%
+  \hypertarget{#1}{}%
+  \subsection{#2\ \texttt{#3}}%
+  \noindent\textbf{Auth:} #4 \\[2pt]
+  \textbf{Purpose:} #5 \\[6pt]
+  \textbf{Security test checklist:}
+  \begin{itemize}[leftmargin=1.4em,itemsep=1pt,topsep=2pt]
+    \item[$\square$] AuthZ — access without/with wrong token or tenant
+    \item[$\square$] Tenant isolation — cross-tenant object access (IDOR)
+    \item[$\square$] Input validation / injection / malformed payload
+    \item[$\square$] Rate limiting / abuse
+  \end{itemize}
+  \textbf{Findings:} \textit{\textcolor{muted}{(pending)}}
+  \vspace{4pt}\hrule\vspace{8pt}
+}
+
+% Row in the index that links to an endpoint block
+\newcommand{\idx}[4]{#1 & \texttt{#2} & #3 & \hyperlink{#4}{jump $\to$}\\}
+
+% =====================================================================
+\begin{document}
+
+% ---- Title page --------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\Huge\bfseries\color{brand} Amber \& Grain\par}
+\vspace{0.4cm}
+{\LARGE API Security Testing Dossier\par}
+\vspace{1cm}
+{\large\color{muted} Complete endpoint inventory for individual security review\par}
+\vspace{2cm}
+\begin{tabular}{rl}
+\textbf{Service:} & \code{@amber/api} (NestJS 10 + Prisma 6)\\[4pt]
+\textbf{Base URL:} & \code{http://<host>:3001}\\[4pt]
+\textbf{Tenant scope:} & \code{X-Tenant-Slug} header (or \code{?tenant=} for SSE)\\[4pt]
+\textbf{Auth:} & \code{Authorization: Bearer <JWT>}\\[4pt]
+\textbf{Generated:} & \today\\
+\end{tabular}
+\vfill
+{\small\color{muted} Confidential — internal security assessment\par}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ---- Conventions -------------------------------------------------------
+\section{Conventions \& global notes}
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Base URL.} All paths are relative to \code{http://<host>:3001}.
+  \item \textbf{Tenant scoping.} \code{TenantMiddleware} resolves the tenant from
+        the \code{X-Tenant-Slug} header (or \code{?tenant=slug} for EventSource
+        streams). \code{/admin/*} and \code{/auth/*} are excluded (cross-tenant).
+  \item \textbf{Auth layer.} JWT-guarded routes use \code{@RequirePermission(...)}.
+        Permission keys: \code{team.manage}, \code{settings.manage},
+        \code{menu.manage}, \code{tables.manage}, \code{orders.history}.
+        Super-admin routes use Supabase auth + \code{SuperAdminGuard}.
+  \item \textbf{Guest/device auth.} Some order + all service-request routes are
+        \authPublic{} or \authDevice{} by design (deferred auth) — priority
+        targets for the review.
+  \item Each endpoint below has a checklist and a \textbf{Findings} slot to fill in.
+\end{itemize}
+
+% =====================================================================
+% ---- MASTER INDEX ------------------------------------------------------
+% =====================================================================
+\section{Endpoint index}
+\renewcommand{\arraystretch}{1.25}
+\rowcolors{2}{white}{rowalt}
+\begin{longtable}{@{}p{1.4cm} p{6.4cm} p{4.2cm} p{2.2cm}@{}}
+\toprule
+\textbf{Method} & \textbf{Path} & \textbf{Auth} & \textbf{Detail}\\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Method} & \textbf{Path} & \textbf{Auth} & \textbf{Detail}\\
+\midrule
+\endhead
+\multicolumn{4}{c}{\textit{Health}}\\
+\idx{\GET}{/health}{Public}{ep-health}
+
+\multicolumn{4}{c}{\textit{Auth}}\\
+\idx{\POST}{/auth/login}{Public}{ep-auth-login}
+\idx{\POST}{/auth/select-tenant}{Public (ticket)}{ep-auth-select}
+\idx{\GET}{/auth/me}{JWT}{ep-auth-me}
+\idx{\POST}{/auth/change-password}{JWT}{ep-auth-changepw}
+\idx{\POST}{/auth/sync-profile}{Supabase}{ep-auth-sync}
+
+\multicolumn{4}{c}{\textit{Tenant}}\\
+\idx{\GET}{/tenant}{Tenant hdr}{ep-tenant-get}
+\idx{\PATCH}{/tenant}{settings.manage}{ep-tenant-patch}
+\idx{\GET}{/tenants/:slug}{Public}{ep-tenant-byslug}
+
+\multicolumn{4}{c}{\textit{Menu}}\\
+\idx{\GET}{/menu}{Tenant hdr}{ep-menu-get}
+\idx{\POST}{/menu/upload}{menu.manage}{ep-menu-upload}
+\idx{\POST}{/menu/categories}{menu.manage}{ep-menu-cat-add}
+\idx{\PATCH}{/menu/categories/:id}{menu.manage}{ep-menu-cat-patch}
+\idx{\DELETE}{/menu/categories/:id}{menu.manage}{ep-menu-cat-del}
+\idx{\POST}{/menu/items}{menu.manage}{ep-menu-item-add}
+\idx{\PATCH}{/menu/items/:id}{menu.manage}{ep-menu-item-patch}
+\idx{\DELETE}{/menu/items/:id}{menu.manage}{ep-menu-item-del}
+
+\multicolumn{4}{c}{\textit{Tables}}\\
+\idx{\GET}{/tables}{tables.manage}{ep-tables-list}
+\idx{\GET}{/tables/qr/:token}{Public}{ep-tables-qr}
+\idx{\POST}{/tables}{tables.manage}{ep-tables-add}
+\idx{\PATCH}{/tables/:id}{tables.manage}{ep-tables-patch}
+\idx{\POST}{/tables/:id/qr}{tables.manage}{ep-tables-regenqr}
+\idx{\DELETE}{/tables/:id}{tables.manage}{ep-tables-del}
+
+\multicolumn{4}{c}{\textit{Orders}}\\
+\idx{\SSE}{/orders/stream}{StreamGuard}{ep-orders-stream}
+\idx{\GET}{/orders}{tables.manage}{ep-orders-list}
+\idx{\GET}{/orders/open-table-ids}{Public}{ep-orders-opentids}
+\idx{\GET}{/orders/sales}{orders.history}{ep-orders-sales}
+\idx{\GET}{/orders/analytics}{tables.manage}{ep-orders-analytics}
+\idx{\GET}{/orders/:id}{Device-bound}{ep-orders-get}
+\idx{\GET}{/orders/:id/payment}{tables.manage}{ep-orders-payget}
+\idx{\POST}{/orders/reclaim}{Device-bound}{ep-orders-reclaim}
+\idx{\POST}{/orders}{Device-bound}{ep-orders-create}
+\idx{\POST}{/orders/:id/rounds}{Device-bound}{ep-orders-rounds}
+\idx{\POST}{/orders/:id/items}{tables.manage}{ep-orders-items-add}
+\idx{\PATCH}{/orders/:id/items/:itemId}{Device/staff}{ep-orders-items-patch}
+\idx{\POST}{/orders/:id/bill}{Device-bound}{ep-orders-bill}
+\idx{\POST}{/orders/:id/cancel}{tables.manage}{ep-orders-cancel}
+\idx{\POST}{/orders/:id/payment}{Device/staff}{ep-orders-payment}
+
+\multicolumn{4}{c}{\textit{Service requests}}\\
+\idx{\SSE}{/service-requests/stream}{StreamGuard}{ep-sr-stream}
+\idx{\POST}{/service-requests}{Public}{ep-sr-create}
+\idx{\GET}{/service-requests}{tables.manage}{ep-sr-list}
+\idx{\PATCH}{/service-requests/:id}{tables.manage}{ep-sr-patch}
+
+\multicolumn{4}{c}{\textit{Roles}}\\
+\idx{\GET}{/roles}{team.manage}{ep-roles-list}
+\idx{\POST}{/roles}{team.manage}{ep-roles-add}
+\idx{\PATCH}{/roles/:id}{team.manage}{ep-roles-patch}
+\idx{\DELETE}{/roles/:id}{team.manage}{ep-roles-del}
+
+\multicolumn{4}{c}{\textit{Members}}\\
+\idx{\GET}{/members}{team.manage}{ep-members-list}
+\idx{\POST}{/members}{team.manage}{ep-members-add}
+\idx{\PATCH}{/members/:id}{team.manage}{ep-members-patch}
+\idx{\DELETE}{/members/:id}{team.manage}{ep-members-del}
+
+\multicolumn{4}{c}{\textit{Billing}}\\
+\idx{\GET}{/admin/plans}{Super-admin}{ep-bill-plans-list}
+\idx{\POST}{/admin/plans}{Super-admin}{ep-bill-plans-add}
+\idx{\PATCH}{/admin/plans/:id}{Super-admin}{ep-bill-plans-patch}
+\idx{\POST}{/admin/tenants/:id/subscription}{Super-admin}{ep-bill-sub-add}
+\idx{\GET}{/admin/tenants/:id/subscription}{Super-admin}{ep-bill-sub-get}
+\idx{\PATCH}{/admin/tenants/:id/subscription}{Super-admin}{ep-bill-sub-patch}
+\idx{\GET}{/billing/me}{JWT}{ep-bill-me}
+
+\multicolumn{4}{c}{\textit{Admin (super-admin)}}\\
+\idx{\GET}{/admin/tenants}{Super-admin}{ep-admin-tenants-list}
+\idx{\POST}{/admin/tenants}{Super-admin}{ep-admin-tenants-add}
+\idx{\GET}{/admin/tenants/:id}{Super-admin}{ep-admin-tenant-get}
+\idx{\PATCH}{/admin/tenants/:id}{Super-admin}{ep-admin-tenant-patch}
+\idx{\GET}{/admin/tenants/:id/payments}{Super-admin}{ep-admin-tenant-pay}
+\idx{\GET}{/admin/credentials}{Super-admin}{ep-admin-creds}
+\idx{\POST}{/admin/tenants/:id/reset-owner-password}{Super-admin}{ep-admin-resetpw}
+\idx{\POST}{/admin/impersonate}{Super-admin}{ep-admin-impersonate}
+\idx{\GET}{/admin/analytics}{Super-admin}{ep-admin-analytics}
+\idx{\GET}{/admin/audit-log}{Super-admin}{ep-admin-audit}
+\bottomrule
+\end{longtable}
+
+\newpage
+
+% =====================================================================
+% ---- ENDPOINT DETAIL SECTIONS -----------------------------------------
+% =====================================================================
+\section{Health}
+\apidoc{ep-health}{\GET}{/health}{\authPublic}{Liveness probe.}
+
+\section{Auth}
+\apidoc{ep-auth-login}{\POST}{/auth/login}{\authPublic}{Email+password login; returns JWT or a tenant-select ticket.}
+\apidoc{ep-auth-select}{\POST}{/auth/select-tenant}{Public (5-min ticket)}{Redeem tenant-select ticket for a scoped JWT.}
+\apidoc{ep-auth-me}{\GET}{/auth/me}{\authJwt{JwtAuthGuard}}{Current authenticated user.}
+\apidoc{ep-auth-changepw}{\POST}{/auth/change-password}{\authJwt{JwtAuthGuard}}{Change own password.}
+\apidoc{ep-auth-sync}{\POST}{/auth/sync-profile}{Supabase auth}{Ensure a Prisma User row for a Supabase super-admin sign-in.}
+
+\section{Tenant}
+\apidoc{ep-tenant-get}{\GET}{/tenant}{Tenant header}{Active tenant config (theme/profile).}
+\apidoc{ep-tenant-patch}{\PATCH}{/tenant}{\authJwt{settings.manage}}{Update own tenant's branding/profile.}
+\apidoc{ep-tenant-byslug}{\GET}{/tenants/:slug}{\authPublic}{Public tenant lookup by slug (guest boot / theming).}
+
+\section{Menu}
+\apidoc{ep-menu-get}{\GET}{/menu}{Tenant header}{Full menu (categories + items + modifiers).}
+\apidoc{ep-menu-upload}{\POST}{/menu/upload}{\authJwt{menu.manage}}{Multipart item-photo upload $\to$ Supabase Storage.}
+\apidoc{ep-menu-cat-add}{\POST}{/menu/categories}{\authJwt{menu.manage}}{Create category.}
+\apidoc{ep-menu-cat-patch}{\PATCH}{/menu/categories/:id}{\authJwt{menu.manage}}{Rename/reorder category.}
+\apidoc{ep-menu-cat-del}{\DELETE}{/menu/categories/:id}{\authJwt{menu.manage}}{Delete category (blocked if it holds items).}
+\apidoc{ep-menu-item-add}{\POST}{/menu/items}{\authJwt{menu.manage}}{Create item (with modifier groups).}
+\apidoc{ep-menu-item-patch}{\PATCH}{/menu/items/:id}{\authJwt{menu.manage}}{Update item (replace-on-save modifiers).}
+\apidoc{ep-menu-item-del}{\DELETE}{/menu/items/:id}{\authJwt{menu.manage}}{Delete item.}
+
+\section{Tables}
+\apidoc{ep-tables-list}{\GET}{/tables}{\authJwt{tables.manage}}{Floor list + status + live session.}
+\apidoc{ep-tables-qr}{\GET}{/tables/qr/:token}{\authPublic}{Resolve a table by its QR token (guest boot).}
+\apidoc{ep-tables-add}{\POST}{/tables}{\authJwt{tables.manage}}{Create table (mints qrToken).}
+\apidoc{ep-tables-patch}{\PATCH}{/tables/:id}{\authJwt{tables.manage}}{Update table.}
+\apidoc{ep-tables-regenqr}{\POST}{/tables/:id/qr}{\authJwt{tables.manage}}{Regenerate QR token (invalidates old).}
+\apidoc{ep-tables-del}{\DELETE}{/tables/:id}{\authJwt{tables.manage}}{Delete table.}
+
+\section{Orders}
+\apidoc{ep-orders-stream}{\SSE}{/orders/stream}{OrderStreamGuard (\code{?tenant=})}{Per-tenant SSE live floor event bus.}
+\apidoc{ep-orders-list}{\GET}{/orders}{\authJwt{tables.manage}}{Live order list (\code{?status=}).}
+\apidoc{ep-orders-opentids}{\GET}{/orders/open-table-ids}{\authPublic}{Table ids with a live order (guest occupancy check).}
+\apidoc{ep-orders-sales}{\GET}{/orders/sales}{\authJwt{orders.history}}{Sales feed / order history (\code{?from=\&to=}).}
+\apidoc{ep-orders-analytics}{\GET}{/orders/analytics}{\authJwt{tables.manage}}{Aggregated revenue/orders analytics.}
+\apidoc{ep-orders-get}{\GET}{/orders/:id}{\authDevice}{Single order (guest device-bound / staff).}
+\apidoc{ep-orders-payget}{\GET}{/orders/:id/payment}{\authJwt{tables.manage}}{Payment record for an order.}
+\apidoc{ep-orders-reclaim}{\POST}{/orders/reclaim}{\authDevice}{Reclaim a device's live session.}
+\apidoc{ep-orders-create}{\POST}{/orders}{\authDevice}{Open a table session (occupancy + format guards).}
+\apidoc{ep-orders-rounds}{\POST}{/orders/:id/rounds}{\authDevice}{Add a round (server recomputes modifier deltas).}
+\apidoc{ep-orders-items-add}{\POST}{/orders/:id/items}{\authJwt{tables.manage}}{Staff add item to order.}
+\apidoc{ep-orders-items-patch}{\PATCH}{/orders/:id/items/:itemId}{Device / staff}{Update item qty/status (409 if order terminal).}
+\apidoc{ep-orders-bill}{\POST}{/orders/:id/bill}{\authDevice}{Request bill (Order $\to$ billed).}
+\apidoc{ep-orders-cancel}{\POST}{/orders/:id/cancel}{\authJwt{tables.manage}}{Staff cancel order.}
+\apidoc{ep-orders-payment}{\POST}{/orders/:id/payment}{Device / staff}{Capture payment; recomputes totals server-side.}
+
+\section{Service requests}
+\apidoc{ep-sr-stream}{\SSE}{/service-requests/stream}{ServiceRequestStreamGuard (\code{?tenant=})}{Per-tenant SSE for open service requests.}
+\apidoc{ep-sr-create}{\POST}{/service-requests}{\authPublic}{Guest creates a request (dedupes on pending type).}
+\apidoc{ep-sr-list}{\GET}{/service-requests}{\authJwt{tables.manage}}{Staff list open requests (\code{?status=}).}
+\apidoc{ep-sr-patch}{\PATCH}{/service-requests/:id}{\authJwt{tables.manage}}{Acknowledge / resolve a request.}
+
+\section{Roles}
+\apidoc{ep-roles-list}{\GET}{/roles}{\authJwt{team.manage}}{List custom roles.}
+\apidoc{ep-roles-add}{\POST}{/roles}{\authJwt{team.manage}}{Create role.}
+\apidoc{ep-roles-patch}{\PATCH}{/roles/:id}{\authJwt{team.manage}}{Rename/edit role (Admin-tier guard on protected).}
+\apidoc{ep-roles-del}{\DELETE}{/roles/:id}{\authJwt{team.manage}}{Delete role (blocked if protected / has members).}
+
+\section{Members}
+\apidoc{ep-members-list}{\GET}{/members}{\authJwt{team.manage}}{List memberships.}
+\apidoc{ep-members-add}{\POST}{/members}{\authJwt{team.manage}}{Add member (creates User if new).}
+\apidoc{ep-members-patch}{\PATCH}{/members/:id}{\authJwt{team.manage}}{Change role / permission override / activate (tier + last-admin guards).}
+\apidoc{ep-members-del}{\DELETE}{/members/:id}{\authJwt{team.manage}}{Remove member (last-admin + tier guards).}
+
+\section{Billing}
+\apidoc{ep-bill-plans-list}{\GET}{/admin/plans}{\authSuper}{List billing plans.}
+\apidoc{ep-bill-plans-add}{\POST}{/admin/plans}{\authSuper}{Create plan.}
+\apidoc{ep-bill-plans-patch}{\PATCH}{/admin/plans/:id}{\authSuper}{Update plan.}
+\apidoc{ep-bill-sub-add}{\POST}{/admin/tenants/:id/subscription}{\authSuper}{Create tenant subscription.}
+\apidoc{ep-bill-sub-get}{\GET}{/admin/tenants/:id/subscription}{\authSuper}{Get tenant subscription.}
+\apidoc{ep-bill-sub-patch}{\PATCH}{/admin/tenants/:id/subscription}{\authSuper}{Update tenant subscription.}
+\apidoc{ep-bill-me}{\GET}{/billing/me}{\authJwt{JwtAuthGuard}}{Current tenant's own billing state.}
+
+\section{Admin (super-admin)}
+\apidoc{ep-admin-tenants-list}{\GET}{/admin/tenants}{\authSuper}{List all tenants.}
+\apidoc{ep-admin-tenants-add}{\POST}{/admin/tenants}{\authSuper}{Onboard a new tenant.}
+\apidoc{ep-admin-tenant-get}{\GET}{/admin/tenants/:id}{\authSuper}{Tenant detail.}
+\apidoc{ep-admin-tenant-patch}{\PATCH}{/admin/tenants/:id}{\authSuper}{Update tenant.}
+\apidoc{ep-admin-tenant-pay}{\GET}{/admin/tenants/:id/payments}{\authSuper}{Tenant payment history.}
+\apidoc{ep-admin-creds}{\GET}{/admin/credentials}{\authSuper}{Retrieve tenant credentials.}
+\apidoc{ep-admin-resetpw}{\POST}{/admin/tenants/:id/reset-owner-password}{\authSuper}{Reset a tenant owner's password.}
+\apidoc{ep-admin-impersonate}{\POST}{/admin/impersonate}{\authSuper}{Mint an impersonation token for a tenant.}
+\apidoc{ep-admin-analytics}{\GET}{/admin/analytics}{\authSuper}{Platform-wide analytics.}
+\apidoc{ep-admin-audit}{\GET}{/admin/audit-log}{\authSuper}{Platform audit log.}
+
+\end{document}
