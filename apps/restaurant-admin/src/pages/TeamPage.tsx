@@ -13,6 +13,7 @@ import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { Toggle } from "../components/Toggle";
 import { PermissionChecklist } from "../components/PermissionChecklist";
+import { PinnerLoader, TableSkeleton } from "../components/Skeleton";
 
 /** New members are created with this password until email invites land. */
 const DEFAULT_MEMBER_PASSWORD = "changeme123";
@@ -49,17 +50,25 @@ export function TeamPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Distinguish "the list failed to load" from "no members yet" — a timed-out
+  // GET must not render the misleading empty state.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
+    setError(null);
+    setLoadFailed(false);
     Promise.all([api.members.list(), api.roles.list()])
       .then(([m, r]) => {
         setMembers(m);
         setRoles(r);
       })
-      .catch((e) => setError(messageOf(e)))
+      .catch((e) => {
+        setError(messageOf(e));
+        setLoadFailed(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -150,9 +159,22 @@ export function TeamPage() {
 
       <div className="overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest">
         {loading ? (
-          <p className="px-xl py-lg font-body-md text-body-md text-on-surface-variant">
-            Loading…
-          </p>
+          <>
+            <PinnerLoader />
+            <TableSkeleton rows={4} cols={3} />
+          </>
+        ) : loadFailed ? (
+          <div className="flex items-center justify-between gap-md px-xl py-lg">
+            <p className="font-body-md text-body-md text-on-surface-variant">
+              Couldn’t load the team.
+            </p>
+            <button
+              onClick={load}
+              className="flex items-center gap-xs rounded-full border border-outline-variant px-lg py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <Icon name="refresh" size={18} /> Retry
+            </button>
+          </div>
         ) : members.length === 0 ? (
           <p className="px-xl py-lg font-body-md text-body-md text-on-surface-variant">
             No team members yet.

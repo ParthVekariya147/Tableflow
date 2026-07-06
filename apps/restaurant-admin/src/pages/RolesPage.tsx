@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { PermissionChecklist } from "../components/PermissionChecklist";
+import { PinnerLoader, TableSkeleton } from "../components/Skeleton";
 
 interface Draft {
   id?: string;
@@ -33,15 +34,23 @@ export function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Distinguish "the list failed to load" from "the tenant has no roles" — a
+  // timed-out GET must not render the misleading "No roles yet" empty state.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
+    setError(null);
+    setLoadFailed(false);
     api.roles
       .list()
       .then(setRoles)
-      .catch((e) => setError(messageOf(e)))
+      .catch((e) => {
+        setError(messageOf(e));
+        setLoadFailed(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -108,9 +117,22 @@ export function RolesPage() {
 
       <div className="overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest">
         {loading ? (
-          <p className="px-xl py-lg font-body-md text-body-md text-on-surface-variant">
-            Loading…
-          </p>
+          <>
+            <PinnerLoader />
+            <TableSkeleton rows={4} cols={2} />
+          </>
+        ) : loadFailed ? (
+          <div className="flex items-center justify-between gap-md px-xl py-lg">
+            <p className="font-body-md text-body-md text-on-surface-variant">
+              Couldn’t load roles.
+            </p>
+            <button
+              onClick={load}
+              className="flex items-center gap-xs rounded-full border border-outline-variant px-lg py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              <Icon name="refresh" size={18} /> Retry
+            </button>
+          </div>
         ) : roles.length === 0 ? (
           <p className="px-xl py-lg font-body-md text-body-md text-on-surface-variant">
             No roles yet.

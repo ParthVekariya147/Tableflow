@@ -3,11 +3,20 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { Permission } from "@amber/domain";
 import { useAuth } from "../context/AuthContext";
 import { homeRouteFor } from "../lib/nav";
+import { Spinner } from "./Skeleton";
 
 function FullScreen({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background text-on-surface-variant">
       <p className="font-body-md text-body-md">{children}</p>
+    </div>
+  );
+}
+
+function FullScreenSpinner() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <Spinner size={36} />
     </div>
   );
 }
@@ -28,7 +37,7 @@ export function RequirePermission({
   const { status, user, can } = useAuth();
   const location = useLocation();
 
-  if (status === "loading") return <FullScreen>Loading…</FullScreen>;
+  if (status === "loading") return <FullScreenSpinner />;
   if (status === "anon" || !user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }

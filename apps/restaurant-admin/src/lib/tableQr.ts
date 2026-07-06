@@ -1,4 +1,5 @@
 import { defaultTenant } from "../tenant/defaultTenant";
+import { getStoredTenantSlug } from "./auth-tenant";
 
 /**
  * Build the deep link a guest's phone opens when scanning a table's QR. It
@@ -13,7 +14,14 @@ const customerBaseUrl = (
   "http://localhost:5173"
 ).replace(/\/+$/, "");
 
-/** The full scannable URL for a table's QR token. */
+/**
+ * The full scannable URL for a table's QR token. The slug is the *logged-in*
+ * tenant's (read at call time, same source as the api-client) so every
+ * restaurant's QR encodes its own tenant — byQrToken is tenant-scoped, so a QR
+ * baked with the wrong slug 404s ("Invalid QR"). defaultTenant.slug is only
+ * the pre-login dev fallback.
+ */
 export function tableQrUrl(qrToken: string): string {
-  return `${customerBaseUrl}/${defaultTenant.slug}/t/${encodeURIComponent(qrToken)}`;
+  const slug = getStoredTenantSlug() ?? defaultTenant.slug;
+  return `${customerBaseUrl}/${encodeURIComponent(slug)}/t/${encodeURIComponent(qrToken)}`;
 }

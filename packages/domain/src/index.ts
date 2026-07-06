@@ -14,6 +14,7 @@ export * from "./tenant.js";
 export * from "./menu.js";
 export * from "./order.js";
 export * from "./service-request.js";
+export * from "./loyalty.js";
 export * from "./table.js";
 export * from "./payment.js";
 export * from "./analytics.js";

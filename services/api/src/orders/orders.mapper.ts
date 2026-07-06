@@ -26,6 +26,10 @@ export function toDomainOrder(row: OrderWithRounds): Order {
     createdAt: row.createdAt.toISOString(),
     closedAt: row.closedAt?.toISOString(),
     billRequestedAt: row.billRequestedAt?.toISOString(),
+    loyaltyAccountId: row.loyaltyAccountId ?? undefined,
+    pointsEarned: row.pointsEarned ?? undefined,
+    pointsRedeemed: row.pointsRedeemed ?? undefined,
+    redemptionValueMinor: row.redemptionValueCents ?? undefined,
     rounds: row.rounds.map((r) => ({
       id: r.id,
       type: r.type,

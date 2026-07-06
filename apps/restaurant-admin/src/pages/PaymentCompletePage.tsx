@@ -4,12 +4,14 @@ import {
   buildUpiPaymentUrl,
   orderItemUnitPrice,
   orderSubtotal,
+  type Order,
+  type Payment,
   type PrinterSettings,
   type Receipt,
   type Tenant,
 } from "@amber/domain";
 import { Icon } from "../components/Icon";
-import { useMoney } from "../store/AdminStore";
+import { useAdmin, useMoney } from "../store/AdminStore";
 import { api } from "../lib/api";
 import { printReceipt, type PrintResult } from "../lib/printAgent";
 import type { PaymentMethod } from "../data/types";
@@ -26,17 +28,14 @@ interface CompleteState {
  * Router state (`data` below) is only used as a fast-path hint for the
  * on-screen summary; printing always goes through this rebuilt payload.
  */
-async function buildReceipt(
+function buildReceipt(
   orderId: string,
   tableId: string | undefined,
   tableLabel: string,
   tenant: Tenant,
-): Promise<Receipt> {
-  const [order, payment] = await Promise.all([
-    api.orders.get(orderId),
-    api.orders.getPayment(orderId),
-  ]);
-
+  order: Order,
+  payment: Payment | null,
+): Receipt {
   const lines = order.rounds.flatMap((round) =>
     round.items
       .filter((item) => item.status !== "cancelled")
@@ -62,6 +61,9 @@ async function buildReceipt(
     lines,
     subtotal,
     taxRate: tenant.taxRate,
+    // A captured Payment row = the bill is settled; without one the receipt
+    // must print "TOTAL DUE" (and the UPI QR), never claim it was paid.
+    settled: !!payment,
     tax: payment?.tax ?? 0,
     gratuity: payment?.tip,
     total,
@@ -88,6 +90,7 @@ async function buildReceipt(
 export function PaymentCompletePage() {
   const navigate = useNavigate();
   const money = useMoney();
+  const { state: adminState } = useAdmin();
   const { state } = useLocation();
   const [searchParams] = useSearchParams();
   const { id: tableId } = useParams();
@@ -110,13 +113,13 @@ export function PaymentCompletePage() {
       return;
     }
     let active = true;
-    api.tenant
-      .current()
-      .then(async (tenant) => {
+    // All three are independent — fetch them together instead of waiting on
+    // tenant.current() before even starting the order/payment fetch.
+    Promise.all([api.tenant.current(), api.orders.get(orderId), api.orders.getPayment(orderId)])
+      .then(([tenant, order, payment]) => {
         if (!active) return;
         setPrinterSettings(tenant.printer);
-        const r = await buildReceipt(orderId, tableId, data.tableLabel, tenant);
-        if (active) setReceipt(r);
+        setReceipt(buildReceipt(orderId, tableId, data.tableLabel, tenant, order, payment));
       })
       .catch(() => active && setReceiptError("Couldn't load the receipt for printing."));
     return () => {
@@ -139,6 +142,10 @@ export function PaymentCompletePage() {
     : printResult
     ? "Print Again"
     : "Print Receipt";
+
+  // A Quick Sale (no-table counter checkout) returns to /quick-sale to ring up
+  // the next customer, instead of the dine-in floor plan.
+  const isQuickSale = !!adminState.tables.find((t) => t.id === tableId)?.isCounter;
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center overflow-hidden bg-surface-bright px-xl">
@@ -164,7 +171,7 @@ export function PaymentCompletePage() {
             <span className="inline-flex items-center gap-xs rounded-full bg-surface-container-high px-sm py-base">
               <span className="h-2 w-2 rounded-full bg-primary" />
               <span className="font-label-md text-label-md text-on-background">
-                {data.tableLabel} Free
+                {isQuickSale ? "Ready for next order" : `${data.tableLabel} Free`}
               </span>
             </span>
           </div>
@@ -188,10 +195,10 @@ export function PaymentCompletePage() {
           style={{ animationDelay: "0.2s" }}
         >
           <button
-            onClick={() => navigate("/tables")}
+            onClick={() => navigate(isQuickSale ? "/quick-sale" : "/tables")}
             className="flex-1 rounded-full bg-primary px-xl py-sm font-label-md text-label-md text-on-primary shadow-sm transition-colors hover:bg-primary-container sm:flex-none"
           >
-            Back to Tables
+            {isQuickSale ? "New Sale" : "Back to Tables"}
           </button>
           <button
             onClick={handlePrint}

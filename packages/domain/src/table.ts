@@ -15,6 +15,9 @@ export const tableSchema = z.object({
   room: z.string().optional(),
   /** Sort order within the floor list. */
   sortOrder: z.number().int().default(0),
+  /** True for the auto-created virtual "Counter Sale" table used by the
+   *  no-table quick-sale flow — hidden from the normal floor plan grid. */
+  isCounter: z.boolean().default(false),
 });
 
 /**

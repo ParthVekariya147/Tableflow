@@ -39,6 +39,15 @@ export class TablesController {
     return this.tables.byQrToken(tenant.id, token);
   }
 
+  /** Staff-only: find-or-create the tenant's virtual "Counter Sale" table
+   *  backing the no-table quick-sale flow. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
+  @Get("counter")
+  getCounter(@CurrentTenant() tenant: Tenant): Promise<Table> {
+    return this.tables.getOrCreateCounter(tenant.id);
+  }
+
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermission("tables.manage")
   @Post()

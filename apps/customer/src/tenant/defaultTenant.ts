@@ -28,4 +28,12 @@ export const defaultTenant: Tenant = {
     },
   },
   printer: {},
+  kitchenPrinter: {},
+  loyalty: {
+    enabled: false,
+    earnRatePerCurrency: 1,
+    redemptionRate: 100,
+    minRedeemPoints: 100,
+    maxRedeemPercent: 0.5,
+  },
 };

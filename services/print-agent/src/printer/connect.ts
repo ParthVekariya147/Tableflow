@@ -1,5 +1,6 @@
 import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
 import type { PrinterSettings } from "@amber/domain";
+import { osPrintDriver } from "./osPrintDriver.js";
 
 /** Thrown for a missing/incomplete connection config — a 400, not a printer failure. */
 export class PrinterConfigError extends Error {}
@@ -10,12 +11,16 @@ export class PrinterConfigError extends Error {}
  * Bluetooth both resolve to the OS-level print queue — the practical, reliable
  * path once the printer is installed (USB) or paired (Bluetooth) at the OS
  * level and exposed as a named printer/port; `usbPath`/`bluetoothPort` are
- * that system identifier, not a raw device/MAC address.
+ * that system identifier, not a raw device/MAC address. The `printer:` interface
+ * requires an explicit `driver` (node-thermal-printer has no default) — without
+ * one it throws "No driver set!" on every request, which is what `osPrintDriver`
+ * fixes; network needs no driver at all.
  */
 export function buildPrinter(settings: PrinterSettings): ThermalPrinter {
   return new ThermalPrinter({
     type: PrinterTypes.EPSON,
     interface: resolveInterface(settings),
+    driver: settings.connectionType === "network" ? undefined : osPrintDriver,
     width: settings.paperWidth === "58mm" ? 32 : 48,
     removeSpecialCharacters: false,
   });

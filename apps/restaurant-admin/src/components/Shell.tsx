@@ -12,7 +12,7 @@ const NAV_PREF_KEY = "amber-admin-nav";
 
 function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const navigate = useNavigate();
-  const { user, can, logout } = useAuth();
+  const { can, logout } = useAuth();
   // The active tenant's brand (name + logo) — set by TenantThemeGate.
   const tenant = useTenant();
   // Live count of tables awaiting their bill, badged on the Billing nav item so
@@ -195,7 +195,7 @@ function NotificationBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-lg border border-outline-variant bg-surface shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-outline-variant bg-surface shadow-lg">
           <div className="flex items-center justify-between border-b border-outline-variant px-md py-sm">
             <span className="font-label-md text-label-md font-bold text-on-surface">
               Service requests

@@ -8,13 +8,19 @@ import {
   RequirePermission,
 } from "../auth/permissions.guard.js";
 import { UpdateTenantDto } from "./tenant.dto.js";
+import { toPublicDomainTenant } from "./tenant.mapper.js";
 
 @Controller()
 export class TenantController {
   constructor(private readonly tenants: TenantService) {}
 
-  /** The active tenant (resolved from the X-Tenant-Slug header). */
+  /**
+   * The active tenant (resolved from the X-Tenant-Slug header). Signed-in
+   * staff only — the full object carries print-agent credentials
+   * (`printer.agentSecret`), so it must not be reachable pre-auth.
+   */
   @Get("tenant")
+  @UseGuards(JwtAuthGuard)
   current(@CurrentTenant() tenant: Tenant): Tenant {
     return tenant;
   }
@@ -31,9 +37,15 @@ export class TenantController {
     return this.tenants.update(tenant.id, dto);
   }
 
-  /** Look up a tenant by slug (used before theme is applied, e.g. splash). */
+  /**
+   * Look up a tenant by slug (used before theme is applied, e.g. splash).
+   * Unauthenticated by design — returns a redacted tenant (no print-agent
+   * credentials); the full object is only served to signed-in staff via
+   * GET /tenant.
+   */
   @Get("tenants/:slug")
-  bySlug(@Param("slug") slug: string): Promise<Tenant> {
-    return this.tenants.getBySlug(slug);
+  async bySlug(@Param("slug") slug: string): Promise<Tenant> {
+    const tenant = await this.tenants.getBySlug(slug);
+    return toPublicDomainTenant(tenant);
   }
 }

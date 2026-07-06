@@ -45,6 +45,7 @@ export class TenantService {
     if (input.printer !== undefined) data.printer = input.printer as Prisma.InputJsonValue;
     if (input.kitchenPrinter !== undefined)
       data.kitchenPrinter = input.kitchenPrinter as Prisma.InputJsonValue;
+    if (input.loyalty !== undefined) data.loyalty = input.loyalty as Prisma.InputJsonValue;
     const row = await this.prisma.tenant.update({ where: { id: tenantId }, data });
     this.invalidateCache(row.slug);
     return toDomainTenant(row);

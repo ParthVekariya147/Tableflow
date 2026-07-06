@@ -100,6 +100,9 @@ export interface TableSession {
   rounds: Round[];
   /** epoch ms when the guest requested the bill (set once `status` becomes "bill"). */
   billRequestedAt?: number;
+  /** Guest contact captured at session start — optional, shown on the session page. */
+  customerName?: string;
+  customerPhone?: string;
 }
 
 export interface Table {
@@ -110,6 +113,9 @@ export interface Table {
   status: TableStatus;
   qrToken: string;
   session?: TableSession;
+  /** True for the auto-created virtual "Counter Sale" table used by the
+   *  no-table quick-sale flow — hidden from the floor plan grid. */
+  isCounter?: boolean;
 }
 
 export interface Sale {

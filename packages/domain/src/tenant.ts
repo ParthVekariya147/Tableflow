@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, slugSchema } from "./common.js";
 import { printerSettingsSchema } from "./printer.js";
+import { loyaltyProgramSchema } from "./loyalty.js";
 
 /**
  * The Tenant is the center of the platform: each restaurant is one row.
@@ -94,6 +95,8 @@ export const tenantSchema = z.object({
    * `footerMessage` are unused for KOTs (fixed, non-branded ticket format).
    */
   kitchenPrinter: printerSettingsSchema.default({}),
+  /** Staff/platform-only points program — see loyalty.ts. No guest-facing surface. */
+  loyalty: loyaltyProgramSchema.default({}),
   active: z.boolean().default(true),
 });
 
@@ -113,6 +116,7 @@ export const updateTenantRequestSchema = z
     theme: themeConfigSchema,
     printer: printerSettingsSchema,
     kitchenPrinter: printerSettingsSchema,
+    loyalty: loyaltyProgramSchema,
   })
   .partial();
 

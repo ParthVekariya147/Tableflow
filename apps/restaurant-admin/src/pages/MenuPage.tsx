@@ -7,7 +7,7 @@ import { useAdmin } from "../store/AdminStore";
 import type { Category, MenuItem } from "../data/types";
 
 export function MenuPage() {
-  const { state, dispatch, pendingItems } = useAdmin();
+  const { state, pendingItems } = useAdmin();
   const [activeCat, setActiveCat] = useState(state.categories[0]?.id ?? "");
   // panel: undefined = closed, null = add new, MenuItem = edit
   const [panel, setPanel] = useState<MenuItem | null | undefined>(undefined);

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { MaterialIcon } from "@amber/ui";
 import { signInWithGoogle, signInWithPassword } from "../lib/supabase";
 import { api } from "../api";
+import { Spinner } from "../components/Skeleton";
 
 /**
  * Super-admin login. Auth is Supabase Auth (see PLATFORM_PLAN.md) — this
@@ -89,8 +90,9 @@ export function LoginPage() {
         <button
           type="submit"
           disabled={busy}
-          className="mb-4 w-full rounded-lg bg-primary py-2.5 font-semibold text-on-primary disabled:opacity-50"
+          className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 font-semibold text-on-primary disabled:opacity-50"
         >
+          {busy && <Spinner size={16} />}
           {busy ? "Signing in…" : "Sign in"}
         </button>
 

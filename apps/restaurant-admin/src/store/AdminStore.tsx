@@ -80,7 +80,7 @@ type Action =
   | { type: "UPDATE_CATEGORY"; categoryId: string; name: string }
   | { type: "DELETE_CATEGORY"; categoryId: string }
   | { type: "ADD_TABLE"; label: string; seats?: number; room?: string }
-  | { type: "OPEN_SESSION"; tableId: string }
+  | { type: "OPEN_SESSION"; tableId: string; customerName?: string; customerPhone?: string }
   | { type: "REGEN_QR"; tableId: string }
   | { type: "UPDATE_TABLE"; tableId: string; patch: Partial<Table> }
   | { type: "DELETE_TABLE"; tableId: string }
@@ -151,6 +151,8 @@ function mapSession(order: DomainOrder): TableSession {
     openedAt: Date.parse(order.createdAt),
     rounds: order.rounds.map(mapRound),
     billRequestedAt: order.billRequestedAt ? Date.parse(order.billRequestedAt) : undefined,
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
   };
 }
 
@@ -163,6 +165,7 @@ function mapTable(ft: FloorTable): Table {
     status: ft.status,
     qrToken: ft.qrToken,
     session: ft.activeOrder ? mapSession(ft.activeOrder) : undefined,
+    isCounter: ft.isCounter,
   };
 }
 
@@ -242,6 +245,9 @@ interface AdminContextValue {
   currencySymbol: string;
   /** Force an immediate re-sync from the API (used on session-page open). */
   refresh: () => Promise<void>;
+  /** Lighter re-sync: tables + sales only, skips menu/tenant (used where the
+   *  menu can't have changed, e.g. Quick Sale's counter-table resolve). */
+  refreshFloor: () => Promise<void>;
   /** Upload an item photo to storage; resolves to its public URL. */
   uploadImage: (file: File) => Promise<string>;
   loading: boolean;
@@ -555,7 +561,10 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           });
           return;
         case "OPEN_SESSION":
-          await api.orders.createForTable(action.tableId);
+          await api.orders.createForTable(action.tableId, {
+            customerName: action.customerName,
+            customerPhone: action.customerPhone,
+          });
           return;
         case "REGEN_QR":
           await api.tables.regenerateQr(action.tableId);
@@ -674,6 +683,22 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Of the refreshFloor-resynced actions, these two are the only callers that
+  // read the refetched state right after `await dispatch(...)` resolves:
+  // OpenSessionModal navigates into TableSessionPage expecting the new
+  // session to already be in `state.tables` (its own comment says so), and
+  // QrModal's regenerate() re-renders the QR from the refetched `table.qrToken`
+  // — showing the OLD code even a moment longer risks staff printing/scanning
+  // a QR that's about to stop working. Every other refreshFloor caller either
+  // only closes a modal (no state read) or navigates to a page that re-syncs
+  // itself (TableSessionPage's own mount effect) or just needs the shared
+  // context to catch up shortly after (TablesPage), so they don't need to
+  // block on the refetch — see BLOCKING_RESYNC_TYPES below.
+  const BLOCKING_RESYNC_TYPES = useMemo(
+    () => new Set<Action["type"]>(["OPEN_SESSION", "REGEN_QR"]),
+    [],
+  );
+
   const dispatch = useCallback(
     async (action: Action): Promise<void> => {
       // Optimistic "crafting" placeholder so the new item appears immediately.
@@ -697,13 +722,24 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         const resync = MENU_ACTION_TYPES.has(action.type) ? refresh : refreshFloor;
-        await resync().catch(() => {});
-        setMutateCount((c) => Math.max(0, c - 1));
-        if (tempId)
-          setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
+        const resynced = resync().catch(() => {});
+        const settle = () => {
+          setMutateCount((c) => Math.max(0, c - 1));
+          if (tempId)
+            setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
+        };
+        // mutateCount (→ mutatingRef) stays true until `resynced` settles
+        // either way, so an SSE event arriving mid-refetch still gets skipped
+        // (see the stream handler below) — only whether the CALLER waits changes.
+        if (MENU_ACTION_TYPES.has(action.type) || BLOCKING_RESYNC_TYPES.has(action.type)) {
+          await resynced;
+          settle();
+        } else {
+          void resynced.then(settle);
+        }
       }
     },
-    [apply, refresh, refreshFloor, MENU_ACTION_TYPES],
+    [apply, refresh, refreshFloor, MENU_ACTION_TYPES, BLOCKING_RESYNC_TYPES],
   );
 
   const uploadImage = useCallback(
@@ -730,6 +766,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       state,
       dispatch,
       refresh,
+      refreshFloor,
       uploadImage,
       money,
       currencySymbol,
@@ -739,7 +776,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       error,
       subscribeOrderEvents,
     }),
-    [state, dispatch, refresh, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error, subscribeOrderEvents],
+    [state, dispatch, refresh, refreshFloor, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error, subscribeOrderEvents],
   );
 
   // Only block on the floor/menu data load once the user is signed in. Before

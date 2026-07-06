@@ -6,6 +6,10 @@
  * active tenant is sent as a header so the API scopes every query.
  */
 import { z } from "zod";
+import type {
+  roundTypeSchema,
+  modifierInputTypeSchema,
+  serviceRequestTypeSchema} from "@amber/domain";
 import {
   tenantSchema,
   menuSchema,
@@ -18,11 +22,7 @@ import {
   paymentSchema,
   saleSchema,
   analyticsSummarySchema,
-  roundTypeSchema,
-  modifierInputTypeSchema,
   serviceRequestSchema,
-  serviceRequestTypeSchema,
-  serviceRequestStatusSchema,
   loginResponseSchema,
   loginResultSchema,
   authUserSchema,
@@ -31,6 +31,8 @@ import {
   planSchema,
   tenantWithSubscriptionSchema,
   subscriptionWithPlanSchema,
+  loyaltyAccountSchema,
+  loyaltyTransactionSchema,
   type LoginResponse,
   type LoginResult,
   type AuthUser,
@@ -60,8 +62,10 @@ import {
   type UpdatePlanInput,
   type SetSubscriptionInput,
   type UpdateSubscriptionStatusInput,
+  type LoyaltyAccount,
+  type LoyaltyTransaction,
 } from "@amber/domain";
-import { request, ApiError, type ApiClientConfig } from "./http.js";
+import { request, requestBlob, ApiError, type ApiClientConfig } from "./http.js";
 
 export { ApiError } from "./http.js";
 export type { ApiClientConfig } from "./http.js";
@@ -97,6 +101,49 @@ export interface AuditLogEntry {
   tenant: { id: string; name: string; slug: string } | null;
   metadata: Record<string, unknown>;
   createdAt: string;
+}
+
+/** One of a loyalty customer's visits — items ordered, pricing, payment method. */
+export interface LoyaltyOrderSummary {
+  id: string;
+  tableLabel: string;
+  status: string;
+  createdAt: string;
+  items: Array<{ name: string; qty: number; unitPrice: number }>;
+  payment: {
+    method: string;
+    subtotal: number;
+    tax: number;
+    tip: number;
+    total: number;
+  } | null;
+}
+
+/** Cross-tenant loyalty account row from `GET /admin/loyalty/accounts`. */
+export interface AdminLoyaltyAccountSummary {
+  id: string;
+  phone: string;
+  name: string | null;
+  pointsBalance: number;
+  lifetimePoints: number;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  updatedAt: string;
+}
+
+/** Account detail + transaction history from `GET /admin/loyalty/accounts/:id`. */
+export interface AdminLoyaltyAccountDetail extends AdminLoyaltyAccountSummary {
+  createdAt: string;
+  transactions: Array<{
+    id: string;
+    type: string;
+    points: number;
+    balanceAfter: number;
+    note: string | null;
+    orderId: string | null;
+    createdAt: string;
+  }>;
 }
 
 /** Cross-tenant platform analytics for the super-admin dashboard. */
@@ -490,6 +537,10 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/tables/qr/${encodeURIComponent(qrToken)}`, {
           schema: tableSchema,
         }),
+      /** Find-or-create the tenant's virtual "Counter Sale" table backing
+       *  the no-table quick-sale flow. */
+      counter: (): Promise<Table> =>
+        request(config, "/tables/counter", { schema: tableSchema }),
       /** Add a table to the floor. */
       create: (input: TableInput): Promise<Table> =>
         request(config, "/tables", {
@@ -559,6 +610,21 @@ export function createApiClient(config: ApiClientConfig) {
         request(config, `/orders/${encodeURIComponent(id)}`, {
           schema: orderSchema,
         }),
+      /** Download the sales report (Summary, Daily Sales, Orders, Order Items,
+       *  Item Summary) as an .xlsx workbook for a `from`/`to` ISO window —
+       *  the table/item-level export for bookkeeping/reconciliation. Returns
+       *  the raw file blob + server-suggested filename; the caller triggers
+       *  the browser download. */
+      exportSalesReport: (range?: {
+        from?: string;
+        to?: string;
+      }): Promise<{ blob: Blob; filename: string }> => {
+        const qs = new URLSearchParams();
+        if (range?.from) qs.set("from", range.from);
+        if (range?.to) qs.set("to", range.to);
+        const q = qs.toString();
+        return requestBlob(config, q ? `/orders/export?${q}` : "/orders/export");
+      },
       /** The captured Payment for an order (method/tax/tip/tendered breakdown),
        *  or null if unpaid — lets a client rebuild a receipt after a refresh. */
       getPayment: (id: string): Promise<Payment | null> =>
@@ -673,6 +739,14 @@ export function createApiClient(config: ApiClientConfig) {
           body: input,
           schema: paymentSchema,
         }),
+      /** Staff-only: apply (or, with 0, clear) a loyalty points redemption on an
+       *  open/billed order before capturing payment. See loyalty.manage. */
+      redeemPoints: (orderId: string, points: number): Promise<Order> =>
+        request(config, `/orders/${encodeURIComponent(orderId)}/loyalty/redeem`, {
+          method: "POST",
+          body: { points },
+          schema: orderSchema,
+        }),
     },
 
     /**
@@ -734,6 +808,60 @@ export function createApiClient(config: ApiClientConfig) {
           }
         };
         return () => source.close();
+      },
+    },
+
+    /**
+     * Staff-only customer loyalty directory (requires loyalty.manage). No
+     * guest-facing surface — accounts are created/credited server-side from
+     * order flow, never from a client call.
+     */
+    loyalty: {
+      accounts: {
+        list: (search?: string): Promise<LoyaltyAccount[]> =>
+          request(
+            config,
+            search ? `/loyalty/accounts?search=${encodeURIComponent(search)}` : "/loyalty/accounts",
+            { schema: z.array(loyaltyAccountSchema) },
+          ),
+        get: (
+          id: string,
+        ): Promise<{
+          account: LoyaltyAccount;
+          transactions: LoyaltyTransaction[];
+          orders: LoyaltyOrderSummary[];
+        }> =>
+          request(config, `/loyalty/accounts/${encodeURIComponent(id)}`, {
+            schema: z.object({
+              account: loyaltyAccountSchema,
+              transactions: z.array(loyaltyTransactionSchema),
+              orders: z.array(z.object({
+                id: z.string(),
+                tableLabel: z.string(),
+                status: z.string(),
+                createdAt: z.string(),
+                items: z.array(z.object({
+                  name: z.string(),
+                  qty: z.number(),
+                  unitPrice: z.number(),
+                })),
+                payment: z.object({
+                  method: z.string(),
+                  subtotal: z.number(),
+                  tax: z.number(),
+                  tip: z.number(),
+                  total: z.number(),
+                }).nullable(),
+              })),
+            }),
+          }),
+        /** Manual point correction (comp/fix) — writes an "adjust" transaction. */
+        adjust: (id: string, input: { points: number; note?: string }): Promise<LoyaltyAccount> =>
+          request(config, `/loyalty/accounts/${encodeURIComponent(id)}/adjust`, {
+            method: "PATCH",
+            body: input,
+            schema: loyaltyAccountSchema,
+          }),
       },
     },
 
@@ -855,6 +983,52 @@ export function createApiClient(config: ApiClientConfig) {
             total: z.number(),
           }),
         });
+      },
+      /** Cross-tenant customer lookup (platform support). Read-only. */
+      loyaltyAccounts: {
+        list: (params?: { search?: string; tenantId?: string }): Promise<AdminLoyaltyAccountSummary[]> => {
+          const qs = new URLSearchParams();
+          if (params?.search) qs.set("search", params.search);
+          if (params?.tenantId) qs.set("tenantId", params.tenantId);
+          const query = qs.toString() ? `?${qs.toString()}` : "";
+          return request(config, `/admin/loyalty/accounts${query}`, {
+            schema: z.array(z.object({
+              id: z.string(),
+              phone: z.string(),
+              name: z.string().nullable(),
+              pointsBalance: z.number(),
+              lifetimePoints: z.number(),
+              tenantId: z.string(),
+              tenantName: z.string(),
+              tenantSlug: z.string(),
+              updatedAt: z.string(),
+            })),
+          });
+        },
+        get: (id: string): Promise<AdminLoyaltyAccountDetail> =>
+          request(config, `/admin/loyalty/accounts/${encodeURIComponent(id)}`, {
+            schema: z.object({
+              id: z.string(),
+              phone: z.string(),
+              name: z.string().nullable(),
+              pointsBalance: z.number(),
+              lifetimePoints: z.number(),
+              tenantId: z.string(),
+              tenantName: z.string(),
+              tenantSlug: z.string(),
+              updatedAt: z.string(),
+              createdAt: z.string(),
+              transactions: z.array(z.object({
+                id: z.string(),
+                type: z.string(),
+                points: z.number(),
+                balanceAfter: z.number(),
+                note: z.string().nullable(),
+                orderId: z.string().nullable(),
+                createdAt: z.string(),
+              })),
+            }),
+          }),
       },
     },
   };

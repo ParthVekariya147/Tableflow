@@ -122,6 +122,7 @@ async function seedRoles(tenantId: string): Promise<Map<string, string>> {
         "orders.history",
         "settings.manage",
         "team.manage",
+        "loyalty.manage",
       ],
     },
     { name: "Kitchen", permissions: ["kds.use"] },
@@ -296,6 +297,8 @@ async function main(): Promise<void> {
       name: "Amber & Grain",
       currency: "USD",
       taxRate: 0.1,
+      upiId: "amberandgrain@okhdfc",
+      upiMobile: "919876543210",
       theme: {
         mode: "light",
         colors: {

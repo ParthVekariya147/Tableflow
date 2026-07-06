@@ -14,6 +14,7 @@ import { MenuModule } from "./menu/menu.module.js";
 import { TablesModule } from "./tables/tables.module.js";
 import { OrdersModule } from "./orders/orders.module.js";
 import { ServiceRequestsModule } from "./service-requests/service-requests.module.js";
+import { LoyaltyModule } from "./loyalty/loyalty.module.js";
 import { AdminModule } from "./admin/admin.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { TenantMiddleware } from "./tenant/tenant.middleware.js";
@@ -35,6 +36,7 @@ import { GlobalExceptionFilter } from "./common/http-exception.filter.js";
     TablesModule,
     OrdersModule,
     ServiceRequestsModule,
+    LoyaltyModule,
     AdminModule,
     HealthModule,
   ],

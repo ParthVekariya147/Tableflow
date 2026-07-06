@@ -111,7 +111,7 @@ export function SessionProvider({ children }) {
     resumeOrder ? new Date(resumeOrder.createdAt) : null,
   );
   // The platform Order (session) backing this visit, once opened via the API.
-  const [orderId, setOrderId] = useState(resumeOrder?.id ?? null);
+  const [, setOrderId] = useState(resumeOrder?.id ?? null);
   const orderIdRef = useRef(resumeOrder?.id ?? null);
 
   /** Persist the active session so a refresh can resume it (see BootContext). */

@@ -21,16 +21,18 @@ function roundState(round: Round): keyof typeof ROUND_STATE {
 export function TableSessionPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch, refresh, money } = useAdmin();
+  const { state, dispatch, refreshFloor, money } = useAdmin();
   const [picker, setPicker] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   // Force a fresh sync on open so we never render this table's previous session
   // snapshot (e.g. after it was reused, paid, or changed from another device).
+  // Only tables/sales can differ here, so the light refresh (skips menu/tenant)
+  // is enough and avoids re-fetching the full menu on every session-page open.
   useEffect(() => {
-    refresh().catch(() => {});
-  }, [refresh, id]);
+    refreshFloor().catch(() => {});
+  }, [refreshFloor, id]);
 
   const table = state.tables.find((t) => t.id === id);
 
@@ -69,6 +71,20 @@ export function TableSessionPage() {
               Seated for {elapsed(table.session.openedAt)}
             </span>
           </h2>
+          {(table.session.customerName || table.session.customerPhone) && (
+            <div className="mt-xs flex flex-wrap items-center gap-md font-body-md text-body-md text-on-surface-variant">
+              {table.session.customerName && (
+                <span className="flex items-center gap-xs">
+                  <Icon name="person" size={16} /> {table.session.customerName}
+                </span>
+              )}
+              {table.session.customerPhone && (
+                <span className="flex items-center gap-xs">
+                  <Icon name="call" size={16} /> {table.session.customerPhone}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex gap-sm">
           <button
@@ -306,7 +322,9 @@ function newLineKey() {
   return `staged_${stagedLineSeq}`;
 }
 
-function ItemPicker({
+/** Exported so QuickSalePage (no-table counter sale) can reuse the same
+ *  menu-item picker instead of duplicating it. */
+export function ItemPicker({
   onClose,
   onConfirm,
 }: {

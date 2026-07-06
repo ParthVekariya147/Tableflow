@@ -59,6 +59,28 @@ export function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await api.orders.exportSalesReport(rangeWindow(range));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  }, [range]);
 
   const load = useCallback((key: RangeKey) => {
     setLoading(true);
@@ -111,8 +133,22 @@ export function AnalyticsPage() {
               </button>
             ))}
           </div>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-xs rounded-full border border-outline-variant px-lg py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-60"
+          >
+            <Icon name={exporting ? "hourglass_empty" : "file_download"} size={18} />
+            {exporting ? "Exporting…" : "Export to Excel"}
+          </button>
         </div>
       </div>
+
+      {exportError && (
+        <div className="mb-lg rounded-card border border-error/30 bg-error-container px-lg py-md font-body-md text-body-md text-on-error-container">
+          Couldn't export the report: {exportError}
+        </div>
+      )}
 
       {error && (
         <div className="mb-lg rounded-card border border-error/30 bg-error-container px-lg py-md font-body-md text-body-md text-on-error-container">

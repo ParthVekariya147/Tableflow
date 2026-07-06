@@ -55,4 +55,14 @@ responding."
 - **usb** / **bluetooth** — both resolve to an OS-level print queue: install
   the printer (USB) or pair it (Bluetooth) at the operating-system level first
   so it's addressable by a system printer/port name, then enter that name as
-  `usbPath` / `bluetoothPort`.
+  `usbPath` / `bluetoothPort`. Sending to that queue is handled by
+  `printer/osPrintDriver.ts` — a small hand-rolled driver with **no native
+  (node-gyp) dependency**, so `pnpm install` never needs a C++ toolchain on
+  the staff PC:
+  - **Windows**: the printer must also be **shared** (Printer Properties →
+    Sharing → "Share this printer"), not just installed — the driver writes
+    raw bytes straight to `\\localhost\<share name>`, so `usbPath`/
+    `bluetoothPort` must be the **share name**, not the display name, if they
+    differ.
+  - **macOS/Linux**: pipes to CUPS's `lp -d <name> -o raw`, present by default
+    on macOS and on Linux distros with `cups-client` installed.

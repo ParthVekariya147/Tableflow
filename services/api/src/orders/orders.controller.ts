@@ -56,6 +56,7 @@ import {
   updateItemSchema,
   capturePaymentSchema,
   reclaimSessionSchema,
+  redeemLoyaltyPointsSchema,
 } from "./orders.dto.js";
 
 @Controller("orders")
@@ -194,6 +195,34 @@ export class OrdersController {
     return this.orders.getAnalytics(tenant.id, { from, to });
   }
 
+  /** Staff-only: download the sales report as an .xlsx workbook (Summary,
+   *  Daily Sales, Orders, Order Items, Item Summary) for a `from`/`to` ISO
+   *  window — same access + range semantics as `sales`. Gated on either
+   *  permission that can reach this data in the UI (Order History **or**
+   *  the Sales Analytics page — same pairing as `analytics` above) so a
+   *  Manager who can see the report can also export it. Declared before :id. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireAnyPermission("orders.history", "analytics.view")
+  @Get("export")
+  async export(
+    @CurrentTenant() tenant: Tenant,
+    @Query("from") from: string | undefined,
+    @Query("to") to: string | undefined,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } = await this.orders.exportSalesReport(
+      tenant.id,
+      { name: tenant.name, currency: tenant.currency },
+      { from, to },
+    );
+    res.set({
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    });
+    res.send(buffer);
+  }
+
   /** Public — the guest app polls its own order (device-id bound); staff also
    *  use this for a single order's detail. */
   @Get(":id")
@@ -260,22 +289,28 @@ export class OrdersController {
       tenant.id,
       createOrderSchema.parse(body),
       deviceId,
+      tenant.loyalty,
     );
   }
 
-  /** Public — guest-only round submission ("bring it" / "bring these"). */
+  /** Public — the guest app's round submission ("bring it" / "bring these"), and
+   *  staff's batched "Add Item" (one call for N lines instead of N `addItem`
+   *  POSTs) via restaurant-admin. */
   @Post(":id/rounds")
-  addRound(
+  async addRound(
     @CurrentTenant() tenant: Tenant,
     @Param("id") id: string,
     @Body() body: unknown,
     @Headers("x-device-id") deviceId?: string,
+    @Headers("authorization") authHeader?: string,
   ): Promise<Order> {
+    const staff = await this.isStaff(authHeader, tenant.id);
     return this.orders.addRound(
       tenant.id,
       id,
       addRoundSchema.parse(body),
       deviceId,
+      staff,
     );
   }
 
@@ -350,6 +385,25 @@ export class OrdersController {
       capturePaymentSchema.parse(body),
       deviceId,
       staff,
+      tenant.loyalty,
+    );
+  }
+
+  /** Staff-only: apply (or clear, with points:0) a loyalty points redemption
+   *  before capturing payment — see loyalty.ts / LoyaltyPage / BillingPage. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("loyalty.manage")
+  @Post(":id/loyalty/redeem")
+  redeemPoints(
+    @CurrentTenant() tenant: Tenant,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<Order> {
+    return this.orders.redeemPoints(
+      tenant.id,
+      id,
+      redeemLoyaltyPointsSchema.parse(body),
+      tenant.loyalty,
     );
   }
 }

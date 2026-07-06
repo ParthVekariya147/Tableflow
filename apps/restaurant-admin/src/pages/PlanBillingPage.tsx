@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { type SubscriptionWithPlan } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { CenteredSpinner } from "../components/Skeleton";
 import { api } from "../lib/api";
 import {
   CURRENCIES,
@@ -63,9 +64,7 @@ export function PlanBillingPage() {
   }, []);
 
   if (!loaded) {
-    return (
-      <p className="font-body-md text-body-md text-on-surface-variant">Loading…</p>
-    );
+    return <CenteredSpinner label="Loading plan & billing…" />;
   }
 
   if (error) {

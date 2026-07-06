@@ -23,4 +23,10 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": "warn",
     },
   },
+  {
+    files: ["**/*.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 );

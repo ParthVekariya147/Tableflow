@@ -27,8 +27,10 @@ export function TablesPage() {
   const [qrTable, setQrTable] = useState<Table | null>(null);
   const [editTable, setEditTable] = useState<Table | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [openSessionTable, setOpenSessionTable] = useState<Table | null>(null);
 
   const tables = state.tables.filter((t) => {
+    if (t.isCounter) return false; // virtual Quick Sale table — not a real floor table
     if (filter === "free") return t.status === "free";
     if (filter === "occupied") return t.status !== "free";
     return true;
@@ -76,6 +78,7 @@ export function TablesPage() {
             requests={requests.filter((r) => r.tableId === t.id)}
             onQr={() => setQrTable(t)}
             onEdit={() => setEditTable(t)}
+            onOpenSession={() => setOpenSessionTable(t)}
           />
         ))}
       </div>
@@ -83,6 +86,9 @@ export function TablesPage() {
       {qrTable && <QrModal table={qrTable} onClose={() => setQrTable(null)} />}
       {editTable && <EditModal table={editTable} onClose={() => setEditTable(null)} />}
       {addOpen && <AddModal onClose={() => setAddOpen(false)} />}
+      {openSessionTable && (
+        <OpenSessionModal table={openSessionTable} onClose={() => setOpenSessionTable(null)} />
+      )}
     </>
   );
 }
@@ -161,29 +167,105 @@ function AddModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Opens a walk-in session on a free table. Staff fill this in (not the guest),
+ *  so name/phone are optional — a party seated without contact details can
+ *  still be ordered for; capturing them just enables a named bill/receipt. */
+function OpenSessionModal({ table, onClose }: { table: Table; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { dispatch } = useAdmin();
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [opening, setOpening] = useState(false);
+
+  async function start() {
+    if (opening) return;
+    setOpening(true);
+    // Await the create + refetch so the session page opens on fresh data
+    // (not the previous/empty snapshot for this table).
+    await dispatch({
+      type: "OPEN_SESSION",
+      tableId: table.id,
+      customerName: name.trim() || undefined,
+      customerPhone: phone.trim() || undefined,
+    });
+    navigate(`/tables/${table.id}`);
+  }
+
+  return (
+    <ModalShell onClose={() => !opening && onClose()}>
+      <h3 className="mb-xs font-headline-md text-headline-md text-on-background">
+        Open {table.label}
+      </h3>
+      <p className="mb-md font-body-md text-body-md text-on-surface-variant">
+        Guest details are optional — add them for a named bill, or skip and seat the table.
+      </p>
+      <div className="flex flex-col gap-md">
+        <label className="flex flex-col gap-base">
+          <span className="font-label-md text-label-md uppercase text-on-background">
+            Guest Name <span className="normal-case text-on-surface-variant">(optional)</span>
+          </span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Rohan Mehta"
+            className="rounded-md border border-outline-variant bg-surface px-sm py-sm font-body-md text-on-background outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          />
+        </label>
+        <label className="flex flex-col gap-base">
+          <span className="font-label-md text-label-md uppercase text-on-background">
+            Contact Number <span className="normal-case text-on-surface-variant">(optional)</span>
+          </span>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="e.g. 98765 43210"
+            className="rounded-md border border-outline-variant bg-surface px-sm py-sm font-data-mono text-on-background outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          />
+        </label>
+      </div>
+      <div className="mt-lg flex gap-sm">
+        <button
+          onClick={onClose}
+          disabled={opening}
+          className="flex-1 rounded-full border border-outline px-md py-sm font-label-md text-label-md text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-70"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={start}
+          disabled={opening}
+          className="flex flex-1 items-center justify-center gap-xs rounded-full bg-primary px-md py-sm font-label-md text-label-md text-on-primary transition-colors hover:bg-primary-container disabled:opacity-70"
+        >
+          {opening && <Icon name="progress_activity" size={16} className="ag-spin" />}
+          {opening ? "Opening…" : "Open Session"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function TableCard({
   table,
   requests,
   onQr,
   onEdit,
+  onOpenSession,
 }: {
   table: Table;
   requests: ServiceRequest[];
   onQr: () => void;
   onEdit: () => void;
+  onOpenSession: () => void;
 }) {
   const navigate = useNavigate();
-  const { dispatch } = useAdmin();
   const { acknowledge } = useServiceRequests();
   const meta = STATUS_META[table.status];
   const hasOpenRequest = requests.length > 0;
 
-  async function primaryAction() {
+  function primaryAction() {
     if (table.status === "free") {
-      // Await the create + refetch so the session page opens on fresh data
-      // (not the previous/empty snapshot for this table).
-      await dispatch({ type: "OPEN_SESSION", tableId: table.id });
-      navigate(`/tables/${table.id}`);
+      onOpenSession();
     } else if (table.status === "bill") {
       navigate(`/tables/${table.id}/billing`);
     } else {

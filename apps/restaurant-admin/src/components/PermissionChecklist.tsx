@@ -18,7 +18,7 @@ export function PermissionChecklist({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-xs sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-xs">
       {PERMISSIONS.map((perm) => {
         const checked = value.includes(perm);
         return (

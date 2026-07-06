@@ -10,7 +10,7 @@ export function ImpersonationBanner() {
   if (!isImpersonating()) return null;
 
   return (
-    <div className="fixed left-[280px] right-0 top-0 z-[60] flex h-9 items-center justify-center gap-xs bg-error text-on-error">
+    <div className="fixed left-0 right-0 top-0 z-[60] flex h-9 items-center justify-center gap-xs bg-error px-md text-center text-on-error lg:left-[280px]">
       <Icon name="visibility" size={16} />
       <span className="font-label-md text-label-md uppercase tracking-wider">
         Viewing as platform support — {getActiveTenantSlug()}

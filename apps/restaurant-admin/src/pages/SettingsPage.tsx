@@ -47,6 +47,13 @@ const CARDS: Card[] = [
     ready: true,
   },
   {
+    to: "/settings/loyalty",
+    icon: "loyalty",
+    title: "Loyalty",
+    desc: "Reward returning guests with points on every visit.",
+    ready: true,
+  },
+  {
     to: "/settings/printer",
     icon: "print",
     title: "Printer",

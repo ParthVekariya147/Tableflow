@@ -17,6 +17,7 @@ export function LoginPage() {
   const [choice, setChoice] = useState<{ ticket: string; tenants: TenantOption[] } | null>(
     null,
   );
+  const [pickingTenantId, setPickingTenantId] = useState<string | null>(null);
 
   function goHome(user: AuthUser) {
     // Land on the user's highest-priority allowed page (KDS-only → /kds).
@@ -45,6 +46,7 @@ export function LoginPage() {
     if (!choice) return;
     setError(null);
     setBusy(true);
+    setPickingTenantId(tenantId);
     try {
       const user = await selectTenant(choice.ticket, tenantId);
       goHome(user);
@@ -53,6 +55,7 @@ export function LoginPage() {
       setChoice(null);
     } finally {
       setBusy(false);
+      setPickingTenantId(null);
     }
   }
 
@@ -97,7 +100,11 @@ export function LoginPage() {
                         {t.name}
                       </span>
                     </span>
-                    <Icon name="arrow_forward" size={18} className="text-on-surface-variant" />
+                    {pickingTenantId === t.id ? (
+                      <Icon name="progress_activity" size={18} className="ag-spin text-on-surface-variant" />
+                    ) : (
+                      <Icon name="arrow_forward" size={18} className="text-on-surface-variant" />
+                    )}
                   </button>
                 </li>
               ))}
@@ -185,7 +192,11 @@ export function LoginPage() {
             className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? "Signing in…" : "Sign In"}
-            <Icon name="arrow_forward" size={18} />
+            {busy ? (
+              <Icon name="progress_activity" size={18} className="ag-spin" />
+            ) : (
+              <Icon name="arrow_forward" size={18} />
+            )}
           </button>
         </form>
         )}

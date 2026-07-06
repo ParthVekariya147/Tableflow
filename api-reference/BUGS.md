@@ -24,7 +24,56 @@
 
 ## Open
 
-### BUG-001 — Cross-tenant QR URL doesn't resolve 🔴 S2
+_(none)_
+
+<!--
+TEMPLATE for new bugs — copy this block:
+
+### BUG-00N — <one-line title> <status emoji> <severity>
+- **Reported:** <verbatim what the user saw>
+- **Repro:** <steps / URL>
+- **Expected:** <what should happen>
+- **Analysis:** <root-cause hypothesis, to verify>
+- **Suspected files:** <paths>
+- **Status:** <emoji + note>
+-->
+
+## Fixed
+
+### BUG-004 — Staff "Add Item" / Quick Sale save 403s: "This session belongs to another device" 🟢 S1
+- **Reported:** found during a Quick Sale performance rework (batching qty-change
+  calls) — clicking **Save & Charge** on a freshly-created counter order 403'd.
+  Reproduced independently on the plain, untouched dine-in flow: open any table
+  → **Add Item** → 403, every time, on the very first round.
+- **Repro:** Tables → Open Session on any free table → Add Item → pick anything →
+  Add. Or: Quick Sale → Add Item → Save & Charge.
+- **Expected:** staff can add items to any order they manage.
+- **Analysis (confirmed):** `OrdersService.addRound` (`orders.service.ts:171`) calls
+  `assertOrder(tenantId, orderId, deviceId)` with no `trusted` flag → defaults
+  `false` → `assertDevice` requires the caller's `X-Device-Id` to match the order's
+  stored `deviceId`. Staff (restaurant-admin) never sends `X-Device-Id`, so this
+  100% of the time throws `ForbiddenException`, regardless of whether the order was
+  guest-opened or staff walk-in-opened. The sibling `addItem` endpoint already
+  handles this correctly (`orders.service.ts:433`, `assertOrder(..., undefined,
+  true)`, commented "Staff route (JwtAuthGuard)"), and the controller already has
+  a reusable `isStaff(authHeader, tenantId)` helper (verifies a bearer JWT,
+  tenant-matched) used by `GET /orders/:id` and `POST /orders/:id/payment` — but
+  `POST /orders/:id/rounds` was never wired to it. Likely introduced by the
+  security-audit commit that added the device-binding guard (`f195e78`), which
+  correctly closed the guest-session-hijack gap but missed that `addRound` is also
+  the batched staff add-item path (`AdminStore`'s `ADD_ORDER_ITEMS`, one call for
+  N items instead of N `addItem` POSTs — and now Quick Sale's batched save).
+- **Suspected files:** `services/api/src/orders/orders.controller.ts` (`addRound`),
+  `services/api/src/orders/orders.service.ts` (`addRound`, `assertOrder`).
+- **Status:** 🟢 fixed 2026-07-06 — `addRound`'s controller now calls the existing
+  `isStaff` helper (same pattern as `GET /orders/:id`) and threads the result
+  through as `trusted` to `OrdersService.addRound` → `assertOrder`. A valid,
+  tenant-matched staff bearer token now bypasses the device-binding check (as
+  `addItem` already did); guests with no token still go through the strict
+  device-id match. Verified against both the dine-in "Add Item" flow and Quick
+  Sale's Save & Charge.
+
+### BUG-001 — Cross-tenant QR URL doesn't resolve 🟢 S2
 - **Reported:** `http://10.180.23.82:5173/amber-grain/t/green-bowl-2` does **not**
   work, but `http://10.180.23.82:5173/amber-grain/t/amber-grain-t2` **does**. Also
   noted: "one tenant table is booking only" — that table may behave differently.
@@ -50,9 +99,19 @@
 - **Suspected files:** `apps/customer/src/context/BootContext.jsx` (parses slug+token,
   renders "Invalid QR"), `apps/restaurant-admin/src/lib/tableQr.ts` (QR link builder),
   `services/api/src/tables/tables.service.ts` (`byQrToken`).
-- **Status:** 🟡 investigating — likely a wrong-slug-in-URL, need source of the link.
+- **Status:** 🟢 fixed 2026-07-02 — **root cause confirmed: QR generation**, not
+  resolution. `tableQrUrl` (`apps/restaurant-admin/src/lib/tableQr.ts`) hardcoded
+  `defaultTenant.slug` (`amber-grain`) into *every* tenant's QR link, so a Green
+  Bowl table's printed QR encoded `/amber-grain/t/green-bowl-2` — which the
+  tenant-scoped `byQrToken` correctly 404s (tenant isolation is by design and was
+  left untouched). Fix: `tableQrUrl` now reads the **logged-in tenant's slug** at
+  call time (`getStoredTenantSlug()`, same source as the api-client), falling back
+  to `defaultTenant.slug` only pre-login. ⚠️ Any QR printed for a non-amber-grain
+  tenant before this fix encodes the wrong slug and must be re-downloaded/reprinted
+  from `/tables`. ("Booking only" remains an open question — no such table state
+  exists in the model; spec separately if it's a real need.)
 
-### BUG-002 — App/platform name shows "amber-grain" instead of "Amber" 🔴 S3
+### BUG-002 — App/platform name shows "amber-grain" instead of "Amber" 🟢 S3
 - **Reported:** "the whole app name is **amber** not **amber-grain** — that needs to
   be changed."
 - **Expected:** per the product model (see CLAUDE.md), the **SaaS platform is "Amber"**;
@@ -70,9 +129,17 @@
 - **Suspected files:** `apps/restaurant-admin/src/tenant/defaultTenant.ts`,
   `apps/restaurant-admin/src/components/Shell.tsx`, `apps/customer` title/theme,
   `index.html` `<title>` in each app.
-- **Status:** 🔴 open — need the exact location before fixing.
+- **Status:** 🟢 fixed 2026-07-02 — audit found no raw slug rendered in UI chrome
+  (Shell/Splash/etc. all use `tenant.name`; admin `defaultTenant.name` was already
+  "Amber"). The naming bugs were the **browser tab titles**: the customer app's
+  `<title>` was hardcoded "Amber & Grain" for *every* tenant, and neither app
+  updated it dynamically. Fixed: customer `index.html` ships the platform fallback
+  "Amber" and `App.jsx` sets `document.title = tenant.name` once boot resolves the
+  scanned tenant; restaurant-admin's `TenantThemeGate` sets `"<Tenant> · Amber"`
+  post-login and reverts to "Amber" pre-login/logout. Display names only — never
+  the slug.
 
-### BUG-003 — Saves in Settings (roles/team/profile) time out after 15s, esp. non-default tenants 🟡 S1
+### BUG-003 — Saves in Settings (roles/team/profile) time out after 15s, esp. non-default tenants 🟢 S1
 - **Reported:** On other tenants (e.g. **Green Bowl**), managing profiles / roles /
   team and saving data "takes lots of time and some fails too — `Request timed out
   after 15000ms`." Creating a role hangs on **"Saving…"** (see screenshot); the Roles
@@ -128,20 +195,20 @@
   (timeout), `apps/restaurant-admin/src/store/AdminStore.tsx` (refetch bursts),
   `apps/restaurant-admin/src/pages/*Roles*`/`*Team*` (fetch-on-open),
   `services/api/src/auth/auth.service.ts` (`resolveAuthUser` per-request queries).
-- **Status:** 🟡 investigating — strong evidence for pool/latency; confirm via diagnostic
-  #1 before changing config. (S1: blocks tenant admin from managing roles/team.)
-
-<!--
-TEMPLATE for new bugs — copy this block:
-
-### BUG-00N — <one-line title> <status emoji> <severity>
-- **Reported:** <verbatim what the user saw>
-- **Repro:** <steps / URL>
-- **Expected:** <what should happen>
-- **Analysis:** <root-cause hypothesis, to verify>
-- **Suspected files:** <paths>
-- **Status:** <emoji + note>
--->
-
-## Fixed
-_(none yet)_
+- **Status:** 🟢 fixed 2026-07-02 — two-part fix (candidate #2 + UI honesty):
+  1. **Pool headroom** (the live `services/api/.env`, mirrored into `.env.example`):
+     `connection_limit=5&pool_timeout=20` → **`connection_limit=10&pool_timeout=10`**.
+     10 connections absorb the tenant-switch/Settings-open burst while staying
+     under the pooler's 15-client session cap; `pool_timeout=10` makes a genuinely
+     saturated pool fail fast *with a clear Prisma pool error* instead of hanging
+     past the api-client's 15s abort (which produced the opaque
+     "Request timed out after 15000ms"). Restart the API after changing `.env`.
+  2. **UI: failed load ≠ empty list.** `RolesPage`/`TeamPage` rendered the
+     "No roles yet." / "No team members yet." empty state whenever the GET failed
+     (misreporting seeded tenants as empty) with no way to retry short of a page
+     reload. Both now track load failure separately and render a
+     "Couldn't load…" state with a **Retry** button; the error banner is also
+     cleared on each reload attempt.
+  Not done (deliberately): transaction-mode pooler (6543) and moving regions —
+  bigger changes to take only if the symptom recurs; the request-burst trim is
+  covered by the pool headroom for now.

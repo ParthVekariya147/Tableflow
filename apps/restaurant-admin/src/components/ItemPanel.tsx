@@ -53,7 +53,7 @@ export function ItemPanel({
   const [description, setDescription] = useState(item?.description ?? "");
   const [price, setPrice] = useState(item ? (item.priceCents / 100).toFixed(2) : "");
   const [categoryId, setCategoryId] = useState(item?.categoryId ?? defaultCategoryId);
-  const [icon, setIcon] = useState(item?.icon ?? "restaurant");
+  const icon = item?.icon ?? "restaurant";
   const [swatch, setSwatch] = useState(item?.swatch ?? SWATCHES[0]!);
   const [imageUrl, setImageUrl] = useState<string | undefined>(item?.imageUrl);
   const fileInputRef = useRef<HTMLInputElement>(null);

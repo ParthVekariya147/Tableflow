@@ -55,6 +55,8 @@ export function OrderHistoryPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -85,6 +87,26 @@ export function OrderHistoryPage() {
     };
   }, [sales]);
 
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await api.orders.exportSalesReport(rangeWindow(range));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  }, [range]);
+
   return (
     <>
       <div className="mb-lg flex flex-col justify-between gap-md md:flex-row md:items-end">
@@ -94,22 +116,38 @@ export function OrderHistoryPage() {
             Completed & paid orders — what sold, and which table ordered what.
           </p>
         </div>
-        <div className="flex items-center gap-sm self-start rounded-full border border-outline-variant bg-surface-container-high p-1">
-          {RANGES.map((r) => (
-            <button
-              key={r.key}
-              onClick={() => setRange(r.key)}
-              className={`rounded-full px-md py-sm font-label-md text-label-md transition-all ${
-                range === r.key
-                  ? "bg-surface-container-lowest text-primary shadow-sm"
-                  : "text-on-surface-variant hover:text-primary"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-sm self-start">
+          <div className="flex items-center gap-sm rounded-full border border-outline-variant bg-surface-container-high p-1">
+            {RANGES.map((r) => (
+              <button
+                key={r.key}
+                onClick={() => setRange(r.key)}
+                className={`rounded-full px-md py-sm font-label-md text-label-md transition-all ${
+                  range === r.key
+                    ? "bg-surface-container-lowest text-primary shadow-sm"
+                    : "text-on-surface-variant hover:text-primary"
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleExport}
+            disabled={exporting || loading || sales.length === 0}
+            className="flex items-center gap-xs rounded-full bg-primary px-md py-sm font-label-md text-label-md text-on-primary shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Icon name={exporting ? "progress_activity" : "file_download"} size={18} className={exporting ? "ag-spin" : ""} />
+            {exporting ? "Exporting…" : "Export to Excel"}
+          </button>
         </div>
       </div>
+      {exportError && (
+        <div className="mb-lg flex items-center gap-sm rounded-card border border-error/30 bg-error/5 px-md py-sm text-error">
+          <Icon name="error" size={18} />
+          <p className="font-body-md text-body-md">Export failed: {exportError}</p>
+        </div>
+      )}
 
       {loading ? (
         <>
@@ -265,6 +303,17 @@ function OrderItems({ order }: { order: Order }) {
           {order.customerPhone && (
             <span className="flex items-center gap-xs">
               <Icon name="call" size={16} /> {order.customerPhone}
+            </span>
+          )}
+          {!!order.pointsEarned && (
+            <span className="flex items-center gap-xs text-primary">
+              <Icon name="loyalty" size={16} /> +{order.pointsEarned} pts earned
+            </span>
+          )}
+          {!!order.pointsRedeemed && (
+            <span className="flex items-center gap-xs">
+              <Icon name="redeem" size={16} /> {order.pointsRedeemed} pts redeemed
+              {order.redemptionValueMinor ? ` (${money(order.redemptionValueMinor)} off)` : ""}
             </span>
           )}
         </div>

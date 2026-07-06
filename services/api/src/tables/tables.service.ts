@@ -109,6 +109,31 @@ export class TablesService {
     await this.prisma.table.delete({ where: { id } });
   }
 
+  /**
+   * Find-or-create the tenant's single virtual "Counter Sale" table — the
+   * backing `tableId` for the no-table quick-sale flow (add items, charge,
+   * print), reusing the existing Order/Payment/print pipeline without staff
+   * ever picking a real table. `isCounter` lets the floor grid filter it out
+   * client-side while still riding every other table-scoped code path as-is.
+   */
+  async getOrCreateCounter(tenantId: string): Promise<Table> {
+    const existing = await this.prisma.table.findFirst({
+      where: { tenantId, isCounter: true },
+      include: { room: true },
+    });
+    if (existing) return toDomainTable(existing);
+    const row = await this.prisma.table.create({
+      data: {
+        tenantId,
+        label: "Counter Sale",
+        qrToken: randomUUID(),
+        isCounter: true,
+      },
+      include: { room: true },
+    });
+    return toDomainTable(row);
+  }
+
   /** Customer entry: resolve a table from its QR token. */
   async byQrToken(tenantId: string, qrToken: string): Promise<Table> {
     const row = await this.prisma.table.findFirst({

@@ -28,6 +28,9 @@ const BillingPage = lazy(() =>
 const BillingQueuePage = lazy(() =>
   import("./pages/BillingQueuePage").then((m) => ({ default: m.BillingQueuePage })),
 );
+const QuickSalePage = lazy(() =>
+  import("./pages/QuickSalePage").then((m) => ({ default: m.QuickSalePage })),
+);
 const PaymentCompletePage = lazy(() =>
   import("./pages/PaymentCompletePage").then((m) => ({ default: m.PaymentCompletePage })),
 );
@@ -51,6 +54,12 @@ const BrandingPage = lazy(() =>
 );
 const PaymentsPage = lazy(() =>
   import("./pages/PaymentsPage").then((m) => ({ default: m.PaymentsPage })),
+);
+const LoyaltySettingsPage = lazy(() =>
+  import("./pages/LoyaltySettingsPage").then((m) => ({ default: m.LoyaltySettingsPage })),
+);
+const LoyaltyPage = lazy(() =>
+  import("./pages/LoyaltyPage").then((m) => ({ default: m.LoyaltyPage })),
 );
 const RestaurantProfilePage = lazy(() =>
   import("./pages/RestaurantProfilePage").then((m) => ({
@@ -159,6 +168,14 @@ export default function App() {
             }
           />
           <Route
+            path="/quick-sale"
+            element={
+              <RequirePermission permission="tables.manage">
+                <QuickSalePage />
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/billing"
             element={
               <RequirePermission permission="tables.manage">
@@ -227,6 +244,22 @@ export default function App() {
             element={
               <RequirePermission permission="settings.manage">
                 <PaymentsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/loyalty"
+            element={
+              <RequirePermission permission="settings.manage">
+                <LoyaltySettingsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/loyalty"
+            element={
+              <RequirePermission permission="loyalty.manage">
+                <LoyaltyPage />
               </RequirePermission>
             }
           />

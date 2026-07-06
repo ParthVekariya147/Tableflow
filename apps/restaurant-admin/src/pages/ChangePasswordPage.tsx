@@ -134,7 +134,11 @@ export function ChangePasswordPage() {
             className="mt-xs flex w-full items-center justify-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy ? "Saving…" : "Save password"}
-            <Icon name="arrow_forward" size={18} />
+            {busy ? (
+              <Icon name="progress_activity" size={18} className="ag-spin" />
+            ) : (
+              <Icon name="arrow_forward" size={18} />
+            )}
           </button>
         </form>
 

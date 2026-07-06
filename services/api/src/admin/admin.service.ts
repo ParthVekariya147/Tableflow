@@ -5,6 +5,7 @@ import { PrismaService } from "../prisma/prisma.service.js";
 import { toDomainTenant } from "../tenant/tenant.mapper.js";
 import { TenantService } from "../tenant/tenant.service.js";
 import { AuthService } from "../auth/auth.service.js";
+import { backfillLoyaltyAccountsFromOrders } from "../loyalty/loyalty.service.js";
 import type { CreateTenantDto, UpdateTenantDto } from "./admin.dto.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 
@@ -44,6 +45,32 @@ export interface GetAuditLogOptions {
   to?: string;
   limit?: number;
   offset?: number;
+}
+
+/** Cross-tenant loyalty account row for the super-admin customer lookup. */
+export interface LoyaltyAccountSummary {
+  id: string;
+  phone: string;
+  name: string | null;
+  pointsBalance: number;
+  lifetimePoints: number;
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  updatedAt: string;
+}
+
+export interface LoyaltyAccountDetail extends LoyaltyAccountSummary {
+  createdAt: string;
+  transactions: {
+    id: string;
+    type: string;
+    points: number;
+    balanceAfter: number;
+    note: string | null;
+    orderId: string | null;
+    createdAt: string;
+  }[];
 }
 
 @Injectable()
@@ -361,6 +388,83 @@ export class AdminService {
         createdAt: r.createdAt.toISOString(),
       })),
       total,
+    };
+  }
+
+  /**
+   * Cross-tenant customer lookup for platform support — search every tenant's
+   * loyalty accounts by phone/name, optionally narrowed to one tenant. Unlike
+   * the per-tenant `LoyaltyService`, this has no tenantId scope of its own
+   * (the SuperAdminGuard on AdminController is the authorization boundary).
+   */
+  async listLoyaltyAccounts(opts: {
+    search?: string;
+    tenantId?: string;
+  }): Promise<LoyaltyAccountSummary[]> {
+    await backfillLoyaltyAccountsFromOrders(this.prisma, opts.tenantId);
+    const q = opts.search?.trim();
+    const rows = await this.prisma.loyaltyAccount.findMany({
+      where: {
+        ...(opts.tenantId ? { tenantId: opts.tenantId } : {}),
+        ...(q
+          ? {
+              OR: [
+                { phone: { contains: q } },
+                { name: { contains: q, mode: "insensitive" as const } },
+              ],
+            }
+          : {}),
+      },
+      include: { tenant: { select: { name: true, slug: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      phone: r.phone,
+      name: r.name,
+      pointsBalance: r.pointsBalance,
+      lifetimePoints: r.lifetimePoints,
+      tenantId: r.tenantId,
+      tenantName: r.tenant.name,
+      tenantSlug: r.tenant.slug,
+      updatedAt: r.updatedAt.toISOString(),
+    }));
+  }
+
+  /** One account's full transaction history, read-only (adjustments stay a
+   *  restaurant-admin action so they're attributable to that tenant's staff). */
+  async getLoyaltyAccount(id: string): Promise<LoyaltyAccountDetail> {
+    const row = await this.prisma.loyaltyAccount.findUnique({
+      where: { id },
+      include: { tenant: { select: { name: true, slug: true } } },
+    });
+    if (!row) throw new NotFoundException(`Loyalty account not found: ${id}`);
+    const txns = await this.prisma.loyaltyTransaction.findMany({
+      where: { accountId: id },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
+    return {
+      id: row.id,
+      phone: row.phone,
+      name: row.name,
+      pointsBalance: row.pointsBalance,
+      lifetimePoints: row.lifetimePoints,
+      tenantId: row.tenantId,
+      tenantName: row.tenant.name,
+      tenantSlug: row.tenant.slug,
+      updatedAt: row.updatedAt.toISOString(),
+      createdAt: row.createdAt.toISOString(),
+      transactions: txns.map((t) => ({
+        id: t.id,
+        type: t.type,
+        points: t.points,
+        balanceAfter: t.balanceAfter,
+        note: t.note,
+        orderId: t.orderId,
+        createdAt: t.createdAt.toISOString(),
+      })),
     };
   }
 }

@@ -1,27 +1,38 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
-import { QRCodeCanvas } from "qrcode.react";
-import { buildUpiPaymentUrl } from "@amber/domain";
+import { useTenant } from "@amber/ui";
+import { maxRedeemablePoints } from "@amber/domain";
+import type { LoyaltyAccount } from "@amber/domain";
+import { ApiError } from "@amber/api-client";
 import { Icon } from "../components/Icon";
+import { api } from "../lib/api";
 import { useAdmin, billTotals, itemUnitPrice } from "../store/AdminStore";
 import type { PaymentMethod } from "../data/types";
 
 // ── Payment method config ─────────────────────────────────────────────────────
-
+// All three are staff-recorded, not staff-collected: the guest has already
+// paid (cash handed over, card tapped on the counter's own POS, UPI scanned
+// on the counter's own QR/device) before this screen opens. This panel's job
+// is only to pick which method it was and confirm — never to re-collect it
+// (no QR/deep-link here; that belongs on a guest-facing surface, not a
+// reception-only staff screen).
 const METHOD_META: Record<PaymentMethod, { icon: string; label: string; desc: string }> = {
   cash: { icon: "payments", label: "Cash", desc: "Collect cash at the table" },
   card: { icon: "credit_card", label: "Card", desc: "Guest pays at POS / counter" },
-  upi: { icon: "qr_code_2", label: "UPI", desc: "Scan QR · instant transfer" },
+  upi: { icon: "qr_code_2", label: "UPI", desc: "Confirm UPI received" },
 };
 
 export function BillingPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch, refresh, money, currencySymbol } = useAdmin();
+  const { state, dispatch, refreshFloor, money, currencySymbol } = useAdmin();
+  const tenant = useTenant();
 
+  // Only tables/sales can differ on open (this table reused/paid/changed from
+  // another device) — the light refresh skips re-fetching menu/tenant.
   useEffect(() => {
-    refresh().catch(() => {});
-  }, [refresh, id]);
+    refreshFloor().catch(() => {});
+  }, [refreshFloor, id]);
 
   const table = state.tables.find((t) => t.id === id);
   const totals = useMemo(
@@ -29,21 +40,94 @@ export function BillingPage() {
     [table, state.taxRate],
   );
 
-  // Default to UPI if the tenant has it configured, otherwise cash
-  const defaultMethod: PaymentMethod = state.upiId ? "upi" : "cash";
-  const [method, setMethod] = useState<PaymentMethod>(defaultMethod);
+  const [method, setMethod] = useState<PaymentMethod>("upi");
   const [paying, setPaying] = useState(false);
+  // Once complete() has captured payment, the store's own refetch clears
+  // table.session before complete()'s explicit navigate() to the receipt
+  // page can run — without this flag, the render guard below wins that race
+  // and bounces staff back to the floor instead of the print screen.
+  const paidRef = useRef(false);
   const [tendered, setTendered] = useState<string>(() =>
     totals ? (totals.total / 100).toFixed(2) : "0.00",
   );
-  const [upiCopied, setUpiCopied] = useState(false);
 
-  if (!table || !table.session || !totals) {
+  // ── Loyalty (staff-only; no guest-facing surface) ──────────────────────
+  const orderId = table?.session?.orderId;
+  const [loyaltyAccountId, setLoyaltyAccountId] = useState<string | undefined>();
+  const [pointsRedeemed, setPointsRedeemed] = useState(0);
+  const [redemptionDiscount, setRedemptionDiscount] = useState(0);
+  const [loyaltyAccount, setLoyaltyAccount] = useState<LoyaltyAccount | null>(null);
+  const [redeemInput, setRedeemInput] = useState("");
+  const [redeemBusy, setRedeemBusy] = useState(false);
+  const [redeemError, setRedeemError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!orderId || !tenant.loyalty.enabled) return;
+    let active = true;
+    api.orders
+      .get(orderId)
+      .then((order) => {
+        if (!active) return;
+        setLoyaltyAccountId(order.loyaltyAccountId);
+        setPointsRedeemed(order.pointsRedeemed ?? 0);
+        setRedemptionDiscount(order.redemptionValueMinor ?? 0);
+        if (order.loyaltyAccountId) {
+          api.loyalty.accounts
+            .get(order.loyaltyAccountId)
+            .then(({ account }) => active && setLoyaltyAccount(account))
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [orderId, tenant.loyalty.enabled]);
+
+  if (!table) {
+    return <Navigate to="/tables" replace />;
+  }
+  if (paidRef.current) {
+    // complete() has captured payment and is about to navigate to the
+    // receipt/print page — render nothing rather than either the redirect
+    // below (table.session is already gone) or the billing UI (which
+    // assumes it still exists).
+    return null;
+  }
+  if (!table.session || !totals) {
     return <Navigate to="/tables" replace />;
   }
 
   const activeTable = table;
-  const bill = totals;
+  // Post-redemption totals — what the server will actually charge (matches
+  // OrdersService.capturePayment's discount-then-tax computation) so staff
+  // don't ask the guest for the pre-discount amount.
+  const discountedSubtotal = Math.max(0, totals.subtotal - redemptionDiscount);
+  const bill = {
+    subtotal: discountedSubtotal,
+    tax: Math.round(discountedSubtotal * state.taxRate),
+    total: discountedSubtotal + Math.round(discountedSubtotal * state.taxRate),
+  };
+
+  const maxPoints = loyaltyAccount
+    ? maxRedeemablePoints(totals.subtotal, loyaltyAccount.pointsBalance, tenant.loyalty)
+    : 0;
+
+  async function applyRedeem(points: number) {
+    if (!orderId) return;
+    setRedeemBusy(true);
+    setRedeemError(null);
+    try {
+      const order = await api.orders.redeemPoints(orderId, points);
+      setPointsRedeemed(order.pointsRedeemed ?? 0);
+      setRedemptionDiscount(order.redemptionValueMinor ?? 0);
+      setRedeemInput("");
+    } catch (e) {
+      setRedeemError(e instanceof ApiError ? e.message : "Couldn't apply points");
+    } finally {
+      setRedeemBusy(false);
+    }
+  }
 
   const lineItems = table.session.rounds.map((round, idx) => ({
     idx: idx + 1,
@@ -51,19 +135,9 @@ export function BillingPage() {
     items: round.items.filter((i) => i.status !== "cancelled"),
   }));
 
-  const gratuity = Math.round(totals.subtotal * 0.2);
+  const gratuity = Math.round(bill.subtotal * 0.2);
   const tenderedCents = Math.round((parseFloat(tendered) || 0) * 100);
-  const change = method === "cash" ? Math.max(0, tenderedCents - totals.total) : 0;
-
-  // UPI deep link
-  const upiUrl = state.upiId
-    ? buildUpiPaymentUrl({
-        upiId: state.upiId,
-        payeeName: state.tenantName ?? "Restaurant",
-        amountCents: totals.total,
-        note: `${table.label} bill`,
-      })
-    : null;
+  const change = method === "cash" ? Math.max(0, tenderedCents - bill.total) : 0;
 
   function pad(key: string) {
     setTendered((cur) => {
@@ -77,6 +151,7 @@ export function BillingPage() {
   async function complete() {
     if (paying) return;
     setPaying(true);
+    paidRef.current = true;
     await dispatch({
       type: "COMPLETE_PAYMENT",
       tableId: activeTable.id,
@@ -89,13 +164,6 @@ export function BillingPage() {
       `/tables/${activeTable.id}/complete${orderId ? `?order=${encodeURIComponent(orderId)}` : ""}`,
       { state: { method, totalCents: bill.total, tableLabel: activeTable.label } },
     );
-  }
-
-  async function copyUpiId() {
-    if (!state.upiId) return;
-    await navigator.clipboard.writeText(state.upiId).catch(() => {});
-    setUpiCopied(true);
-    setTimeout(() => setUpiCopied(false), 2000);
   }
 
   return (
@@ -160,15 +228,82 @@ export function BillingPage() {
               </p>
             )}
             <Line label="Subtotal" value={money(totals.subtotal)} />
-            <Line label={`Tax (${(state.taxRate * 100).toFixed(1)}%)`} value={money(totals.tax)} />
+            {redemptionDiscount > 0 && (
+              <Line
+                label={`Loyalty discount (${pointsRedeemed} pts)`}
+                value={`-${money(redemptionDiscount)}`}
+              />
+            )}
+            <Line label={`Tax (${(state.taxRate * 100).toFixed(1)}%)`} value={money(bill.tax)} />
             <Line label="Suggested gratuity (20%)" value={money(gratuity)} muted />
             <div className="mt-sm flex items-baseline justify-between border-t border-outline-variant pt-md">
               <span className="font-title-lg text-title-lg text-on-surface">Total Due</span>
               <span className="font-display-lg text-[32px] font-bold leading-none text-primary">
-                {money(totals.total)}
+                {money(bill.total)}
               </span>
             </div>
           </div>
+
+          {/* Loyalty — staff-only, applied on the guest's behalf (no guest UI). */}
+          {tenant.loyalty.enabled && loyaltyAccountId && (
+            <div className="border-t border-outline-variant px-lg py-md">
+              <p className="mb-sm font-label-md text-[11px] uppercase tracking-wider text-on-surface-variant">
+                Loyalty
+              </p>
+              {loyaltyAccount ? (
+                <div className="space-y-sm">
+                  <div className="flex items-center justify-between font-body-md text-body-md text-on-surface">
+                    <span className="text-on-surface-variant">{loyaltyAccount.phone}</span>
+                    <span className="font-data-mono">{loyaltyAccount.pointsBalance} pts</span>
+                  </div>
+                  {redeemError && (
+                    <p className="font-body-md text-[12px] text-error">{redeemError}</p>
+                  )}
+                  {pointsRedeemed > 0 ? (
+                    <button
+                      onClick={() => applyRedeem(0)}
+                      disabled={redeemBusy}
+                      className="rounded-full border border-outline-variant px-md py-1 font-label-md text-[12px] text-on-surface-variant transition-colors hover:bg-surface-container disabled:opacity-60"
+                    >
+                      Clear redemption
+                    </button>
+                  ) : maxPoints > 0 ? (
+                    <div className="flex items-center gap-sm">
+                      <input
+                        value={redeemInput}
+                        onChange={(e) => setRedeemInput(e.target.value.replace(/\D/g, ""))}
+                        placeholder={`Up to ${maxPoints}`}
+                        inputMode="numeric"
+                        className="w-24 rounded-lg border border-outline-variant bg-surface px-sm py-1 font-data-mono text-[13px] text-on-surface focus:border-primary focus:outline-none"
+                      />
+                      <button
+                        onClick={() => applyRedeem(Number(redeemInput) || 0)}
+                        disabled={redeemBusy || !Number(redeemInput)}
+                        className="rounded-full border border-outline-variant px-md py-1 font-label-md text-[12px] text-on-surface transition-colors hover:bg-surface-container disabled:opacity-60"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={() => applyRedeem(maxPoints)}
+                        disabled={redeemBusy}
+                        className="rounded-full bg-primary-container/20 px-md py-1 font-label-md text-[12px] text-primary transition-colors hover:bg-primary-container/30 disabled:opacity-60"
+                      >
+                        Use max ({maxPoints})
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-body-md text-[12px] text-on-surface-variant">
+                      Not enough points to redeem yet.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="flex items-center gap-xs font-body-md text-[12px] text-on-surface-variant">
+                  <Icon name="progress_activity" size={14} className="ag-spin" /> Loading…
+                </p>
+              )}
+            </div>
+          )}
         </section>
 
         {/* ── Payment panel ─────────────────────────────────────────────────── */}
@@ -181,20 +316,14 @@ export function BillingPage() {
             <div className="grid grid-cols-3 gap-sm">
               {(Object.entries(METHOD_META) as [PaymentMethod, typeof METHOD_META[PaymentMethod]][]).map(
                 ([m, meta]) => {
-                  const isUpi = m === "upi";
-                  const unavailable = isUpi && !state.upiId;
                   const active = method === m;
                   return (
                     <button
                       key={m}
-                      onClick={() => !unavailable && setMethod(m)}
-                      disabled={unavailable}
-                      title={unavailable ? "Configure UPI in Settings → Payments" : undefined}
+                      onClick={() => setMethod(m)}
                       className={`relative flex flex-col items-center gap-xs rounded-xl border px-sm py-md transition-all ${
                         active
                           ? "border-primary bg-primary-container/15 shadow-sm"
-                          : unavailable
-                          ? "cursor-not-allowed border-outline-variant opacity-40"
                           : "border-outline-variant hover:border-primary/60 hover:bg-surface-container-low"
                       }`}
                     >
@@ -213,7 +342,7 @@ export function BillingPage() {
                         {meta.label}
                       </span>
                       <span className="text-center font-body-md text-[10px] leading-tight text-on-surface-variant">
-                        {unavailable ? "Not configured" : meta.desc}
+                        {meta.desc}
                       </span>
                       {active && (
                         <span className="absolute right-xs top-xs flex h-4 w-4 items-center justify-center rounded-full bg-primary text-on-primary">
@@ -273,101 +402,24 @@ export function BillingPage() {
               </div>
             )}
 
-            {/* ── Card ── */}
+            {/* ── Card / UPI — both already collected elsewhere (POS terminal /
+                the counter's own UPI QR); this screen only records which one
+                and confirms. ── */}
             {method === "card" && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-lg">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-container/20 text-primary">
-                  <Icon name="contactless" size={40} fill />
-                </div>
-                <div className="text-center">
-                  <p className="mb-xs font-title-lg text-title-lg text-on-surface">Card Payment</p>
-                  <p className="font-body-md text-body-md text-on-surface-variant">
-                    Direct the guest to your POS terminal or card reader.
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-primary/20 bg-primary-container/10 px-xl py-lg text-center">
-                  <p className="mb-xs font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
-                    Amount to collect
-                  </p>
-                  <p className="font-display-lg text-[40px] font-bold leading-none text-primary">
-                    {money(totals.total)}
-                  </p>
-                </div>
-              </div>
+              <CollectPanel
+                icon="contactless"
+                title="Card Payment"
+                desc="Direct the guest to your POS terminal or card reader."
+                amount={money(bill.total)}
+              />
             )}
-
-            {/* ── UPI ── */}
-            {method === "upi" && state.upiId && upiUrl && (
-              <div className="flex flex-1 flex-col items-center justify-between gap-md overflow-y-auto">
-                {/* Amount pill */}
-                <div className="w-full rounded-xl border border-primary/20 bg-primary-container/10 px-md py-sm text-center">
-                  <p className="font-label-md text-[11px] uppercase tracking-wider text-on-surface-variant">
-                    Payable Amount
-                  </p>
-                  <p className="font-display-lg text-[36px] font-bold leading-none text-primary">
-                    {money(totals.total)}
-                  </p>
-                </div>
-
-                {/* QR + details */}
-                <div className="flex flex-col items-center gap-md">
-                  {/* QR code */}
-                  <div className="relative">
-                    <div className="rounded-2xl border-2 border-primary/20 bg-white p-md shadow-md">
-                      <QRCodeCanvas
-                        value={upiUrl}
-                        size={200}
-                        level="M"
-                        includeMargin={true}
-                      />
-                    </div>
-                    {/* UPI badge */}
-                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-outline-variant bg-surface px-md py-[3px] font-data-mono text-[10px] font-bold uppercase tracking-wider text-primary shadow-sm">
-                      UPI
-                    </div>
-                  </div>
-
-                  {/* UPI ID row */}
-                  <div className="flex w-full items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface-container-low px-md py-sm">
-                    <div className="min-w-0">
-                      <p className="font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
-                        UPI ID
-                      </p>
-                      <p className="truncate font-data-mono text-[13px] font-semibold text-on-surface">
-                        {state.upiId}
-                      </p>
-                    </div>
-                    <button
-                      onClick={copyUpiId}
-                      className="flex shrink-0 items-center gap-xs rounded-full border border-outline-variant px-sm py-1 font-label-md text-[11px] text-on-surface-variant transition-colors hover:border-primary hover:text-primary"
-                    >
-                      <Icon name={upiCopied ? "check" : "content_copy"} size={14} />
-                      {upiCopied ? "Copied!" : "Copy"}
-                    </button>
-                  </div>
-
-                  {state.upiMobile && (
-                    <p className="font-body-md text-[12px] text-on-surface-variant">
-                      <Icon name="phone" size={13} className="mr-xs inline-block align-middle" />
-                      {state.upiMobile}
-                    </p>
-                  )}
-                </div>
-
-                {/* Open in UPI App button */}
-                <a
-                  href={upiUrl}
-                  className="flex w-full items-center justify-center gap-sm rounded-xl border border-primary/40 bg-primary-container/15 px-md py-sm font-label-md text-label-md text-primary transition-colors hover:bg-primary-container/30"
-                >
-                  <Icon name="open_in_new" size={16} />
-                  Open in UPI App (GPay / PhonePe / Paytm)
-                </a>
-
-                <p className="text-center font-body-md text-[11px] text-on-surface-variant">
-                  Ask the guest to scan with any UPI app. Amount is pre-filled.{" "}
-                  Confirm receipt, then tap Mark Paid below.
-                </p>
-              </div>
+            {method === "upi" && (
+              <CollectPanel
+                icon="qr_code_2"
+                title="UPI Payment"
+                desc="Guest has already paid via UPI at the counter."
+                amount={money(bill.total)}
+              />
             )}
           </div>
 
@@ -393,6 +445,36 @@ export function BillingPage() {
             </button>
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+function CollectPanel({
+  icon,
+  title,
+  desc,
+  amount,
+}: {
+  icon: string;
+  title: string;
+  desc: string;
+  amount: string;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-lg">
+      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-container/20 text-primary">
+        <Icon name={icon} size={40} fill />
+      </div>
+      <div className="text-center">
+        <p className="mb-xs font-title-lg text-title-lg text-on-surface">{title}</p>
+        <p className="font-body-md text-body-md text-on-surface-variant">{desc}</p>
+      </div>
+      <div className="rounded-2xl border border-primary/20 bg-primary-container/10 px-xl py-lg text-center">
+        <p className="mb-xs font-label-md text-label-md uppercase tracking-wider text-on-surface-variant">
+          Amount to collect
+        </p>
+        <p className="font-display-lg text-[40px] font-bold leading-none text-primary">{amount}</p>
       </div>
     </div>
   );

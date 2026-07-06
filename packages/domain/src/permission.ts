@@ -17,6 +17,7 @@ export const PERMISSIONS = [
   "analytics.view", // Sales Analytics (/analytics)
   "settings.manage", // Settings (/settings/*)
   "team.manage", // Add/remove users & change roles/permissions
+  "loyalty.manage", // Loyalty program config, customer directory & redemption (/loyalty, /settings/loyalty)
 ] as const;
 
 export const permissionSchema = z.enum(PERMISSIONS);
@@ -33,6 +34,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "analytics.view": "View Sales Analytics",
   "settings.manage": "Manage Settings",
   "team.manage": "Manage Team & Roles",
+  "loyalty.manage": "Manage Loyalty Program",
 };
 
 /** True if `held` grants `needed`. Central so guards/UI agree on the check. */

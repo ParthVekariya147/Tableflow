@@ -137,3 +137,59 @@ function safeParse(text: string): unknown {
     return text;
   }
 }
+
+/**
+ * Fetches a binary attachment (e.g. an .xlsx export) instead of JSON — bypasses
+ * `request()`'s text/JSON parsing + schema validation. Returns the raw `Blob`
+ * plus the filename the server suggested via `Content-Disposition`, so the
+ * caller only has to trigger the browser download.
+ */
+export async function requestBlob(
+  config: ApiClientConfig,
+  path: string,
+  opts: { tenantSlug?: string } = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const doFetch = config.fetch ?? globalThis.fetch;
+  const headers: Record<string, string> = {};
+
+  const tenant = opts.tenantSlug ?? config.tenantSlug ?? config.getTenantSlug?.();
+  if (tenant) headers["X-Tenant-Slug"] = tenant;
+
+  const token = config.getToken?.();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  // Exports can take longer than a typical JSON call on a large date range.
+  const timeoutMs = Math.max(config.timeoutMs ?? 15_000, 60_000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res: Response;
+  try {
+    res = await doFetch(`${config.baseUrl}${path}`, {
+      headers,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ApiError(0, `Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const json = text ? safeParse(text) : undefined;
+    const message =
+      (json && typeof json === "object" && "message" in json
+        ? String((json as { message: unknown }).message)
+        : res.statusText) || `Request failed (${res.status})`;
+    throw new ApiError(res.status, message, json);
+  }
+
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? "export.xlsx";
+  const blob = await res.blob();
+  return { blob, filename };
+}

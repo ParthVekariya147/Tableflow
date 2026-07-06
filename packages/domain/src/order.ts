@@ -73,6 +73,16 @@ export const orderSchema = z.object({
   closedAt: isoTimestampSchema.optional(),
   /** Set when the guest requests the bill — drives staff "Awaiting Bill". */
   billRequestedAt: isoTimestampSchema.optional(),
+  /**
+   * Loyalty fields — staff/platform-only (see loyalty.ts), never shown in the
+   * customer app. `loyaltyAccountId` is set silently at session start from
+   * customerPhone; the points/redemption fields are set at capturePayment and
+   * are stable even if the account or program config changes later.
+   */
+  loyaltyAccountId: idSchema.optional(),
+  pointsEarned: z.number().int().min(0).optional(),
+  pointsRedeemed: z.number().int().min(0).optional(),
+  redemptionValueMinor: moneyMinorSchema.optional(),
 });
 
 /** Table ids currently holding a live (open/billed) order — a lean shape for

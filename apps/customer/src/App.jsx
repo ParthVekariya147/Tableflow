@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { TenantThemeProvider } from "@amber/ui";
 import { BootProvider, useBoot } from "./context/BootContext";
@@ -46,6 +47,11 @@ function AppRoutes() {
  */
 function BootedApp() {
   const { tenant } = useBoot();
+  // Tab title = the scanned restaurant's name (one codebase, many brands);
+  // index.html ships the neutral platform fallback "Amber" until boot resolves.
+  useEffect(() => {
+    if (tenant?.name) document.title = tenant.name;
+  }, [tenant?.name]);
   return (
     <TenantThemeProvider tenant={tenant}>
       <MenuProvider>

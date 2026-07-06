@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from "@nestjs/common";
@@ -82,13 +83,17 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
-    // PLATFORM_MASTER_PASSWORD lets super-admins log in as any tenant user
-    // without knowing that user's password (for support / impersonation via
-    // login). Compared in constant time so it can't be recovered via a timing
-    // oracle, and every use is written to the audit log below.
+    // PLATFORM_MASTER_PASSWORD is a break-glass credential. It is scoped to
+    // super-admin accounts ONLY — it can no longer be used as a skeleton key to
+    // sign in as an arbitrary tenant user (routine tenant support goes through
+    // the audited POST /admin/impersonate flow instead). The constant-time
+    // compare always runs (no early return on `isSuperAdmin`, so it isn't a
+    // timing oracle for that flag); the effect is then gated on the target being
+    // a super-admin. Every use is written to the audit log below.
     const masterPw = process.env.PLATFORM_MASTER_PASSWORD;
-    const isMasterLogin =
+    const masterMatches =
       Boolean(masterPw) && timingSafeEqualStr(password, masterPw as string);
+    const isMasterLogin = masterMatches && user.isSuperAdmin;
 
     if (!isMasterLogin) {
       if (!user.passwordHash) {
@@ -245,6 +250,25 @@ export class AuthService {
       throw new UnauthorizedException("Invalid or expired Supabase session");
     }
     const sbUser = data.user;
+
+    // A valid Supabase session is NOT sufficient to become a platform
+    // super-admin. Without this gate, anyone who can obtain a token for the
+    // configured Supabase project (open self-signup being the Supabase default)
+    // would be granted isSuperAdmin=true here and could reach every /admin/*
+    // route. Grant super-admin ONLY to explicitly allow-listed emails
+    // (`SUPERADMIN_EMAILS`, comma-separated). An empty/unset allowlist means
+    // no one can self-bootstrap — the seed script provisions the first operator.
+    const email = (sbUser.email ?? "").toLowerCase();
+    const allowlist = (process.env.SUPERADMIN_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+    if (!email || !allowlist.includes(email)) {
+      throw new ForbiddenException(
+        "This account is not authorized for platform admin access",
+      );
+    }
+
     const user = await this.prisma.user.upsert({
       where: { supabaseId: sbUser.id },
       update: { email: sbUser.email ?? "", isSuperAdmin: true },

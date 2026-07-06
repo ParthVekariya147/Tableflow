@@ -25,27 +25,35 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(cuid())
-  slug      String   @unique
-  name      String
-  currency  String   @default("USD")
-  taxRate   Float    @default(0)
-  gstNumber String?
-  /** UPI VPA used for QR-code / deep-link payments (e.g. "restaurant@okicici"). */
-  upiId     String?
-  /** Mobile number registered with UPI shown alongside the QR code. */
-  upiMobile String?
-  active    Boolean  @default(true)
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  currency       String   @default("USD")
+  taxRate        Float    @default(0)
+  gstNumber      String?
+  /**
+   * UPI VPA used for QR-code / deep-link payments (e.g. "restaurant@okicici").
+   */
+  upiId          String?
+  /**
+   * Mobile number registered with UPI shown alongside the QR code.
+   */
+  upiMobile      String?
+  active         Boolean  @default(true)
   // ThemeConfig (colors/typography/logo/mode) as JSON — see @amber/domain.
-  theme     Json
+  theme          Json
   // PrinterSettings (agent URL/secret + printer connection config) as JSON —
   // see @amber/domain. Nullable: absent = never configured, mapper defaults to {}.
-  printer   Json?
+  printer        Json?
   // Optional SECOND print-agent connection for a kitchen printer (KOTs), same
   // shape as `printer`. Nullable: absent = never configured, mapper defaults to {}.
   kitchenPrinter Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // LoyaltyProgram (enabled/earnRate/redemptionRate/min/max) as JSON — see
+  // @amber/domain. Nullable: absent = never configured, mapper defaults to {}
+  // (program disabled).
+  loyalty        Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   memberships     Membership[]
   rooms           Room[]
@@ -65,6 +73,8 @@ model Tenant {
   subscription    Subscription?
   auditLogs       AuditLog[]
   serviceRequests ServiceRequest[]
+  loyaltyAccounts LoyaltyAccount[]
+  loyaltyTxns     LoyaltyTransaction[]
 }
 
 // ── Identity & access ──────────────────────────────────────────────────────
@@ -98,22 +108,30 @@ model Role {
  * role come from the matching Membership.
  */
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  /** Null for Supabase-auth users (super-admins who log in via Supabase, not password). */
-  passwordHash String?
-  name         String
-  /** Supabase Auth UUID — set on super-admin users; null for restaurant staff. */
-  supabaseId   String?  @unique
-  /** Platform operator (super-admin app). Has no tenant memberships. */
-  isSuperAdmin Boolean  @default(false)
-  active       Boolean  @default(true)
-  /** True for a member still on their initial default password (see
-   *  members.service.ts DEFAULT_MEMBER_PASSWORD) — forces a change-password
-   *  screen client-side until they set their own. */
-  mustChangePassword Boolean @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  /**
+   * Null for Supabase-auth users (super-admins who log in via Supabase, not password).
+   */
+  passwordHash       String?
+  name               String
+  /**
+   * Supabase Auth UUID — set on super-admin users; null for restaurant staff.
+   */
+  supabaseId         String?  @unique
+  /**
+   * Platform operator (super-admin app). Has no tenant memberships.
+   */
+  isSuperAdmin       Boolean  @default(false)
+  active             Boolean  @default(true)
+  /**
+   * True for a member still on their initial default password (see
+   * members.service.ts DEFAULT_MEMBER_PASSWORD) — forces a change-password
+   * screen client-side until they set their own.
+   */
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   memberships   Membership[]
   ordersServed  Order[]      @relation("OrderServer")
@@ -148,7 +166,9 @@ model Membership {
 
 // ── Floor layout ───────────────────────────────────────────────────────────
 
-/** A named area on the floor (e.g. "Main Dining Room", "Patio") grouping tables. */
+/**
+ * A named area on the floor (e.g. "Main Dining Room", "Patio") grouping tables.
+ */
 model Room {
   id        String  @id @default(cuid())
   tenantId  String
@@ -162,18 +182,21 @@ model Room {
 }
 
 model Table {
-  id        String   @id @default(cuid())
-  tenantId  String
-  roomId    String?
-  label     String
-  qrToken   String   @unique
-  seats     Int?
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  room      Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  orders    Order[]
+  id              String           @id @default(cuid())
+  tenantId        String
+  roomId          String?
+  label           String
+  qrToken         String           @unique
+  seats           Int?
+  sortOrder       Int              @default(0)
+  /// Auto-created virtual "Counter Sale" table used by the no-table quick-sale
+  /// flow — hidden from the normal floor plan grid, otherwise a plain Table.
+  isCounter       Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  room            Room?            @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  orders          Order[]
   serviceRequests ServiceRequest[]
 
   @@index([tenantId])
@@ -195,26 +218,34 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id          String   @id @default(cuid())
-  tenantId    String
-  categoryId  String
-  name        String
-  description String   @default("")
-  price       Int // minor units (cents)
-  badge       String?
-  imageUrl    String?
-  /** Material Symbols icon name used as a photo stand-in when imageUrl is unset. */
-  icon        String?
-  /** Tailwind gradient classes for the stand-in card backdrop. */
-  swatch      String?
-  available   Boolean  @default(true)
-  /** Veg / Non-veg dietary marker (Indian menu convention). null = unmarked. */
-  dietary     DietaryType?
-  /** Jain (no roots/onion/garlic). Independent of `dietary`; shown as a J badge. */
-  jain        Boolean  @default(false)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String          @id @default(cuid())
+  tenantId       String
+  categoryId     String
+  name           String
+  description    String          @default("")
+  price          Int // minor units (cents)
+  badge          String?
+  imageUrl       String?
+  /**
+   * Material Symbols icon name used as a photo stand-in when imageUrl is unset.
+   */
+  icon           String?
+  /**
+   * Tailwind gradient classes for the stand-in card backdrop.
+   */
+  swatch         String?
+  available      Boolean         @default(true)
+  /**
+   * Veg / Non-veg dietary marker (Indian menu convention). null = unmarked.
+   */
+  dietary        DietaryType?
+  /**
+   * Jain (no roots/onion/garlic). Independent of `dietary`; shown as a J badge.
+   */
+  jain           Boolean         @default(false)
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   category       MenuCategory    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   modifierGroups ModifierGroup[]
@@ -229,13 +260,15 @@ model MenuItem {
 // Optional feature. If v1 doesn't need item options, delete these three models
 // plus MenuItem.modifierGroups and OrderItem.modifiers — nothing else uses them.
 
-/** single = pick one (Size, Spice level). multiple = pick any (Add-ons). */
+/**
+ * single = pick one (Size, Spice level). multiple = pick any (Add-ons).
+ */
 /**
  * How a modifier group is presented + behaves while ordering (see MODIFIERS.md).
- *   single   → pick one  (radio / bullet list; dropdown if many)
- *   multiple → pick many (checkboxes, bounded by min/maxSelect)
- *   toggle   → independent on/off switches, one per option
- *   text     → free text, NO options
+ * single   → pick one  (radio / bullet list; dropdown if many)
+ * multiple → pick many (checkboxes, bounded by min/maxSelect)
+ * toggle   → independent on/off switches, one per option
+ * text     → free text, NO options
  */
 enum ModifierInputType {
   single
@@ -244,13 +277,17 @@ enum ModifierInputType {
   text
 }
 
-/** Veg / Non-veg dietary marker shown on item cards (Indian menu convention). */
+/**
+ * Veg / Non-veg dietary marker shown on item cards (Indian menu convention).
+ */
 enum DietaryType {
   veg
   non_veg
 }
 
-/** A choice group attached to a menu item, e.g. "Cheese", "Toppings", "Spice level". */
+/**
+ * A choice group attached to a menu item, e.g. "Cheese", "Toppings", "Spice level".
+ */
 model ModifierGroup {
   id          String            @id @default(cuid())
   tenantId    String
@@ -260,7 +297,9 @@ model ModifierGroup {
   required    Boolean           @default(false)
   minSelect   Int               @default(0)
   maxSelect   Int? // null = unlimited (for `multiple`)
-  /** `text` only: optional length cap + input hint. */
+  /**
+   * `text` only: optional length cap + input hint.
+   */
   maxLength   Int?
   placeholder String?
   sortOrder   Int               @default(0)
@@ -272,7 +311,9 @@ model ModifierGroup {
   @@index([menuItemId])
 }
 
-/** A selectable option within a group, e.g. "Large" (+150c), "Extra cheese". */
+/**
+ * A selectable option within a group, e.g. "Large" (+150c), "Extra cheese".
+ */
 model ModifierOption {
   id            String              @id @default(cuid())
   tenantId      String
@@ -306,7 +347,9 @@ model MenuPlacement {
   tenantId   String
   menuItemId String
   kind       PlacementKind
-  /** For `welcome`: the carousel/section label (e.g. "drinks", "bites"). Null for `featured`. */
+  /**
+   * For `welcome`: the carousel/section label (e.g. "drinks", "bites"). Null for `featured`.
+   */
   section    String?
   sortOrder  Int           @default(0)
   tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -330,7 +373,9 @@ enum RoundType {
   bundled
 }
 
-/** Kitchen lifecycle for a single line item. `ready` = plated, not yet delivered. */
+/**
+ * Kitchen lifecycle for a single line item. `ready` = plated, not yet delivered.
+ */
 enum ItemStatus {
   placed
   preparing
@@ -359,7 +404,9 @@ model ServiceRequest {
   id             String               @id @default(cuid())
   tenantId       String
   tableId        String
-  /** Best-effort link to the table's live session, if one exists. */
+  /**
+   * Best-effort link to the table's live session, if one exists.
+   */
   orderId        String?
   type           ServiceRequestType
   status         ServiceRequestStatus @default(pending)
@@ -374,15 +421,65 @@ model ServiceRequest {
   @@index([tenantId, status])
 }
 
+// ── Loyalty (staff/platform-only — no guest-facing surface) ────────────────
+// A points account keyed by tenant+phone (the phone already captured at guest
+// checkout). Earns automatically on payment capture; redemption is applied by
+// staff only. See @amber/domain's loyalty.ts.
+
+enum LoyaltyTransactionType {
+  earn
+  redeem
+  adjust
+}
+
+model LoyaltyAccount {
+  id             String               @id @default(cuid())
+  tenantId       String
+  phone          String
+  name           String?
+  pointsBalance  Int                  @default(0)
+  lifetimePoints Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  transactions   LoyaltyTransaction[]
+  orders         Order[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
+}
+
+model LoyaltyTransaction {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  accountId    String
+  orderId      String?
+  type         LoyaltyTransactionType
+  points       Int // signed: +earn/+adjust, -redeem/-adjust
+  balanceAfter Int
+  note         String?
+  createdAt    DateTime               @default(now())
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account      LoyaltyAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  order        Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([accountId])
+}
+
 model Order {
-  id        String      @id @default(cuid())
-  tenantId  String
-  tableId   String
-  /** Server who opened/owns the session (analytics, accountability). */
-  serverId  String?
-  /** Guest contact captured for the session — used on the bill/receipt. */
-  customerName  String?
-  customerPhone String?
+  id                   String               @id @default(cuid())
+  tenantId             String
+  tableId              String
+  /**
+   * Server who opened/owns the session (analytics, accountability).
+   */
+  serverId             String?
+  /**
+   * Guest contact captured for the session — used on the bill/receipt.
+   */
+  customerName         String?
+  customerPhone        String?
   /**
    * Opaque per-device id (sent as `X-Device-Id`) of the guest device that opened
    * this session. Acts as the session capability: guest writes/resumes must
@@ -390,26 +487,41 @@ model Order {
    * can't be read from the public order list and replayed). Null for staff
    * walk-in sessions opened from restaurant-admin (no device).
    */
-  deviceId  String?
-  status    OrderStatus @default(open)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  closedAt  DateTime?
-  /** Set when the guest taps "Request Bill" — powers staff "Awaiting Bill" + table `bill` status. */
-  billRequestedAt DateTime?
-  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  table     Table       @relation(fields: [tableId], references: [id])
-  server    User?       @relation("OrderServer", fields: [serverId], references: [id], onDelete: SetNull)
-  rounds    Round[]
-  payment   Payment?
-  review    Review?
-  serviceRequests ServiceRequest[]
+  deviceId             String?
+  status               OrderStatus          @default(open)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  closedAt             DateTime?
+  /**
+   * Set when the guest taps "Request Bill" — powers staff "Awaiting Bill" + table `bill` status.
+   */
+  billRequestedAt      DateTime?
+  /**
+   * Loyalty snapshot fields — staff-only (see loyalty.ts in @amber/domain), never
+   * shown in the customer app. loyaltyAccountId is set silently at session start
+   * from customerPhone; the points/redemption fields are set at capturePayment
+   * and are stable even if the account or program config changes later.
+   */
+  loyaltyAccountId     String?
+  pointsEarned         Int?
+  pointsRedeemed       Int?
+  redemptionValueCents Int?
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  table                Table                @relation(fields: [tableId], references: [id])
+  server               User?                @relation("OrderServer", fields: [serverId], references: [id], onDelete: SetNull)
+  rounds               Round[]
+  payment              Payment?
+  review               Review?
+  serviceRequests      ServiceRequest[]
+  loyaltyAccount       LoyaltyAccount?      @relation(fields: [loyaltyAccountId], references: [id], onDelete: SetNull)
+  loyaltyTxns          LoyaltyTransaction[]
 
   @@index([tenantId])
   @@index([tenantId, status]) // live-table / active-session lookups
   @@index([tenantId, createdAt]) // sales / order-history sorting
   @@index([tableId])
   @@index([serverId])
+  @@index([loyaltyAccountId])
 }
 
 model Round {
@@ -427,27 +539,27 @@ model Round {
 }
 
 model OrderItem {
-  id         String              @id @default(cuid())
-  tenantId   String
-  roundId    String
-  menuItemId String? // null if the source menu item was later deleted (snapshot below preserves display)
-  name       String
-  unitPrice  Int // snapshot, minor units
-  qty        Int
-  status     ItemStatus          @default(placed)
-  notes      String?
+  id          String              @id @default(cuid())
+  tenantId    String
+  roundId     String
+  menuItemId  String? // null if the source menu item was later deleted (snapshot below preserves display)
+  name        String
+  unitPrice   Int // snapshot, minor units
+  qty         Int
+  status      ItemStatus          @default(placed)
+  notes       String?
   // Stage timestamps for KDS timers + analytics, set as `status` advances.
   preparingAt DateTime?
   readyAt     DateTime?
   servedAt    DateTime?
   cancelledAt DateTime?
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
-  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  round      Round               @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  round       Round               @relation(fields: [roundId], references: [id], onDelete: Cascade)
   // Keep history even if the menu item is later deleted (snapshot fields cover display).
-  menuItem   MenuItem?           @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
-  modifiers  OrderItemModifier[]
+  menuItem    MenuItem?           @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+  modifiers   OrderItemModifier[]
 
   @@index([tenantId])
   @@index([tenantId, status]) // active-item filtering (analytics, KDS self-heal)
@@ -455,8 +567,10 @@ model OrderItem {
   @@index([menuItemId])
 }
 
-/** A chosen modifier on an order line. groupName/name/priceDelta are snapshotted
- *  at order time so historical bills stay correct even if the source is edited. */
+/**
+ * A chosen modifier on an order line. groupName/name/priceDelta are snapshotted
+ * at order time so historical bills stay correct even if the source is edited.
+ */
 model OrderItemModifier {
   id          String          @id @default(cuid())
   tenantId    String
@@ -495,7 +609,9 @@ model Payment {
   tax       Int // cents
   tip       Int           @default(0) // cents
   total     Int // cents (subtotal + tax + tip)
-  /** Cash handed over (null for card). Change due = tendered - total, derived. */
+  /**
+   * Cash handed over (null for card). Change due = tendered - total, derived.
+   */
   tendered  Int?
   takenById String?
   createdAt DateTime      @default(now())
@@ -508,7 +624,9 @@ model Payment {
 
 // ── Guest feedback ───────────────────────────────────────────────────────────
 
-/** A guest's post-visit rating for one order (the customer confirmation screen). */
+/**
+ * A guest's post-visit rating for one order (the customer confirmation screen).
+ */
 model Review {
   id        String   @id @default(cuid())
   tenantId  String
@@ -521,6 +639,7 @@ model Review {
 
   @@index([tenantId, createdAt])
 }
+
 // ── Billing (platform-managed plans + per-tenant subscriptions) ────────────
 
 enum BillingInterval {
@@ -595,4 +714,3 @@ model AuditLog {
   @@index([actorId])
   @@index([createdAt])
 }
-

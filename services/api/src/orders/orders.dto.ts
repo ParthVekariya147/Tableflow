@@ -110,3 +110,12 @@ export const reclaimSessionSchema = z.object({
   customerPhone: z.string().trim().min(7).max(32),
 });
 export type ReclaimSessionDto = z.infer<typeof reclaimSessionSchema>;
+
+/**
+ * POST /orders/:id/loyalty/redeem — staff-only. Applies (or, with 0, clears) a
+ * points redemption as a draft on the order; finalized at capturePayment.
+ */
+export const redeemLoyaltyPointsSchema = z.object({
+  points: z.number().int().nonnegative(),
+});
+export type RedeemLoyaltyPointsDto = z.infer<typeof redeemLoyaltyPointsSchema>;

@@ -4,6 +4,7 @@ import { RequireSession } from "./components/RequireSession";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { TenantsPage } from "./pages/TenantsPage";
+import { CustomersPage } from "./pages/CustomersPage";
 import { TenantDetailPage } from "./pages/TenantDetailPage";
 import { TenantEditPage } from "./pages/TenantEditPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="tenants/new" element={<OnboardingPage />} />
           <Route path="tenants/:id" element={<TenantDetailPage />} />
           <Route path="tenants/:id/edit" element={<TenantEditPage />} />
+          <Route path="customers" element={<CustomersPage />} />
           <Route path="plans" element={<PlansPage />} />
           <Route path="subscriptions" element={<SubscriptionsPage />} />
           <Route path="credentials" element={<CredentialsPage />} />

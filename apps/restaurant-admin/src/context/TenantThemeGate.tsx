@@ -59,6 +59,13 @@ export function TenantThemeGate({ children }: { children: ReactNode }) {
     // Re-fetch when the active tenant changes (a login to a different restaurant).
   }, [status, user?.tenantId]);
 
+  // Tab title follows the active brand: the platform ("Amber") pre-login, the
+  // tenant's display name — never the slug — once signed in.
+  useEffect(() => {
+    document.title =
+      tenant.id === defaultTenant.id ? "Amber" : `${tenant.name} · Amber`;
+  }, [tenant.id, tenant.name]);
+
   const brand = useMemo<TenantBrandValue>(() => ({ applyTenant: setTenant }), []);
 
   return (

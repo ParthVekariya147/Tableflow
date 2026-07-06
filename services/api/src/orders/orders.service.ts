@@ -13,13 +13,20 @@ import type {
   ItemStatus,
   AnalyticsSummary,
   AnalyticsBucket,
+  LoyaltyProgram,
 } from "@amber/domain";
-import { orderItemUnitPrice } from "@amber/domain";
+import {
+  orderSubtotal,
+  pointsForSpend,
+  redemptionValueMinor,
+  maxRedeemablePoints,
+} from "@amber/domain";
 import { Prisma, type Payment as PrismaPayment } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TtlCache } from "../common/ttl-cache.js";
 import { OrdersEvents } from "./orders.events.js";
 import { toDomainOrder, toDomainPayment, toSale } from "./orders.mapper.js";
+import { buildSalesWorkbook } from "./orders.export.js";
 import type {
   AddRoundDto,
   CreateOrderDto,
@@ -27,6 +34,7 @@ import type {
   UpdateItemDto,
   CapturePaymentDto,
   ReclaimSessionDto,
+  RedeemLoyaltyPointsDto,
 } from "./orders.dto.js";
 
 const ROUND_INCLUDE = {
@@ -109,6 +117,7 @@ export class OrdersService {
     tenantId: string,
     dto: CreateOrderDto,
     deviceId?: string,
+    loyaltyProgram?: LoyaltyProgram,
   ): Promise<Order> {
     const table = await this.prisma.table.findFirst({
       where: { id: dto.tableId, tenantId },
@@ -127,6 +136,19 @@ export class OrdersService {
         `Table ${table.label} already has an active session.`,
       );
 
+    // Silent loyalty bookkeeping — no guest-facing effect. If the program is
+    // enabled and a phone was captured, find-or-create the tenant+phone
+    // account so points accrue across visits. Never blocks session creation.
+    let loyaltyAccountId: string | undefined;
+    if (loyaltyProgram?.enabled && dto.customerPhone) {
+      const account = await this.prisma.loyaltyAccount.upsert({
+        where: { tenantId_phone: { tenantId, phone: dto.customerPhone } },
+        update: dto.customerName ? { name: dto.customerName } : {},
+        create: { tenantId, phone: dto.customerPhone, name: dto.customerName },
+      });
+      loyaltyAccountId = account.id;
+    }
+
     const row = await this.prisma.order.create({
       data: {
         tenantId,
@@ -135,6 +157,7 @@ export class OrdersService {
         customerName: dto.customerName,
         customerPhone: dto.customerPhone,
         deviceId,
+        loyaltyAccountId,
       },
       include: ROUND_INCLUDE,
     });
@@ -150,8 +173,9 @@ export class OrdersService {
     orderId: string,
     dto: AddRoundDto,
     deviceId?: string,
+    trusted = false,
   ): Promise<Order> {
-    await this.assertOrder(tenantId, orderId, deviceId);
+    await this.assertOrder(tenantId, orderId, deviceId, trusted);
 
     // Fetch every distinct menu item referenced by this round in one query
     // (was one round trip per line item).
@@ -306,6 +330,53 @@ export class OrdersService {
     await this.prisma.order.update({
       where: { id: orderId },
       data: { status: "billed", billRequestedAt: new Date() },
+    });
+    return this.refreshAndEmit(tenantId, orderId, "updated");
+  }
+
+  /**
+   * Staff-only: apply (or, with `points: 0`, clear) a points redemption on an
+   * open/billed order — a draft that's finalized at capturePayment. Re-quotes
+   * against the LIVE bill + balance every call (replace-on-change), so the
+   * amount staff see is always current even if the order changed since they
+   * last opened Billing.
+   */
+  async redeemPoints(
+    tenantId: string,
+    orderId: string,
+    dto: RedeemLoyaltyPointsDto,
+    program: LoyaltyProgram,
+  ): Promise<Order> {
+    const order = await this.get(tenantId, orderId, undefined, true);
+    if (order.status === "closed" || order.status === "paid")
+      throw new ConflictException(
+        "This session is closed; points can no longer be applied.",
+      );
+    if (!order.loyaltyAccountId)
+      throw new BadRequestException("This order has no linked loyalty account.");
+
+    if (dto.points === 0) {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { pointsRedeemed: null, redemptionValueCents: null },
+      });
+      return this.refreshAndEmit(tenantId, orderId, "updated");
+    }
+
+    const account = await this.prisma.loyaltyAccount.findFirst({
+      where: { id: order.loyaltyAccountId, tenantId },
+    });
+    if (!account) throw new NotFoundException("Loyalty account not found");
+
+    const subtotal = orderSubtotal(order);
+    const max = maxRedeemablePoints(subtotal, account.pointsBalance, program);
+    if (dto.points > max)
+      throw new BadRequestException(`At most ${max} points may be redeemed on this bill.`);
+
+    const discount = redemptionValueMinor(dto.points, program);
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: { pointsRedeemed: dto.points, redemptionValueCents: discount },
     });
     return this.refreshAndEmit(tenantId, orderId, "updated");
   }
@@ -513,6 +584,7 @@ export class OrdersService {
     dto: CapturePaymentDto,
     deviceId?: string,
     trusted = false,
+    loyaltyProgram?: LoyaltyProgram,
   ): Promise<Payment> {
     const order = await this.get(tenantId, orderId, deviceId, trusted);
     if (order.status === "paid")
@@ -522,38 +594,101 @@ export class OrdersService {
     if (order.status === "closed")
       throw new ConflictException("This session was cancelled and can't be paid.");
 
-    const subtotal = order.rounds.reduce(
-      (sum, r) =>
-        sum +
-        r.items
-          .filter((i) => i.status !== "cancelled")
-          .reduce((s, i) => s + orderItemUnitPrice(i) * i.qty, 0),
-      0,
-    );
-    const tax = Math.round(subtotal * taxRate);
+    const subtotal = orderSubtotal(order);
+    // Redemption (if staff applied one via redeemPoints) discounts the taxable
+    // subtotal. Re-validated against the live balance below, inside the
+    // transaction, in case it drifted since the redemption was drafted.
+    const redeemPoints = order.pointsRedeemed ?? 0;
+    const redemptionDiscount = Math.min(order.redemptionValueMinor ?? 0, subtotal);
+    const discountedSubtotal = subtotal - redemptionDiscount;
+    const tax = Math.round(discountedSubtotal * taxRate);
     const tip = dto.tip;
-    const total = subtotal + tax + tip;
+    const total = discountedSubtotal + tax + tip;
+    const pointsEarned =
+      loyaltyProgram?.enabled && order.loyaltyAccountId
+        ? pointsForSpend(discountedSubtotal, loyaltyProgram)
+        : 0;
 
+    const now = new Date();
     let payment: PrismaPayment;
     try {
-      [payment] = await this.prisma.$transaction([
-        this.prisma.payment.create({
+      payment = await this.prisma.$transaction(async (tx) => {
+        const p = await tx.payment.create({
           data: {
             tenantId,
             orderId,
             method: dto.method,
-            subtotal,
+            subtotal: discountedSubtotal,
             tax,
             tip,
             total,
             tendered: dto.tendered,
           },
-        }),
-        this.prisma.order.update({
+        });
+        await tx.order.update({
           where: { id: orderId },
-          data: { status: "paid", closedAt: new Date() },
-        }),
-      ]);
+          data: {
+            status: "paid",
+            closedAt: now,
+            pointsEarned: pointsEarned || null,
+            pointsRedeemed: redeemPoints || null,
+            redemptionValueCents: redemptionDiscount || null,
+          },
+        });
+
+        // Loyalty bookkeeping — one read (for the live balance + the redeem
+        // check), one atomic write (net delta, immune to a concurrent order
+        // touching the same account), then the ledger rows in parallel. Was
+        // up to 5 sequential round-trips (read, write, insert, write, insert);
+        // now 3.
+        if (order.loyaltyAccountId && loyaltyProgram?.enabled && (redeemPoints > 0 || pointsEarned > 0)) {
+          const account = await tx.loyaltyAccount.findUniqueOrThrow({
+            where: { id: order.loyaltyAccountId },
+          });
+          if (redeemPoints > 0 && account.pointsBalance < redeemPoints)
+            throw new BadRequestException(
+              "The linked account's points balance changed — please re-apply the redemption.",
+            );
+          const afterRedeem = account.pointsBalance - redeemPoints;
+          const afterEarn = afterRedeem + pointsEarned;
+          await tx.loyaltyAccount.update({
+            where: { id: order.loyaltyAccountId },
+            data: {
+              pointsBalance: { increment: pointsEarned - redeemPoints },
+              ...(pointsEarned > 0 ? { lifetimePoints: { increment: pointsEarned } } : {}),
+            },
+          });
+          const ledgerWrites: Promise<unknown>[] = [];
+          if (redeemPoints > 0)
+            ledgerWrites.push(
+              tx.loyaltyTransaction.create({
+                data: {
+                  tenantId,
+                  accountId: order.loyaltyAccountId,
+                  orderId,
+                  type: "redeem",
+                  points: -redeemPoints,
+                  balanceAfter: afterRedeem,
+                },
+              }),
+            );
+          if (pointsEarned > 0)
+            ledgerWrites.push(
+              tx.loyaltyTransaction.create({
+                data: {
+                  tenantId,
+                  accountId: order.loyaltyAccountId,
+                  orderId,
+                  type: "earn",
+                  points: pointsEarned,
+                  balanceAfter: afterEarn,
+                },
+              }),
+            );
+          await Promise.all(ledgerWrites);
+        }
+        return p;
+      });
     } catch (err) {
       // Payment.orderId is @unique — two near-simultaneous captures for the
       // same order (double-tap "Pay", or a guest retry racing a staff cash
@@ -569,8 +704,18 @@ export class OrdersService {
       throw err;
     }
     // Broadcast the now-closed order so the floor frees the table and the guest
-    // phone leaves the bill screen in real time.
-    const closed = await this.get(tenantId, orderId, undefined, true);
+    // phone leaves the bill screen in real time. Built from the order already
+    // in hand + the fields this call just changed — skips a second full
+    // (rounds→items→modifiers) reload, which only ever echoed data we already
+    // know here.
+    const closed: Order = {
+      ...order,
+      status: "paid",
+      closedAt: now.toISOString(),
+      pointsEarned: pointsEarned || undefined,
+      pointsRedeemed: redeemPoints || undefined,
+      redemptionValueMinor: redemptionDiscount || undefined,
+    };
     this.events.emit(tenantId, { type: "closed", orderId, order: closed });
     return toDomainPayment(payment);
   }
@@ -608,6 +753,71 @@ export class OrdersService {
       include: { order: { include: { table: true } } },
     });
     return rows.map(toSale);
+  }
+
+  /**
+   * Sales report as a downloadable .xlsx workbook (Summary, Daily Sales,
+   * Orders, Order Items, Item Summary) for a `from`/`to` window — the
+   * table/order/item-level export staff pull for bookkeeping or reconciliation.
+   * Unlike `listSales`, this is never capped: a financial export that silently
+   * truncates would be worse than a large file.
+   */
+  async exportSalesReport(
+    tenantId: string,
+    tenant: { name: string; currency: string },
+    range?: { from?: string; to?: string },
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const to = range?.to ? new Date(range.to) : new Date();
+    const from = range?.from
+      ? new Date(range.from)
+      : new Date(to.getTime() - 86_400_000);
+    // Mirrors getAnalytics: compare against the immediately preceding
+    // equal-length window so the Summary sheet's deltas match the Analytics page.
+    const windowMs = Math.max(1, to.getTime() - from.getTime());
+    const prevFrom = new Date(from.getTime() - windowMs);
+
+    const [payments, prev] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: { tenantId, createdAt: { gte: from, lte: to } },
+        orderBy: { createdAt: "asc" },
+        include: {
+          order: {
+            include: {
+              table: true,
+              rounds: {
+                include: {
+                  items: {
+                    include: {
+                      modifiers: true,
+                      menuItem: { include: { category: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: { tenantId, createdAt: { gte: prevFrom, lt: from } },
+        _sum: { total: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const workbook = await buildSalesWorkbook({
+      tenantName: tenant.name,
+      currency: tenant.currency,
+      from,
+      to,
+      generatedAt: new Date(),
+      payments,
+      previousPeriod: { revenue: prev._sum.total ?? 0, orders: prev._count._all ?? 0 },
+    });
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    const stamp = (d: Date) => d.toISOString().slice(0, 10);
+    return { buffer, filename: `sales-report_${stamp(from)}_to_${stamp(to)}.xlsx` };
   }
 
   /**
@@ -836,9 +1046,14 @@ export class OrdersService {
     deviceId?: string,
     trusted = false,
   ): void {
-    if (trusted) return;
-    if (!orderDeviceId) return; // order isn't device-bound (e.g. staff walk-in)
-    if (deviceId && deviceId === orderDeviceId) return; // the owning device
+    if (trusted) return; // authenticated staff / internal server-side reload
+    // A guest-opened session always has a deviceId; a null deviceId means a
+    // staff walk-in, which is only ever acted on by authenticated staff (who
+    // arrive here with trusted=true). An UNTRUSTED caller must therefore both
+    // present a device id AND have it match — a null-device order is NOT a free
+    // pass, otherwise anyone who learned a walk-in order id could read the
+    // guest's name/phone or add rounds / capture payment on it.
+    if (orderDeviceId && deviceId && deviceId === orderDeviceId) return;
     throw new ForbiddenException("This session belongs to another device.");
   }
 }

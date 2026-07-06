@@ -16,6 +16,7 @@ export function toDomainTable(row: TableWithRoom): Table {
     seats: row.seats ?? undefined,
     room: row.room?.name ?? undefined,
     sortOrder: row.sortOrder,
+    isCounter: row.isCounter,
   };
 }
 

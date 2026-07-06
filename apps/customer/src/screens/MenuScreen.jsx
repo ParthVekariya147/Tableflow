@@ -46,7 +46,10 @@ export default function MenuScreen() {
 
       <main className="px-5 py-4 max-w-2xl mx-auto">
         {loading && (
-          <div className="py-20 text-center text-on-surface-variant text-[14px]">
+          <div className="flex flex-col items-center gap-2 py-20 text-center text-on-surface-variant text-[14px]">
+            <span className="material-symbols-outlined text-[28px] animate-spin">
+              progress_activity
+            </span>
             Loading menu…
           </div>
         )}

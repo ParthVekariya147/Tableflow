@@ -7,7 +7,13 @@ import { SuperAdminGuard } from "../auth/super-admin.guard.js";
 import { BillingService } from "../billing/billing.service.js";
 import { AdminService } from "./admin.service.js";
 import { timingSafeEqualStr } from "../common/timing-safe-equal.js";
-import type { AuditLogEntry, TenantCredential, TenantPayment } from "./admin.service.js";
+import type {
+  AuditLogEntry,
+  TenantCredential,
+  TenantPayment,
+  LoyaltyAccountSummary,
+  LoyaltyAccountDetail,
+} from "./admin.service.js";
 import type { PlatformAnalytics } from "./admin.types.js";
 import {
   createTenantSchema,
@@ -132,5 +138,20 @@ export class AdminController {
       limit: limitStr ? parseInt(limitStr, 10) : undefined,
       offset: offsetStr ? parseInt(offsetStr, 10) : undefined,
     });
+  }
+
+  /** Cross-tenant customer lookup (platform support). Read-only — see
+   *  admin.service.ts's listLoyaltyAccounts for why adjustments stay tenant-side. */
+  @Get("loyalty/accounts")
+  listLoyaltyAccounts(
+    @Query("search") search?: string,
+    @Query("tenantId") tenantId?: string,
+  ): Promise<LoyaltyAccountSummary[]> {
+    return this.admin.listLoyaltyAccounts({ search, tenantId });
+  }
+
+  @Get("loyalty/accounts/:id")
+  getLoyaltyAccount(@Param("id") id: string): Promise<LoyaltyAccountDetail> {
+    return this.admin.getLoyaltyAccount(id);
   }
 }

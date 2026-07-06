@@ -25,5 +25,12 @@
     "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "multer": ">=2.2.0",
+      "qs": ">=6.15.2",
+      "file-type": ">=21.3.2"
+    }
   }
 }
