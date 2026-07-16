@@ -128,6 +128,16 @@ export function BootProvider({ children }) {
       }
 
       // ── Fresh QR scan, or dev fallback ────────────────────────────────────
+      // The first-free-table fallback is DEV-ONLY (audit C4): in production a
+      // no-QR hit must never silently seat the guest at an arbitrary table —
+      // the qrToken is the capability, so demand a scan instead.
+      if (!parsed && !import.meta.env.DEV) {
+        setBoot({
+          status: "invalid",
+          reason: "Scan the QR code on your table to get started.",
+        });
+        return;
+      }
       try {
         // tenant, table and the open-order list are independent → run in parallel.
         const tablePromise = parsed
@@ -171,7 +181,12 @@ export function BootProvider({ children }) {
           status: "invalid",
           reason: notFound
             ? "We couldn’t find that table. Ask a staff member for help."
-            : "We couldn’t reach the restaurant. Please try again in a moment.",
+            : !parsed
+              ? // Dev-only fallback path (see the guard above): GET /tables is
+                // staff-gated, so tell the developer the truth instead of the
+                // misleading "couldn't reach the restaurant".
+                "Dev fallback can’t list tables (staff-only endpoint) — open a table QR link instead, e.g. /amber-grain/t/<qrToken>."
+              : "We couldn’t reach the restaurant. Please try again in a moment.",
         });
       }
     })();
