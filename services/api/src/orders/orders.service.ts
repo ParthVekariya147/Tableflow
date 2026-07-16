@@ -175,46 +175,65 @@ export class OrdersService {
     deviceId?: string,
     trusted = false,
   ): Promise<Order> {
-    await this.assertOrder(tenantId, orderId, deviceId, trusted);
+    // ONE transaction for the whole flow — device assert, validation, inserts
+    // and the final full reload — instead of four, each paying its own
+    // BEGIN + DEALLOCATE ALL + COMMIT against the pooler (pass 2 of the
+    // latency work: measured ~22 pooled round trips → ~13 for this endpoint).
+    const order = await this.prisma.$transaction(async (tx) => {
+      await this.assertOrder(tenantId, orderId, deviceId, trusted, tx);
 
-    // Fetch every distinct menu item referenced by this round in one query
-    // (was one round trip per line item).
-    const menuItemIds = [...new Set(dto.items.map((i) => i.menuItemId))];
-    const menuItems = await this.prisma.menuItem.findMany({
-      where: { id: { in: menuItemIds }, tenantId },
-      include: { modifierGroups: { include: { options: true } } },
-    });
-    const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
+      // Fetch every distinct menu item referenced by this round in one query
+      // (was one round trip per line item).
+      const menuItemIds = [...new Set(dto.items.map((i) => i.menuItemId))];
+      const menuItems = await tx.menuItem.findMany({
+        where: { id: { in: menuItemIds }, tenantId },
+        include: { modifierGroups: { include: { options: true } } },
+      });
+      const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
 
-    const lines = dto.items.map((i) => ({
-      // Honour a client-supplied id (shared id space with the KDS ticket); else
-      // Prisma mints a cuid.
-      ...(i.id ? { id: i.id } : {}),
-      tenantId,
-      menuItemId: i.menuItemId,
-      name: i.name,
-      unitPrice: i.unitPrice,
-      qty: i.qty,
-      notes: i.notes,
-      modifiers: {
-        create: this.resolveItemModifiers(
-          tenantId,
-          menuItemById.get(i.menuItemId) ?? null,
-          i.modifiers ?? [],
-        ),
-      },
-    }));
-
-    await this.prisma.round.create({
-      data: {
-        ...(dto.id ? { id: dto.id } : {}),
+      const lines = dto.items.map((i) => ({
+        // Honour a client-supplied id (shared id space with the KDS ticket); else
+        // Prisma mints a cuid.
+        ...(i.id ? { id: i.id } : {}),
         tenantId,
-        orderId,
-        type: dto.type,
-        items: { create: lines },
-      },
+        menuItemId: i.menuItemId,
+        name: i.name,
+        unitPrice: i.unitPrice,
+        qty: i.qty,
+        notes: i.notes,
+        modifiers: {
+          create: this.resolveItemModifiers(
+            tenantId,
+            menuItemById.get(i.menuItemId) ?? null,
+            i.modifiers ?? [],
+          ),
+        },
+      }));
+
+      await tx.round.create({
+        data: {
+          ...(dto.id ? { id: dto.id } : {}),
+          tenantId,
+          orderId,
+          type: dto.type,
+          items: { create: lines },
+        },
+      });
+
+      // Final reload INSIDE the transaction doubles as the emitted payload —
+      // kills the refreshAndEmit double-load (perf doc P3 #13).
+      const row = await tx.order.findFirst({
+        where: { id: orderId, tenantId },
+        include: ROUND_INCLUDE,
+      });
+      if (!row) throw new NotFoundException(`Order not found: ${orderId}`);
+      return toDomainOrder(row);
     });
-    return this.refreshAndEmit(tenantId, orderId, "updated");
+
+    // Emit strictly AFTER commit — a rollback must never broadcast an order
+    // state that doesn't exist.
+    this.events.emit(tenantId, { type: "updated", orderId, order });
+    return order;
   }
 
   /**
@@ -1020,8 +1039,11 @@ export class OrdersService {
     orderId: string,
     deviceId?: string,
     trusted = false,
+    // Callers already inside a $transaction pass their tx client so the guard
+    // shares that BEGIN/COMMIT instead of paying its own (see addRound).
+    db: Prisma.TransactionClient = this.prisma,
   ): Promise<void> {
-    const order = await this.prisma.order.findFirst({
+    const order = await db.order.findFirst({
       where: { id: orderId, tenantId },
       select: { id: true, deviceId: true },
     });
