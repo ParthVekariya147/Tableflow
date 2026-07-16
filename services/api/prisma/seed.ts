@@ -297,6 +297,10 @@ async function main(): Promise<void> {
       name: "Amber & Grain",
       currency: "USD",
       taxRate: 0.1,
+      gstNumber: "24AAACA1234A1Z5",
+      fssaiNumber: "10012031000123",
+      address: "12 MG Road, Ahmedabad, Gujarat 380001",
+      phone: "079-2656 0000",
       upiId: "amberandgrain@okhdfc",
       upiMobile: "919876543210",
       theme: {

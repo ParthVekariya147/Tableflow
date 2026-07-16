@@ -36,6 +36,9 @@ export function RestaurantProfilePage() {
     String(Math.round(tenant.taxRate * 100)),
   );
   const [gstNumber, setGstNumber] = useState(tenant.gstNumber ?? "");
+  const [fssaiNumber, setFssaiNumber] = useState(tenant.fssaiNumber ?? "");
+  const [address, setAddress] = useState(tenant.address ?? "");
+  const [phone, setPhone] = useState(tenant.phone ?? "");
   const [saving, setSaving] = useState(false);
   const [savedTick, setSavedTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +55,10 @@ export function RestaurantProfilePage() {
     name.trim() !== committedRef.current.name ||
     currency !== committedRef.current.currency ||
     parseFloat(taxPct) !== Math.round(committedRef.current.taxRate * 100) ||
-    gstNumber.trim() !== (committedRef.current.gstNumber ?? "");
+    gstNumber.trim() !== (committedRef.current.gstNumber ?? "") ||
+    fssaiNumber.trim() !== (committedRef.current.fssaiNumber ?? "") ||
+    address.trim() !== (committedRef.current.address ?? "") ||
+    phone.trim() !== (committedRef.current.phone ?? "");
 
   function discard() {
     const t = committedRef.current;
@@ -60,6 +66,9 @@ export function RestaurantProfilePage() {
     setCurrency(t.currency);
     setTaxPct(String(Math.round(t.taxRate * 100)));
     setGstNumber(t.gstNumber ?? "");
+    setFssaiNumber(t.fssaiNumber ?? "");
+    setAddress(t.address ?? "");
+    setPhone(t.phone ?? "");
     setError(null);
   }
 
@@ -76,6 +85,9 @@ export function RestaurantProfilePage() {
         currency,
         taxRate,
         gstNumber: gstNumber.trim(),
+        fssaiNumber: fssaiNumber.trim(),
+        address: address.trim(),
+        phone: phone.trim(),
       });
       committedRef.current = updated;
       setSavedTick((t) => t + 1);
@@ -103,7 +115,8 @@ export function RestaurantProfilePage() {
             Restaurant Profile
           </h1>
           <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
-            Name, currency, tax rate, and GST number shown on bills.
+            Name, currency, tax rate, address, phone, and GST/FSSAI numbers
+            shown on bills.
           </p>
         </div>
       </header>
@@ -207,6 +220,50 @@ export function RestaurantProfilePage() {
               GST number must be exactly 15 characters.
             </p>
           )}
+        </Section>
+
+        {/* FSSAI License */}
+        <Section title="FSSAI License Number">
+          <p className="mb-md font-body-md text-body-md text-on-surface-variant">
+            Your 14-digit FSSAI food-safety license, printed on every bill.
+            Leave blank if not applicable.
+          </p>
+          <input
+            value={fssaiNumber}
+            onChange={(e) => setFssaiNumber(e.target.value.replace(/\D/g, ""))}
+            placeholder="e.g. 10012031000123"
+            maxLength={14}
+            inputMode="numeric"
+            className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-md py-sm font-data-mono text-[14px] tracking-widest text-on-surface focus:border-primary focus:outline-none"
+          />
+          {fssaiNumber.trim().length > 0 && fssaiNumber.trim().length !== 14 && (
+            <p className="mt-xs font-body-md text-body-md text-error">
+              FSSAI license number must be exactly 14 digits.
+            </p>
+          )}
+        </Section>
+
+        {/* Address & Phone */}
+        <Section title="Address & Phone">
+          <p className="mb-md font-body-md text-body-md text-on-surface-variant">
+            Printed centered under the restaurant name on every bill.
+          </p>
+          <div className="space-y-sm">
+            <textarea
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="e.g. 12 MG Road, Ahmedabad, Gujarat 380001"
+              rows={2}
+              className="w-full resize-y rounded-lg border border-outline-variant bg-surface-container-lowest px-md py-sm font-body-md text-body-md text-on-surface focus:border-primary focus:outline-none"
+            />
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="e.g. 079-2656 0000 or 98765 43210"
+              type="tel"
+              className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-md py-sm font-body-md text-body-md text-on-surface focus:border-primary focus:outline-none"
+            />
+          </div>
         </Section>
 
         {/* Actions */}

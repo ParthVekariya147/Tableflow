@@ -80,6 +80,12 @@ export const tenantSchema = z.object({
   taxRate: z.number().min(0).max(1).default(0),
   /** GST registration number shown on bills/receipts (e.g. "22AAAAA0000A1Z5"). */
   gstNumber: z.string().optional(),
+  /** FSSAI food-safety license number, printed on bills (Indian restaurants). */
+  fssaiNumber: z.string().optional(),
+  /** Street address printed under the restaurant name on bills. */
+  address: z.string().optional(),
+  /** Front-desk phone number printed on bills. */
+  phone: z.string().optional(),
   /** UPI VPA / address for digital payments (e.g. "restaurant@okicici"). */
   upiId: z.string().optional(),
   /** Mobile number registered with UPI (digits only, no country code prefix needed). */
@@ -111,6 +117,9 @@ export const updateTenantRequestSchema = z
     currency: z.string().length(3),
     taxRate: z.number().min(0).max(1),
     gstNumber: z.string().optional(),
+    fssaiNumber: z.string().optional(),
+    address: z.string().optional(),
+    phone: z.string().optional(),
     upiId: z.string().optional(),
     upiMobile: z.string().optional(),
     theme: themeConfigSchema,

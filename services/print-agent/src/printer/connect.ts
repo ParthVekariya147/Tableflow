@@ -1,5 +1,9 @@
-import { ThermalPrinter, PrinterTypes } from "node-thermal-printer";
-import type { PrinterSettings } from "@amber/domain";
+import {
+  CharacterSet,
+  ThermalPrinter,
+  PrinterTypes,
+} from "node-thermal-printer";
+import { printerColumns, type PrinterSettings } from "@amber/domain";
 import { osPrintDriver } from "./osPrintDriver.js";
 
 /** Thrown for a missing/incomplete connection config — a 400, not a printer failure. */
@@ -21,7 +25,10 @@ export function buildPrinter(settings: PrinterSettings): ThermalPrinter {
     type: PrinterTypes.EPSON,
     interface: resolveInterface(settings),
     driver: settings.connectionType === "network" ? undefined : osPrintDriver,
-    width: settings.paperWidth === "58mm" ? 32 : 48,
+    // buildPrinter is only reached on the ESC/POS path (TSPL goes raw), so
+    // pin the language — a "tspl"-flagged config must not get TSPL columns here.
+    width: printerColumns({ ...settings, commandLanguage: "escpos" }),
+    characterSet: CharacterSet.PC437_USA,
     removeSpecialCharacters: false,
   });
 }
@@ -47,6 +54,8 @@ function resolveInterface(settings: PrinterSettings): string {
       return `printer:${settings.bluetoothPort}`;
     }
     default:
-      throw new PrinterConfigError(`Unknown connection type: ${String(settings.connectionType)}`);
+      throw new PrinterConfigError(
+        `Unknown connection type: ${String(settings.connectionType)}`,
+      );
   }
 }

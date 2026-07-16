@@ -10,7 +10,12 @@ import { z } from "zod";
  * tenant like `theme`/`upiId`.
  */
 
-export const printerConnectionTypeSchema = z.enum(["usb", "bluetooth", "network"]);
+export const printerConnectionTypeSchema = z.enum([
+  "usb",
+  "bluetooth",
+  "network",
+]);
+export const printerCommandLanguageSchema = z.enum(["auto", "escpos", "tspl"]);
 
 /**
  * The printable blocks of a receipt, in the order they're printed. Stored as
@@ -21,6 +26,7 @@ export const receiptSectionTypeSchema = z.enum([
   "logo",
   "header",
   "orderInfo",
+  "customerInfo",
   "lineItems",
   "totals",
   "paymentMethod",
@@ -40,10 +46,13 @@ export const DEFAULT_FOOTER_MESSAGE = "Thank you for dining with us!";
 
 /** Default layout — a conventional receipt order. QR sections default off
  *  since they need UPI/review-link config elsewhere to have any content. */
-export const DEFAULT_RECEIPT_SECTIONS: readonly z.infer<typeof receiptSectionSchema>[] = [
+export const DEFAULT_RECEIPT_SECTIONS: readonly z.infer<
+  typeof receiptSectionSchema
+>[] = [
   { type: "logo", enabled: true },
   { type: "header", enabled: true },
   { type: "orderInfo", enabled: true },
+  { type: "customerInfo", enabled: true },
   { type: "lineItems", enabled: true },
   { type: "totals", enabled: true },
   { type: "paymentMethod", enabled: true },
@@ -72,7 +81,20 @@ export const printerSettingsSchema = z
     networkHost: z.string().optional(),
     /** Network: ESC/POS port, 9100 is the near-universal default. */
     networkPort: z.number().int().positive().default(9100),
-    paperWidth: z.enum(["58mm", "80mm"]).default("80mm"),
+    /**
+     * ESC/POS is for receipt printers. TSPL is for TSC-style label printers
+     * such as the DA310. Auto detects common TSC queue/share names.
+     */
+    commandLanguage: printerCommandLanguageSchema.default("auto"),
+    /**
+     * Roll width as "<mm>mm". Free-form (not an enum) so unusual printers fit:
+     * the Settings UI offers PAPER_WIDTH_PRESETS plus a custom mm input.
+     * Renderers parse it via paperWidthToMm.
+     */
+    paperWidth: z
+      .string()
+      .regex(/^\d{2,3}mm$/)
+      .default("80mm"),
     /** Editable free text on the "footer" section, e.g. "Thank you for dining with us!" */
     footerMessage: z.string().optional(),
     /** Ordered, toggle-able receipt layout. Falls back to DEFAULT_RECEIPT_SECTIONS if unset. */
@@ -80,7 +102,39 @@ export const printerSettingsSchema = z
   })
   .partial();
 
+/**
+ * A tenant's saved layout may predate newer section types (e.g.
+ * "customerInfo") — append any missing types with their default enabled
+ * state, so new print features surface without wiping the saved order.
+ */
+export function mergeReceiptSections(
+  saved: z.infer<typeof receiptSectionSchema>[] | undefined,
+): z.infer<typeof receiptSectionSchema>[] {
+  const base = saved?.length
+    ? saved.map((s) => ({ ...s }))
+    : DEFAULT_RECEIPT_SECTIONS.map((s) => ({ ...s }));
+  for (const def of DEFAULT_RECEIPT_SECTIONS) {
+    if (!base.some((s) => s.type === def.type)) base.push({ ...def });
+  }
+  return base;
+}
+
+/** The common thermal roll sizes: 2" receipt, 3" dot-matrix/receipt, 3.15"
+ *  receipt, 4" label (e.g. TSC DA310). Any other width is entered as custom. */
+export const PAPER_WIDTH_PRESETS = ["58mm", "76mm", "80mm", "101mm"] as const;
+
+/** Parse a `paperWidth` setting ("80mm") to millimetres, clamped to the
+ *  plausible roll range; unset/garbage falls back to 80mm. */
+export function paperWidthToMm(paperWidth: string | undefined): number {
+  const mm = Number.parseInt(paperWidth ?? "", 10);
+  if (!Number.isFinite(mm)) return 80;
+  return Math.min(210, Math.max(40, mm));
+}
+
 export type PrinterConnectionType = z.infer<typeof printerConnectionTypeSchema>;
+export type PrinterCommandLanguage = z.infer<
+  typeof printerCommandLanguageSchema
+>;
 export type ReceiptSectionType = z.infer<typeof receiptSectionTypeSchema>;
 export type ReceiptSection = z.infer<typeof receiptSectionSchema>;
 export type PrinterSettings = z.infer<typeof printerSettingsSchema>;

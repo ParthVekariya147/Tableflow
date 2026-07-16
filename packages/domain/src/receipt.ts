@@ -21,7 +21,14 @@ export const receiptLineSchema = z.object({
 
 export const receiptSchema = z.object({
   tenantName: z.string().min(1),
+  /** Statutory/contact lines under the restaurant name (header section). */
+  address: z.string().optional(),
+  phone: z.string().optional(),
   gstNumber: z.string().optional(),
+  fssaiNumber: z.string().optional(),
+  /** Guest details captured at reservation (customerInfo section). */
+  customerName: z.string().optional(),
+  customerPhone: z.string().optional(),
   tableLabel: z.string().min(1),
   /** Human-facing check/receipt number, derived from the order id. */
   checkNumber: z.string().min(1),

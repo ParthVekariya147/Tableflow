@@ -59,19 +59,13 @@ Package names are scoped `@amber/*`. Internal deps use `workspace:*`.
 
 ## The contract — `@amber/domain` (`packages/domain/src/`)
 All shapes are Zod schemas with inferred types. Key entities:
-- `Tenant` (`tenant.ts`) — `{ id, slug, name, currency, taxRate, theme, active }`
-  plus bill/statutory fields (`gstNumber?`, `fssaiNumber?`, `address?`, `phone?` —
-  printed on receipts), UPI (`upiId?`, `upiMobile?`), and three JSON config blobs:
-  `printer` + `kitchenPrinter` (`PrinterSettings`, see printing below) and
-  `loyalty` (`LoyaltyProgram`). `updateTenantRequestSchema` = the `PATCH /tenant`
-  body (all fields optional; slug/active are platform-only).
+- `Tenant` (`tenant.ts`) — `{ id, slug, name, currency, taxRate, theme, active }`.
   `ThemeConfig` = `{ colors (partial token overrides, hex), typography, logoUrl, mode }`.
 - `MenuItem` / `MenuCategory` / `Menu` (`menu.ts`) — price is **minor units (cents)**.
   `MenuItem.modifierGroups` carries custom modifiers: `ModifierGroup` has an
   `inputType` (`single` radio · `multiple` checkbox · `toggle` switches · `text`
   free-text) + `required`/`min`/`maxSelect`/`maxLength`; `ModifierOption` has a
-  `priceDelta` (cents, may be negative). See **`api-reference/MODIFIERS.md`** for
-  the full feature.
+  `priceDelta` (cents, may be negative). See **`MODIFIERS.md`** for the full feature.
 - `Table` (`table.ts`) — `{ id, tenantId, label, qrToken, seats? }`.
 - `Order` / `Round` / `OrderItem` (`order.ts`) — Order = a table session holding
   Rounds. Round `type`: `instant` ("bring it") | `bundled` ("bring these").
@@ -93,48 +87,25 @@ All shapes are Zod schemas with inferred types. Key entities:
 - `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row).
 - `analytics.ts` — `AnalyticsSummary` (revenue/orders/avgTicket + deltas, revenue
   series, top items, category split, peak hours) for the dashboard/analytics page.
-- `permission.ts` — `PERMISSIONS`, the fixed 9-key permission catalog (incl.
-  `loyalty.manage`) + `PERMISSION_LABELS` + `hasPermission`. Roles are data;
-  this vocabulary is the only hardcoded part of RBAC.
-- `loyalty.ts` — `LoyaltyProgram` (tenant config) + `LoyaltyAccount`/
-  `LoyaltyTransaction` + the earn/redeem math helpers.
-- **Printing contract** (see flow 9): `printer.ts` — `PrinterSettings`
-  (agent URL/secret, `connectionType` usb|bluetooth|network, `commandLanguage`
-  `auto`|`escpos`|`tspl`, free-form `paperWidth` `"<mm>mm"` +
-  `PAPER_WIDTH_PRESETS` [58/76/80/101mm] + `paperWidthToMm`, ordered
-  toggle-able `sections` + `mergeReceiptSections` which appends section types
-  added after a layout was saved, e.g. `customerInfo`); `receipt.ts` —
-  `Receipt` (tenant identity incl. `address`/`phone`/`gstNumber`/`fssaiNumber`,
-  guest `customerName`/`customerPhone`, lines, totals, settled flag, UPI/review
-  URLs); `kot.ts` — `Kot` (kitchen ticket: table/round/items/modifiers/notes,
-  no prices); `print-format.ts` — the **shared text-layout engine** used by
-  BOTH the print agent's renderers and the admin's live preview (`formatAmount`
-  plain numbers without currency symbol, `wrapText`, `labelValueRow` truncates
-  the label never the amount, `itemTableColumns/Header/Rows` Item·Qty·Price·
-  Amount table that drops the unit-Price column under 34 cols, `taxRows`
-  CGST/SGST split when GST-registered, `shouldUseTspl`, `printerColumns`).
-- See **`api-reference/FEATURES.md`** for the full per-app feature →
-  data-requirement inventory that drives the schema.
+- See **`FEATURES.md`** (repo root) for the full per-app feature → data-requirement
+  inventory that drives the schema.
 
 ## API — `services/api` (NestJS + Prisma)
-- `prisma/schema.prisma` — root `Tenant` (theme / printer / kitchenPrinter /
-  loyalty as JSON; statutory bill fields `gstNumber`/`fssaiNumber`/`address`/
-  `phone`; UPI `upiId`/`upiMobile`) + identity (`User`,
+- `prisma/schema.prisma` — root `Tenant` (theme as JSON) + identity (`User`,
   `Membership`, `Role`; platform staff are `User.isSuperAdmin`). **RBAC:** `Role`
   is now a **per-tenant table** (`{ name, permissions String[], protected }`), NOT
   a fixed enum — Admins create/rename/edit custom roles. `Membership` carries
   `roleId` + an optional per-user `permissions String[]` override (non-empty =
   the member's COMPLETE effective set; else inherit the role — see
   `effectivePermissions`). The permission keys are the fixed catalog in
-  `@amber/domain`'s `PERMISSIONS` (`permission.ts`). Then floor (`Room`,
+  `@amber/domain`'s `PERMISSIONS`. See **`SETTINGS.md`** §B. Then floor (`Room`,
   `Table` w/ `sortOrder`), menu
   (`MenuCategory`, `MenuItem`, optional `ModifierGroup`/`ModifierOption`),
   curated `MenuPlacement` (`PlacementKind` featured|welcome — fast lookup for the
   customer Welcome carousels + Menu hero), session (`Order`, `Round`, `OrderItem`
   w/ per-stage timestamps `preparingAt/readyAt/servedAt/cancelledAt`,
   `OrderItemModifier`), `Payment` (one per order, `method`, snapshot
-  subtotal/tax/tip/total, `tendered`), `Review` (guest stars + comment), and
-  loyalty (`LoyaltyAccount` keyed tenant+phone, `LoyaltyTransaction` ledger).
+  subtotal/tax/tip/total, `tendered`), and `Review` (guest stars + comment).
   Every non-tenant row carries `tenantId` (RLS-ready). `Order.billRequestedAt`
   powers the bill-request flow; `Order.customerName/customerPhone` (both optional)
   hold guest contact for the bill/receipt. ⚠️ Online-pay provider fields,
@@ -197,10 +168,6 @@ All shapes are Zod schemas with inferred types. Key entities:
   `PATCH /service-requests/:id` staff-only, `@RequirePermission("tables.manage")`;
   `GET /service-requests/stream` SSE, same `?tenant=` fallback as the orders
   stream — see flow 8),
-  `loyalty/` (`GET /loyalty/accounts?search=`, `GET /loyalty/accounts/:id` →
-  account + transaction ledger + order summaries, `PATCH /loyalty/accounts/:id/adjust`
-  — whole controller `loyalty.manage`-gated; guests never talk to it — account
-  creation + earn/redeem happen server-side from `OrdersService`),
   `admin/` (`GET|POST /admin/tenants`). `prisma/` is a global module.
   Item-status PATCH stamps the per-stage timestamps; **it 409s if the order is
   `closed`/`paid`** (terminal) so a stale KDS board can't resurrect a dead order —
@@ -284,7 +251,7 @@ All shapes are Zod schemas with inferred types. Key entities:
   after schema changes: `pnpm --filter @amber/api exec prisma db push` then
   `pnpm db:seed` (the `prisma-erd-generator: not found` line is harmless). After
   changing `.env`, **restart the API** (nest watch doesn't reload env).
-- ⚠️ **Still missing** (see `api-reference/FEATURES.md`): category reorder (edit/delete done),
+- ⚠️ **Still missing** (see `FEATURES.md`): category reorder (edit/delete done),
   menu placements, and review submit. (Analytics aggregates are now a real
   server-side endpoint — `GET /orders/analytics` — wired into the Dashboard +
   Analytics page.) **Build order is vertical per slice:** domain
@@ -373,7 +340,7 @@ for a different tenant. `ApiError` for non-2xx.
   `components/ItemSheet.jsx` renders an item's **modifier groups** (radio / checkbox /
   switch / text by `inputType`), live-recomputes the price as options are picked, blocks
   add until required groups are satisfied, and carries the chosen modifiers through the
-  cart → round → `addRound` (effective per-unit price = base + Σ deltas). See `api-reference/MODIFIERS.md`.
+  cart → round → `addRound` (effective per-unit price = base + Σ deltas). See `MODIFIERS.md`.
   **Quick Actions** (`screens/WelcomeScreen.jsx`) — Water / Call Staff / Manager —
   are guest **service requests**, not menu items: tapping one calls
   `sendServiceRequest(type)` (`context/SessionContext.jsx`) →
@@ -442,18 +409,8 @@ for a different tenant. `ApiError` for non-2xx.
   delete), and **`BrandingPage`** (`/settings/branding`: edit the tenant's theme —
   brand colors, font pairing, logo upload — with a **live whole-app preview** via
   `useTenantBrand().applyTenant` from `TenantThemeGate`; Save persists via
-  `api.tenant.update({theme})`, leaving without saving reverts). Also live under
-  Settings: **`RestaurantProfilePage`** (`/settings/profile`: name, currency,
-  tax rate, GST number, **FSSAI license** (14-digit validation), **address**,
-  **phone** — the statutory fields printed on every bill), **`PaymentsPage`**
-  (`/settings/payments`: UPI id/mobile for the bill's payment QR),
-  **`PrinterPage`** (`/settings/printer`: print-agent + receipt layout — see
-  flow 9), **`LoyaltySettingsPage`** (`/settings/loyalty`), and
-  **`PlanBillingPage`** (`/settings/billing`, read-only subscription). Beyond
-  Settings, newer operational pages: **`QuickSalePage`** (`/quick-sale`,
-  walk-in counter sale), **`BillingQueuePage`** (`/billing`, floor-wide list of
-  sessions awaiting payment), and **`LoyaltyPage`** (`/loyalty`,
-  `loyalty.manage`-gated customer points directory + adjust).
+  `api.tenant.update({theme})`, leaving without saving reverts). Team & Roles &
+  Branding are live; Restaurant Profile + Payments are still placeholder cards.
   Both Team/Roles pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
   a non-Admin (e.g. a Manager) sees a "lock/Admin" chip instead of edit/remove on
   protected (Admin) members + the Admin role, and can't pick the Admin role when
@@ -465,7 +422,7 @@ for a different tenant. `ApiError` for non-2xx.
   the Admin-tier guard blocks them touching the Admin), `kitchen@…` = Kitchen (→ `/kds`
   only). Other tenants now have logins too: `admin@greenbowl.com`, `admin@bellapizza.com`
   (each their tenant's Admin), and **`owner@ambergroup.com`** belongs to *both*
-  Amber & Grain and Green Bowl → exercises the **tenant picker**. See `docs/apps/restaurant-admin.md` for the full RBAC write-up.
+  Amber & Grain and Green Bowl → exercises the **tenant picker**. See **`SETTINGS.md`**.
   `store/AdminStore.tsx` is now API-backed: it loads menu + floor (`tables.list`) +
   sales on mount, maps the domain shapes to the local `data/types.ts` view model
   (kept for low page churn), and exposes an **async `dispatch`** that translates each
@@ -487,7 +444,7 @@ for a different tenant. `ApiError` for non-2xx.
   `{ state, dispatch }` from `useAdmin()`. `MenuPage`'s item editor (`components/ItemPanel.tsx`)
   is a **centered full modal** (not the old slide-over) with a **modifier-group builder**
   (add groups by `inputType`, options with price deltas, required/min/max) — saved with
-  the item (replace-on-save). See **`api-reference/MODIFIERS.md`**. **`OrderHistoryPage`** (`/history`, sidebar
+  the item (replace-on-save). See **`MODIFIERS.md`**. **`OrderHistoryPage`** (`/history`, sidebar
   "Order History") lists completed/paid sales for a date range (Today default /
   Yesterday / Last 7 days / All) via `api.orders.sales({from,to})`, with revenue/count
   summary and expandable rows that lazy-load each order's items (`api.orders.get`) to

@@ -66,3 +66,14 @@ responding."
     differ.
   - **macOS/Linux**: pipes to CUPS's `lp -d <name> -o raw`, present by default
     on macOS and on Linux distros with `cups-client` installed.
+
+## Printer language
+
+Settings -> Printer has a "Printer language" option:
+
+- **Auto** - defaults to ESC/POS, but switches to TSPL for common TSC queue/share
+  names such as `TSC DA310` or `TSC_DA310`.
+- **Receipt ESC/POS** - standard thermal receipt printers.
+- **TSC / TSPL** - TSC label printers such as DA310. These printers are USB
+  connected and visible in Windows, but they do not understand ESC/POS receipt
+  commands, so the agent sends a label-style TSPL slip instead.

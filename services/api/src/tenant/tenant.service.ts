@@ -39,6 +39,9 @@ export class TenantService {
     if (input.currency !== undefined) data.currency = input.currency;
     if (input.taxRate !== undefined) data.taxRate = input.taxRate;
     if (input.gstNumber !== undefined) data.gstNumber = input.gstNumber || null;
+    if (input.fssaiNumber !== undefined) data.fssaiNumber = input.fssaiNumber || null;
+    if (input.address !== undefined) data.address = input.address || null;
+    if (input.phone !== undefined) data.phone = input.phone || null;
     if (input.upiId !== undefined) data.upiId = input.upiId || null;
     if (input.upiMobile !== undefined) data.upiMobile = input.upiMobile || null;
     if (input.theme !== undefined) data.theme = input.theme as Prisma.InputJsonValue;

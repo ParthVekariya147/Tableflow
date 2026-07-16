@@ -1,22 +1,20 @@
 import type { ThermalPrinter } from "node-thermal-printer";
 import {
-  DEFAULT_RECEIPT_SECTIONS,
-  formatMoney,
+  formatAmount,
+  itemTableHeader,
+  itemTableRows,
+  labelValueRow,
+  mergeReceiptSections,
+  taxRows,
+  wrapText,
   type Receipt,
   type ReceiptSectionType,
 } from "@amber/domain";
 
 type SectionRenderer = (printer: ThermalPrinter, receipt: Receipt) => void | Promise<void>;
 
-function money(receipt: Receipt, cents: number): string {
-  return formatMoney(cents, receipt.currency);
-}
-
 function row(printer: ThermalPrinter, label: string, value: string): void {
-  printer.tableCustom([
-    { text: label, align: "LEFT", width: 0.6 },
-    { text: value, align: "RIGHT", width: 0.4 },
-  ]);
+  printer.println(labelValueRow(label, value, printer.getWidth()));
 }
 
 /** Logo image is decorative — pngjs (node-thermal-printer's image backend)
@@ -35,12 +33,19 @@ const renderLogo: SectionRenderer = async (printer, receipt) => {
   }
 };
 
+/** Restaurant identity block, all centered: name, address, phone, then the
+ *  statutory registration lines (GSTIN / FSSAI) — the standard bill header. */
 const renderHeader: SectionRenderer = (printer, receipt) => {
   printer.alignCenter();
   printer.bold(true);
   printer.println(receipt.tenantName);
   printer.bold(false);
-  if (receipt.gstNumber) printer.println(`GST: ${receipt.gstNumber}`);
+  if (receipt.address)
+    for (const line of wrapText(receipt.address, printer.getWidth()))
+      printer.println(line);
+  if (receipt.phone) printer.println(`Ph: ${receipt.phone}`);
+  if (receipt.gstNumber) printer.println(`GSTIN: ${receipt.gstNumber}`);
+  if (receipt.fssaiNumber) printer.println(`FSSAI: ${receipt.fssaiNumber}`);
 };
 
 const renderOrderInfo: SectionRenderer = (printer, receipt) => {
@@ -50,30 +55,47 @@ const renderOrderInfo: SectionRenderer = (printer, receipt) => {
   printer.drawLine();
 };
 
+/** Guest name/phone captured at reservation — prints nothing for walk-ins. */
+const renderCustomerInfo: SectionRenderer = (printer, receipt) => {
+  if (!receipt.customerName && !receipt.customerPhone) return;
+  printer.alignLeft();
+  if (receipt.customerName) printer.println(`Name: ${receipt.customerName}`);
+  if (receipt.customerPhone) printer.println(`Ph: ${receipt.customerPhone}`);
+  printer.drawLine();
+};
+
 const renderLineItems: SectionRenderer = (printer, receipt) => {
   printer.alignLeft();
+  const width = printer.getWidth();
+  printer.println(itemTableHeader(width));
+  printer.drawLine();
   for (const line of receipt.lines) {
-    row(printer, `${line.qty}x ${line.name}`, money(receipt, line.unitPrice * line.qty));
+    for (const out of itemTableRows(line, width)) printer.println(out);
     for (const modifier of line.modifiers) printer.println(`  ${modifier}`);
   }
   printer.drawLine();
 };
 
 const renderTotals: SectionRenderer = (printer, receipt) => {
-  row(printer, "Subtotal", money(receipt, receipt.subtotal));
-  row(printer, `Tax (${(receipt.taxRate * 100).toFixed(1)}%)`, money(receipt, receipt.tax));
-  if (receipt.gratuity) row(printer, "Gratuity", money(receipt, receipt.gratuity));
+  printer.alignLeft();
+  const totalQty = receipt.lines.reduce((s, l) => s + l.qty, 0);
+  row(printer, "Total Qty", String(totalQty));
+  row(printer, "Subtotal", formatAmount(receipt.subtotal));
+  for (const [label, value] of taxRows(receipt.taxRate, receipt.tax, !!receipt.gstNumber))
+    row(printer, label, value);
+  if (receipt.gratuity) row(printer, "Gratuity", formatAmount(receipt.gratuity));
   printer.bold(true);
-  row(printer, receipt.settled ? "TOTAL" : "TOTAL DUE", money(receipt, receipt.total));
+  row(printer, receipt.settled ? "TOTAL" : "TOTAL DUE", formatAmount(receipt.total));
   printer.bold(false);
 };
 
 /** Nothing to report on an unpaid bill — only prints once `settled`. */
 const renderPaymentMethod: SectionRenderer = (printer, receipt) => {
   if (!receipt.settled || !receipt.method) return;
+  printer.alignLeft();
   printer.println(`Paid via ${receipt.method.toUpperCase()}`);
-  if (receipt.tendered !== undefined) row(printer, "Tendered", money(receipt, receipt.tendered));
-  if (receipt.change !== undefined) row(printer, "Change", money(receipt, receipt.change));
+  if (receipt.tendered !== undefined) row(printer, "Tendered", formatAmount(receipt.tendered));
+  if (receipt.change !== undefined) row(printer, "Change", formatAmount(receipt.change));
 };
 
 /**
@@ -109,6 +131,7 @@ const RENDERERS: Record<ReceiptSectionType, SectionRenderer> = {
   logo: renderLogo,
   header: renderHeader,
   orderInfo: renderOrderInfo,
+  customerInfo: renderCustomerInfo,
   lineItems: renderLineItems,
   totals: renderTotals,
   paymentMethod: renderPaymentMethod,
@@ -125,7 +148,9 @@ const RENDERERS: Record<ReceiptSectionType, SectionRenderer> = {
  * nothing — enabling it is harmless, not an error.
  */
 export async function renderReceipt(printer: ThermalPrinter, receipt: Receipt): Promise<void> {
-  const sections = receipt.sections?.length ? receipt.sections : DEFAULT_RECEIPT_SECTIONS;
+  // Merge, don't just fall back: a saved layout from before a section type
+  // existed (e.g. customerInfo) still gets the new section appended.
+  const sections = mergeReceiptSections(receipt.sections);
   for (const section of sections) {
     if (!section.enabled) continue;
     await RENDERERS[section.type](printer, receipt);

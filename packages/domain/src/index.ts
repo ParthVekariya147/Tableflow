@@ -20,5 +20,6 @@ export * from "./payment.js";
 export * from "./analytics.js";
 export * from "./billing.js";
 export * from "./printer.js";
+export * from "./print-format.js";
 export * from "./receipt.js";
 export * from "./kot.js";

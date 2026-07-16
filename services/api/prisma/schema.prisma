@@ -31,6 +31,12 @@ model Tenant {
   currency       String   @default("USD")
   taxRate        Float    @default(0)
   gstNumber      String?
+  /// FSSAI food-safety license number, printed on bills.
+  fssaiNumber    String?
+  /// Street address printed under the restaurant name on bills.
+  address        String?
+  /// Front-desk phone number printed on bills.
+  phone          String?
   /**
    * UPI VPA used for QR-code / deep-link payments (e.g. "restaurant@okicici").
    */

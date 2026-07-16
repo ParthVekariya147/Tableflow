@@ -54,7 +54,12 @@ function buildReceipt(
 
   return {
     tenantName: tenant.name,
+    address: tenant.address,
+    phone: tenant.phone,
     gstNumber: tenant.gstNumber,
+    fssaiNumber: tenant.fssaiNumber,
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
     tableLabel,
     checkNumber: (tableId ?? orderId).slice(-6).toUpperCase(),
     createdAt: payment?.createdAt ?? order.closedAt ?? new Date().toISOString(),
