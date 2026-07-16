@@ -22,10 +22,14 @@ import type { JwtPayload, TicketPayload } from "./auth.types.js";
 import type { SupabaseClaims } from "./auth-request.js";
 
 // JwtAuthGuard calls resolveAuthUser on EVERY authenticated request (by design,
-// so role/permission changes apply immediately). A short cache removes the two
-// DB round trips for the common case; members/roles services invalidate the
-// relevant entries on write so edits still take effect right away.
-const AUTH_USER_CACHE_TTL_MS = 30_000;
+// so role/permission changes apply immediately). A cache removes the DB round
+// trips for the common case; members/roles services invalidate the relevant
+// entries on write so edits still take effect right away — invalidation is the
+// correctness mechanism, the TTL only bounds staleness for out-of-band writes
+// (direct DB edits). 5 min instead of 30s so the admin's idle 60s self-heal
+// poll stays a cache hit instead of re-resolving every time (measured: each
+// miss = 3 queries ≈ 12 pooled round trips ≈ 1s+ against ap-southeast-1).
+const AUTH_USER_CACHE_TTL_MS = 300_000;
 const authUserCacheKey = (tenantId: string, userId: string): string =>
   `${tenantId}:${userId}`;
 
@@ -40,6 +44,10 @@ const LOGIN_MAX_ATTEMPTS = 8;
 @Injectable()
 export class AuthService {
   private readonly authUserCache = new TtlCache<AuthUser>(AUTH_USER_CACHE_TTL_MS);
+  // Coalesces concurrent cache misses for the same member (the admin app's boot
+  // burst fires ~8 authenticated requests at once) into ONE resolution instead
+  // of a stampede of identical User/Membership/Role query chains.
+  private readonly authUserInflight = new Map<string, Promise<AuthUser>>();
   private readonly loginAttempts = new TtlCache<number>(LOGIN_LOCKOUT_WINDOW_MS);
 
   constructor(
@@ -49,13 +57,20 @@ export class AuthService {
 
   /** Drop one member's cached AuthUser (their role/permissions/active changed). */
   invalidateAuthUser(tenantId: string, userId: string): void {
-    this.authUserCache.delete(authUserCacheKey(tenantId, userId));
+    const key = authUserCacheKey(tenantId, userId);
+    this.authUserCache.delete(key);
+    // Also orphan any in-flight load so its (now possibly stale) result is
+    // returned to its callers but NOT written back into the cache.
+    this.authUserInflight.delete(key);
   }
 
   /** Drop every cached AuthUser for a tenant (a role's permissions changed,
    *  affecting everyone on it — we don't track role→members here). */
   invalidateTenantAuthUsers(tenantId: string): void {
     this.authUserCache.deletePrefix(`${tenantId}:`);
+    for (const key of this.authUserInflight.keys()) {
+      if (key.startsWith(`${tenantId}:`)) this.authUserInflight.delete(key);
+    }
   }
 
   /**
@@ -355,6 +370,33 @@ export class AuthService {
     const cached = this.authUserCache.get(cacheKey);
     if (cached) return cached;
 
+    // Join an identical resolution already in flight instead of stampeding.
+    const inflight = this.authUserInflight.get(cacheKey);
+    if (inflight) return inflight;
+
+    // `let` + self-reference: the async body only compares against `load`
+    // after its first await, by which point the assignment below has run.
+    let load: Promise<AuthUser> | undefined = undefined;
+    load = (async () => {
+      try {
+        const authUser = await this.loadAuthUser(tenantId, userId);
+        // Cache only if no invalidation raced this load (invalidate* removes
+        // the in-flight marker, so a stale result is served once, not cached).
+        if (this.authUserInflight.get(cacheKey) === load) {
+          this.authUserCache.set(cacheKey, authUser);
+        }
+        return authUser;
+      } finally {
+        if (this.authUserInflight.get(cacheKey) === load) {
+          this.authUserInflight.delete(cacheKey);
+        }
+      }
+    })();
+    this.authUserInflight.set(cacheKey, load);
+    return load;
+  }
+
+  private async loadAuthUser(tenantId: string, userId: string): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.active) {
       throw new UnauthorizedException("User no longer active");
@@ -392,7 +434,6 @@ export class AuthService {
       permissions,
       mustChangePassword: user.mustChangePassword,
     };
-    this.authUserCache.set(cacheKey, authUser);
     return authUser;
   }
 }

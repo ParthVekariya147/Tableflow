@@ -6,13 +6,19 @@ import { toDomainTenant } from "./tenant.mapper.js";
 import { TtlCache } from "../common/ttl-cache.js";
 
 // Every tenant-scoped request resolves the tenant by slug (TenantMiddleware).
-// Tenants change rarely (branding/profile edits), so a short cache removes a
-// DB round trip from nearly every request; `update` invalidates on write.
-const TENANT_CACHE_TTL_MS = 30_000;
+// Tenants change rarely (branding/profile edits) and every write path
+// invalidates explicitly, so the TTL is only a staleness bound for out-of-band
+// writes (direct DB edits). 5 min instead of 30s so the admin's idle 60s
+// self-heal poll stays a cache hit instead of paying a pooled DB round trip
+// (~500ms against ap-southeast-1) per request.
+const TENANT_CACHE_TTL_MS = 300_000;
 
 @Injectable()
 export class TenantService {
   private readonly bySlugCache = new TtlCache<Tenant>(TENANT_CACHE_TTL_MS);
+  // Coalesces concurrent cache misses for the same slug (the admin boot burst
+  // fires ~8 tenant-scoped requests at once) into ONE lookup.
+  private readonly bySlugInflight = new Map<string, Promise<Tenant>>();
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -20,13 +26,34 @@ export class TenantService {
   async getBySlug(slug: string): Promise<Tenant> {
     const cached = this.bySlugCache.get(slug);
     if (cached) return cached;
-    const row = await this.prisma.tenant.findUnique({ where: { slug } });
-    if (!row || !row.active) {
-      throw new NotFoundException(`Unknown tenant: ${slug}`);
-    }
-    const tenant = toDomainTenant(row);
-    this.bySlugCache.set(slug, tenant);
-    return tenant;
+
+    const inflight = this.bySlugInflight.get(slug);
+    if (inflight) return inflight;
+
+    // `let` + self-reference: the async body only compares against `load`
+    // after its first await, by which point the assignment below has run.
+    let load: Promise<Tenant> | undefined = undefined;
+    load = (async () => {
+      try {
+        const row = await this.prisma.tenant.findUnique({ where: { slug } });
+        if (!row || !row.active) {
+          throw new NotFoundException(`Unknown tenant: ${slug}`);
+        }
+        const tenant = toDomainTenant(row);
+        // Cache only if no invalidation raced this load (invalidateCache
+        // removes the in-flight marker too).
+        if (this.bySlugInflight.get(slug) === load) {
+          this.bySlugCache.set(slug, tenant);
+        }
+        return tenant;
+      } finally {
+        if (this.bySlugInflight.get(slug) === load) {
+          this.bySlugInflight.delete(slug);
+        }
+      }
+    })();
+    this.bySlugInflight.set(slug, load);
+    return load;
   }
 
   /**
@@ -64,6 +91,9 @@ export class TenantService {
    */
   invalidateCache(slug: string): void {
     this.bySlugCache.delete(slug);
+    // Orphan any in-flight load so its (now possibly stale) result is served
+    // to its callers but not written back into the cache.
+    this.bySlugInflight.delete(slug);
   }
 
   /** All tenants (super-admin). */
