@@ -519,7 +519,9 @@ export function SessionProvider({ children }) {
       }
     };
     check();
-    const id = setInterval(check, 12000);
+    // True fallback cadence — the SSE stream above is the primary signal, so
+    // this only has to catch a silently-dropped stream, not drive the UX.
+    const id = setInterval(check, 30000);
     return () => {
       stopped = true;
       clearInterval(id);
@@ -548,7 +550,9 @@ export function SessionProvider({ children }) {
         if (!stopped && e?.status === 404) endSession(true);
       }
     };
-    const id = setInterval(check, 15000);
+    // True fallback cadence — SSE is the primary path; this poll only covers a
+    // dropped stream / deleted order (backgrounded mobile tabs).
+    const id = setInterval(check, 45000);
     return () => {
       stopped = true;
       clearInterval(id);
@@ -556,7 +560,7 @@ export function SessionProvider({ children }) {
   }, [sessionStarted, sessionEnded, awaitingCash, api, endSession]);
 
   // Memoized so every consumer doesn't re-render on every SessionProvider
-  // render (e.g. the 15s self-heal poll's own state churn) — only when a
+  // render (e.g. the 45s self-heal poll's own state churn) — only when a
   // value it actually reads changes.
   const value = useMemo(() => ({
     tableNumber, sessionStarted, startSession, sessionStartTime,

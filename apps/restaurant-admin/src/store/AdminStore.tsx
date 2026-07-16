@@ -18,6 +18,7 @@ import type {
   FloorTable,
   Sale as DomainSale,
   Order as DomainOrder,
+  Table as DomainTable,
 } from "@amber/domain";
 import type {
   AdminState,
@@ -63,9 +64,10 @@ function toModifierGroupsInput(groups: ModifierGroup[]) {
  * API-backed store for the admin panel. The provider loads the tenant's menu,
  * floor (tables + live sessions) and sales from @amber/api-client, maps them to
  * the local AdminState the pages already consume, and exposes an async
- * `dispatch` that translates each UI action into the matching API call and then
- * refetches. Pages and selectors are unchanged — only the data source moved
- * from an in-memory seed to the live API (Supabase via services/api).
+ * `dispatch` that translates each UI action into the matching API call and
+ * applies the returned object (or the SSE echo) directly to state — refetches
+ * are reserved for menu edits (1 call), the initial load, and self-heal
+ * fallbacks. Pages and selectors are unchanged.
  */
 
 const DEFAULT_ICON = "restaurant";
@@ -169,25 +171,10 @@ function mapTable(ft: FloorTable): Table {
   };
 }
 
-function mapState(
-  menu: DomainMenu,
-  floor: FloorTable[],
-  sales: DomainSale[],
-  taxRate: number,
-  currency: string,
-  gstNumber?: string,
-  upiId?: string,
-  upiMobile?: string,
-  tenantName?: string,
-): AdminState {
+/** Menu → the categories/items slice of AdminState. */
+function mapMenuSlice(menu: DomainMenu): Pick<AdminState, "categories" | "items"> {
   const nameToId = new Map(menu.categories.map((c) => [c.name, c.id]));
   return {
-    taxRate,
-    currency,
-    gstNumber,
-    upiId,
-    upiMobile,
-    tenantName,
     categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
     items: menu.items.map((i): MenuItem => ({
       id: i.id,
@@ -218,14 +205,81 @@ function mapState(
         })),
       })),
     })),
-    tables: floor.map(mapTable),
-    sales: sales.map((s) => ({
-      id: s.id,
-      tableLabel: s.tableLabel,
-      totalCents: s.total,
-      method: s.method,
-      at: Date.parse(s.createdAt),
-    })),
+  };
+}
+
+/** Sales feed → the sales slice of AdminState. */
+function mapSales(sales: DomainSale[]): AdminState["sales"] {
+  return sales.map((s) => ({
+    id: s.id,
+    tableLabel: s.tableLabel,
+    totalCents: s.total,
+    method: s.method,
+    at: Date.parse(s.createdAt),
+  }));
+}
+
+// ── push-driven floor updates ──────────────────────────────────────────────
+// The SSE stream delivers the COMPLETE fresh Order with every event, so the
+// floor can be updated in place from the push instead of refetching
+// `tables.list` + `orders.sales` on each event (2 API round trips per event,
+// per open device — the old pattern, and the main source of perceived lag).
+
+/** Orders that still occupy a table. Mirrors the server's LIVE_STATUSES. */
+const LIVE_ORDER_STATUSES = new Set<DomainOrder["status"]>(["open", "billed"]);
+
+/** Client mirror of the server's floor-status derivation (tables.mapper.ts
+ *  `deriveStatus`) — keep the two in sync. */
+function deriveTableStatus(order: DomainOrder): Table["status"] {
+  if (order.status === "billed" || order.billRequestedAt) return "bill";
+  const hasItems = order.rounds.some((r) =>
+    r.items.some((i) => i.status !== "cancelled"),
+  );
+  return hasItems ? "ordering" : "seated";
+}
+
+/** Apply one pushed/returned Order to the floor: live → (re)attach as the
+ *  table's session; paid/closed → free the table (only if it's still THIS
+ *  order occupying it, so a stale closed event can't kill a newer session). */
+function applyOrderToTables(tables: Table[], order: DomainOrder): Table[] {
+  return tables.map((t) => {
+    if (t.id !== order.tableId) return t;
+    if (!LIVE_ORDER_STATUSES.has(order.status)) {
+      if (t.session && t.session.orderId !== order.id) return t;
+      return { ...t, session: undefined, status: "free" };
+    }
+    return { ...t, session: mapSession(order), status: deriveTableStatus(order) };
+  });
+}
+
+/** Rebuild every table's session from a stream snapshot of the live floor. */
+function applySnapshotToTables(tables: Table[], orders: DomainOrder[]): Table[] {
+  // Newest live order per table (snapshot orders arrive newest-first).
+  const byTable = new Map<string, DomainOrder>();
+  for (const o of orders) if (!byTable.has(o.tableId)) byTable.set(o.tableId, o);
+  return tables.map((t) => {
+    const order = byTable.get(t.id);
+    if (!order) {
+      return t.session || t.status !== "free"
+        ? { ...t, session: undefined, status: "free" }
+        : t;
+    }
+    return { ...t, session: mapSession(order), status: deriveTableStatus(order) };
+  });
+}
+
+/** Domain Table (a tables.* mutation response) → view Table, preserving the
+ *  live-session fields the domain shape doesn't carry. */
+function mergeDomainTable(existing: Table | undefined, t: DomainTable): Table {
+  return {
+    id: t.id,
+    label: t.label,
+    room: t.room ?? "",
+    seats: t.seats ?? 0,
+    status: existing?.status ?? "free",
+    qrToken: t.qrToken,
+    session: existing?.session,
+    isCounter: t.isCounter,
   };
 }
 
@@ -311,50 +365,100 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const mutatingRef = useRef(false);
   mutatingRef.current = mutateCount > 0;
 
-  // Monotonic counter shared by `refresh`/`refreshFloor`. Both can be
-  // triggered from independent sources (the SSE stream, the poll interval,
-  // focus/visibilitychange, an explicit page-level `refresh()` call) that can
-  // race — an EARLIER request resolving AFTER a LATER one (ordinary network
-  // jitter) would otherwise silently revert state to stale data. Each call
-  // captures its own sequence number and only applies its result if nothing
-  // newer has started since.
-  const syncSeqRef = useRef(0);
+  // Per-slice monotonic counters. Refetches can be triggered from independent
+  // sources (the fallback poll, focus/visibilitychange, an explicit page-level
+  // `refresh()` call) that can race — an EARLIER request resolving AFTER a
+  // LATER write would silently revert state to stale data. Each refetch
+  // captures its slice's number at start and only applies if nothing newer
+  // wrote that slice since. "Newer" includes DIRECT writes (pushed SSE events
+  // and mutation responses, which bump floorSeqRef via `applyTables`), not
+  // just competing refetches — pushed data is by definition fresher than any
+  // refetch already in flight.
+  const floorSeqRef = useRef(0);
+  const salesSeqRef = useRef(0);
+  const menuSeqRef = useRef(0);
 
-  const refresh = useCallback(async () => {
-    const seq = ++syncSeqRef.current;
-    const [tenant, menu, floor, sales] = await Promise.all([
-      fetchCurrentTenantCoalesced(() => api.tenant.current()),
-      api.menu.get(),
-      emptyOn403(api.tables.list()),
-      emptyOn403(api.orders.sales()),
-    ]);
-    if (seq !== syncSeqRef.current) return; // superseded by a newer sync
-    setState(mapState(menu, floor, sales, tenant.taxRate ?? 0, tenant.currency, tenant.gstNumber, tenant.upiId, tenant.upiMobile, tenant.name));
-    setLoaded(true);
-  }, [api]);
+  // Apply a direct floor write (a pushed stream event or a mutation response).
+  // This is the push-driven replacement for the old refetch-per-event pattern.
+  const applyTables = useCallback((updater: (tables: Table[]) => Table[]) => {
+    floorSeqRef.current++;
+    setState((s) => ({ ...s, tables: updater(s.tables) }));
+  }, []);
 
-  // Lighter refetch for live order events: only the floor + sales change on an
-  // order mutation, so leave menu/categories/taxRate untouched (less load than a
-  // full `refresh`). Driven by the SSE stream below.
+  // Full floor refetch — now only the initial load, the low-frequency fallback
+  // poll, page-level `refreshFloor()` calls, and rare escape hatches (an event
+  // for an unknown table, a failed mutation) hit this; live updates apply the
+  // pushed order directly instead.
   const refreshFloor = useCallback(async () => {
-    const seq = ++syncSeqRef.current;
+    const floorSeq = ++floorSeqRef.current;
+    const salesSeq = ++salesSeqRef.current;
     const [floor, sales] = await Promise.all([
       emptyOn403(api.tables.list()),
       emptyOn403(api.orders.sales()),
     ]);
-    if (seq !== syncSeqRef.current) return; // superseded by a newer sync
+    // Apply each slice independently — either may have been superseded.
     setState((s) => ({
       ...s,
-      tables: floor.map(mapTable),
-      sales: sales.map((sl) => ({
-        id: sl.id,
-        tableLabel: sl.tableLabel,
-        totalCents: sl.total,
-        method: sl.method,
-        at: Date.parse(sl.createdAt),
-      })),
+      ...(floorSeq === floorSeqRef.current ? { tables: floor.map(mapTable) } : {}),
+      ...(salesSeq === salesSeqRef.current ? { sales: mapSales(sales) } : {}),
     }));
   }, [api]);
+
+  // Sales only change when an order closes (payment capture), so a `closed`
+  // stream event / local payment is the only live trigger for this — debounced
+  // so the local COMPLETE_PAYMENT dispatch and its own stream echo coalesce
+  // into ONE sales call instead of two.
+  const salesTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const refreshSalesSoon = useCallback(() => {
+    if (salesTimerRef.current) return;
+    salesTimerRef.current = setTimeout(() => {
+      salesTimerRef.current = undefined;
+      const seq = ++salesSeqRef.current;
+      emptyOn403(api.orders.sales())
+        .then((sales) => {
+          if (seq !== salesSeqRef.current) return;
+          setState((s) => ({ ...s, sales: mapSales(sales) }));
+        })
+        .catch(() => {}); // fallback poll self-heals
+    }, 200);
+  }, [api]);
+  useEffect(() => () => clearTimeout(salesTimerRef.current), []);
+
+  // Menu-only refetch — what a menu/category mutation needs (server-assigned
+  // ids, category mapping). 1 call, replacing the old 4-call full refresh.
+  const refreshMenu = useCallback(async () => {
+    const seq = ++menuSeqRef.current;
+    const menu = await api.menu.get();
+    if (seq !== menuSeqRef.current) return;
+    setState((s) => ({ ...s, ...mapMenuSlice(menu) }));
+  }, [api]);
+
+  // Tenant profile + menu — only the initial load / explicit full refresh.
+  const refreshTenantMenu = useCallback(async () => {
+    const seq = ++menuSeqRef.current;
+    const [tenant, menu] = await Promise.all([
+      fetchCurrentTenantCoalesced(() => api.tenant.current()),
+      api.menu.get(),
+    ]);
+    if (seq !== menuSeqRef.current) return;
+    setState((s) => ({
+      ...s,
+      taxRate: tenant.taxRate ?? 0,
+      currency: tenant.currency,
+      gstNumber: tenant.gstNumber,
+      upiId: tenant.upiId,
+      upiMobile: tenant.upiMobile,
+      tenantName: tenant.name,
+      ...mapMenuSlice(menu),
+    }));
+  }, [api]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshTenantMenu(), refreshFloor()]);
+    setLoaded(true);
+  }, [refreshTenantMenu, refreshFloor]);
 
   // Listeners registered via `subscribeOrderEvents` (e.g. the KDS board) — fed
   // from the single stream subscription below instead of opening their own.
@@ -408,15 +512,16 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
 
   // Real-time: subscribe to the tenant's live order stream so external changes
   // (guest QR reservations, payments, KDS status, another device's edits) land
-  // on the floor instantly. Coalesce bursts (snapshot + deltas) into one floor
-  // refetch, and skip while a local mutation (+ its refetch) is in flight so a
-  // pushed event can't clobber optimistic state (existing `mutatingRef` guard).
+  // on the floor instantly. Every event carries the COMPLETE fresh Order (and
+  // the reconnect snapshot the whole live floor), so it is applied to state
+  // DIRECTLY — no refetch round trip per event. Applying is safe even while a
+  // local mutation is in flight: it's authoritative server state, replaced
+  // wholesale by orderId, so there is no optimistic state to clobber.
   // This is the ONE `/orders/stream` connection for the whole app — other
   // consumers (KDS) subscribe via `subscribeOrderEvents` above rather than
   // opening a second EventSource.
   useEffect(() => {
     if (!loaded) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const unsub = api.orders.stream((event) => {
       // Keep the live-orders mirror in sync so a late `subscribeOrderEvents`
       // caller can be seeded correctly (see liveOrdersRef above).
@@ -438,31 +543,49 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       if (event.type === "closed") {
         void kdsClient.cancelOrder?.(event.orderId);
       }
-      if (mutatingRef.current || timer) return;
-      timer = setTimeout(() => {
-        timer = undefined;
-        if (mutatingRef.current) return;
+
+      if (event.type === "snapshot") {
+        // The snapshot is the guaranteed full re-sync (reconnects): replace
+        // every table's session wholesale so any drift gets wiped.
+        applyTables((tables) => applySnapshotToTables(tables, event.orders));
+        return;
+      }
+      // Escape hatch: an order for a table this client doesn't know yet (table
+      // added on another device) can't be merged in place — fall back to one
+      // full floor refetch for that rare case instead of dropping the event.
+      // Guarded on tables EXISTING: a role that can't read the floor at all
+      // (tables.list 403s → always empty, e.g. Kitchen) must not turn this
+      // into a refetch-per-event loop — it has no floor state to fix, and the
+      // KDS consumes events via subscribeOrderEvents, not state.tables.
+      const knownTables = stateRef.current.tables;
+      if (
+        knownTables.length > 0 &&
+        !knownTables.some((t) => t.id === event.order.tableId)
+      ) {
         refreshFloor().catch(() => {});
-      }, 150);
+      } else {
+        applyTables((tables) => applyOrderToTables(tables, event.order));
+      }
+      // A closed order may have produced a sale (payment capture) — the one
+      // remaining live sales trigger (debounced; see refreshSalesSoon).
+      if (event.type === "closed") refreshSalesSoon();
     });
-    return () => {
-      if (timer) clearTimeout(timer);
-      unsub();
-    };
-  }, [loaded, api, refreshFloor]);
+    return unsub;
+  }, [loaded, api, applyTables, refreshFloor, refreshSalesSoon]);
 
   // Background sync — low-frequency self-heal fallback behind the SSE stream
   // above (covers a dropped stream, e.g. a backgrounded tab). Only resyncs
   // floor + sales (via `refreshFloor`), not menu — menu only changes through
-  // explicit admin edits, which already trigger their own full `refresh()` in
+  // explicit admin edits, which already trigger their own menu refetch in
   // `dispatch` — so polling it here was pure redundant `/menu` traffic for
   // every page, including ones (like KDS) that never read menu state at all.
   // Polls while the tab is visible and refetches immediately on focus; skips
   // while a mutation (+ its own refetch) is in flight to avoid clobbering
-  // optimistic state.
+  // optimistic state. 60s: the stream (with its reconnect snapshot) is the
+  // primary path — this is a true last-resort fallback, not a data source.
   useEffect(() => {
     if (!loaded) return;
-    const POLL_MS = 20000;
+    const POLL_MS = 60000;
     // `visibilitychange` and `focus` commonly both fire within the same tick
     // when switching back to a backgrounded tab — debounce them behind one
     // trigger (mirrors the SSE handler's 150ms coalescing above) instead of
@@ -553,31 +676,49 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "DELETE_CATEGORY":
           await api.menu.deleteCategory(action.categoryId);
           return;
-        case "ADD_TABLE":
-          await api.tables.create({
+        // Every mutation below applies the API's returned object to state
+        // directly (plus the SSE echo re-applying the same data, idempotent) —
+        // no refetch. That's what removed the old post-dispatch wait: callers
+        // that read state right after `await dispatch(...)` (OpenSessionModal,
+        // QrModal's regenerate) see it already updated when apply() resolves.
+        case "ADD_TABLE": {
+          const t = await api.tables.create({
             label: action.label,
             seats: action.seats,
             room: action.room,
           });
+          applyTables((tables) => [...tables, mergeDomainTable(undefined, t)]);
           return;
-        case "OPEN_SESSION":
-          await api.orders.createForTable(action.tableId, {
+        }
+        case "OPEN_SESSION": {
+          const order = await api.orders.createForTable(action.tableId, {
             customerName: action.customerName,
             customerPhone: action.customerPhone,
           });
+          applyTables((tables) => applyOrderToTables(tables, order));
           return;
-        case "REGEN_QR":
-          await api.tables.regenerateQr(action.tableId);
+        }
+        case "REGEN_QR": {
+          const t = await api.tables.regenerateQr(action.tableId);
+          applyTables((tables) =>
+            tables.map((x) => (x.id === t.id ? mergeDomainTable(x, t) : x)),
+          );
           return;
-        case "UPDATE_TABLE":
-          await api.tables.update(action.tableId, {
+        }
+        case "UPDATE_TABLE": {
+          const t = await api.tables.update(action.tableId, {
             label: action.patch.label,
             seats: action.patch.seats,
             room: action.patch.room,
           });
+          applyTables((tables) =>
+            tables.map((x) => (x.id === t.id ? mergeDomainTable(x, t) : x)),
+          );
           return;
+        }
         case "DELETE_TABLE":
           await api.tables.remove(action.tableId);
+          applyTables((tables) => tables.filter((x) => x.id !== action.tableId));
           return;
         case "ADD_ORDER_ITEMS": {
           const orderId = orderIdFor(action.tableId);
@@ -607,7 +748,11 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
             })
             .filter((i): i is NonNullable<typeof i> => i !== null);
           if (roundItems.length === 0) return;
-          await api.orders.addRound(orderId, { type: "bundled", items: roundItems });
+          const order = await api.orders.addRound(orderId, {
+            type: "bundled",
+            items: roundItems,
+          });
+          applyTables((tables) => applyOrderToTables(tables, order));
           return;
         }
         case "CHANGE_QTY": {
@@ -617,18 +762,21 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           // atomic DB increment, so two rapid taps (or two staff devices on
           // the same table) both land instead of the second silently
           // clobbering the first's write.
-          if (orderId)
-            await api.orders.updateItem(orderId, action.itemId, {
+          if (orderId) {
+            const order = await api.orders.updateItem(orderId, action.itemId, {
               qtyDelta: action.delta,
             });
+            applyTables((tables) => applyOrderToTables(tables, order));
+          }
           return;
         }
         case "CANCEL_ITEM": {
           const orderId = orderIdFor(action.tableId);
           if (orderId) {
-            await api.orders.updateItem(orderId, action.itemId, {
+            const order = await api.orders.updateItem(orderId, action.itemId, {
               status: "cancelled",
             });
+            applyTables((tables) => applyOrderToTables(tables, order));
             // Signal the KDS to pull this dish's card off the board (any column).
             // The ticket id is `roundId::orderItemId` (shared id space). The order
             // itself stays live, so this is the only way the kitchen learns the
@@ -640,7 +788,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "CANCEL_ORDER": {
           const orderId = orderIdFor(action.tableId);
           if (orderId) {
-            await api.orders.cancel(orderId);
+            const order = await api.orders.cancel(orderId);
+            applyTables((tables) => applyOrderToTables(tables, order));
             // Drop the whole order from the KDS immediately (don't wait for the
             // stream round-trip). Idempotent with the closed-event handler.
             void kdsClient.cancelOrder?.(orderId);
@@ -649,7 +798,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         }
         case "COMPLETE_PAYMENT": {
           const orderId = orderIdFor(action.tableId);
-          if (orderId)
+          if (orderId) {
             // Server recomputes subtotal/tax from the order; amountCents is advisory.
             // tenderedCents (cash only) is persisted so a later receipt reprint
             // can still show change due.
@@ -657,18 +806,30 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
               method: action.method,
               tendered: action.tenderedCents,
             });
+            // capturePayment returns the Payment, not the Order — free the
+            // settled table directly and pull the new sale into the feed (the
+            // stream's `closed` echo coalesces into the same debounced fetch).
+            applyTables((tables) =>
+              tables.map((t) =>
+                t.session?.orderId === orderId
+                  ? { ...t, session: undefined, status: "free" }
+                  : t,
+              ),
+            );
+            refreshSalesSoon();
+          }
           return;
         }
       }
     },
-    [api, orderIdFor],
+    [api, orderIdFor, applyTables, refreshSalesSoon],
   );
 
-  // Menu/category actions change items the floor refetch doesn't cover
-  // (categories, item fields, tenant taxRate/currency) — those need the full
-  // 4-call refresh. Table/session/payment actions only ever change tables +
-  // sales, so the lighter 2-call refreshFloor (already used by the SSE
-  // handler) is enough and halves the API calls for the common case.
+  // Menu/category actions are the only ones that still refetch after the
+  // mutation (one `menu.get()` — server-assigned ids + category mapping come
+  // back in one shot). Table/session/payment actions already applied the
+  // mutation's returned object to state inside apply(), so they finish the
+  // moment the mutation itself resolves — no post-dispatch wait at all.
   const MENU_ACTION_TYPES = useMemo(
     () =>
       new Set<Action["type"]>([
@@ -680,22 +841,6 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         "UPDATE_CATEGORY",
         "DELETE_CATEGORY",
       ]),
-    [],
-  );
-
-  // Of the refreshFloor-resynced actions, these two are the only callers that
-  // read the refetched state right after `await dispatch(...)` resolves:
-  // OpenSessionModal navigates into TableSessionPage expecting the new
-  // session to already be in `state.tables` (its own comment says so), and
-  // QrModal's regenerate() re-renders the QR from the refetched `table.qrToken`
-  // — showing the OLD code even a moment longer risks staff printing/scanning
-  // a QR that's about to stop working. Every other refreshFloor caller either
-  // only closes a modal (no state read) or navigates to a page that re-syncs
-  // itself (TableSessionPage's own mount effect) or just needs the shared
-  // context to catch up shortly after (TablesPage), so they don't need to
-  // block on the refetch — see BLOCKING_RESYNC_TYPES below.
-  const BLOCKING_RESYNC_TYPES = useMemo(
-    () => new Set<Action["type"]>(["OPEN_SESSION", "REGEN_QR"]),
     [],
   );
 
@@ -720,26 +865,22 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         await apply(action);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        // A failed floor action can mean this client's snapshot was stale
+        // (e.g. a 409 from a table settled elsewhere) — one refetch resyncs.
+        if (!MENU_ACTION_TYPES.has(action.type))
+          void refreshFloor().catch(() => {});
       } finally {
-        const resync = MENU_ACTION_TYPES.has(action.type) ? refresh : refreshFloor;
-        const resynced = resync().catch(() => {});
-        const settle = () => {
-          setMutateCount((c) => Math.max(0, c - 1));
-          if (tempId)
-            setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
-        };
-        // mutateCount (→ mutatingRef) stays true until `resynced` settles
-        // either way, so an SSE event arriving mid-refetch still gets skipped
-        // (see the stream handler below) — only whether the CALLER waits changes.
-        if (MENU_ACTION_TYPES.has(action.type) || BLOCKING_RESYNC_TYPES.has(action.type)) {
-          await resynced;
-          settle();
-        } else {
-          void resynced.then(settle);
+        if (MENU_ACTION_TYPES.has(action.type)) {
+          // Await it so the ADD_ITEM "crafting" placeholder is only removed
+          // once the real item is in state (same UX as before).
+          await refreshMenu().catch(() => {});
         }
+        setMutateCount((c) => Math.max(0, c - 1));
+        if (tempId)
+          setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
       }
     },
-    [apply, refresh, refreshFloor, MENU_ACTION_TYPES, BLOCKING_RESYNC_TYPES],
+    [apply, refreshMenu, refreshFloor, MENU_ACTION_TYPES],
   );
 
   const uploadImage = useCallback(
