@@ -14,6 +14,14 @@
 
 generator client {
   provider = "prisma-client-js"
+  // relationJoins is PREVIEW (pass 5): per-query relationLoadStrategy:"join"
+  // collapses an include's N sequential queries into ONE LATERAL-join query —
+  // applied per-callsite (orders get()/list()), NOT as a global default.
+  // Prisma is version-PINNED (6.19.3) while this preview flag is on; treat any
+  // Prisma upgrade as a deliberate re-verification of the two callsites.
+  // (Rust-engine concurrency panic prisma#26827 is fixed < 6.19.3; the open
+  // prisma#28058 affects only the driver-adapters engine we don't use.)
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

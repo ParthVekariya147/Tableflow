@@ -103,7 +103,13 @@ export class OrdersService {
     deviceId?: string,
     trusted = false,
   ): Promise<Order> {
+    // relationLoadStrategy "join" (pass 5, preview — see schema generator
+    // note): ROUND_INCLUDE otherwise decomposes into 4 sequential queries
+    // (order → rounds → items → modifiers), and this load runs after every
+    // mutation via refreshAndEmit — one LATERAL-join query cuts each mutation
+    // by 3 round trips.
     const row = await this.prisma.order.findFirst({
+      relationLoadStrategy: "join",
       where: { id, tenantId },
       include: ROUND_INCLUDE,
     });
@@ -415,7 +421,10 @@ export class OrdersService {
 
   /** List sessions for the floor / KDS. Defaults to live (open + billed). */
   async list(tenantId: string, status?: OrderStatus): Promise<Order[]> {
+    // "join" strategy (pass 5): the staff floor list + every SSE snapshot hit
+    // this — one LATERAL-join query instead of 4 sequential ones.
     const rows = await this.prisma.order.findMany({
+      relationLoadStrategy: "join",
       where: { tenantId, status: status ? status : { in: LIVE_STATUSES } },
       orderBy: { createdAt: "desc" },
       include: ROUND_INCLUDE,
