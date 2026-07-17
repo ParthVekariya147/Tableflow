@@ -59,10 +59,15 @@ Staff floor list / SSE snapshot: ~1.0 s → **~110 ms**.
 
 ## What's left
 
-1. **Mumbai region move** (final step before launch). RTT ~100 ms → ~20–40 ms
-   multiplies through everything above. Projection: addRound (10 RT)
-   **~250–450 ms**, mutations **~100–200 ms**, reads **< 100 ms** — the
-   physical floor. The first screenshot's "3–4 s waits" resolved ~15–20×.
+1. **Mumbai region move** (final step before launch; kit ready — see
+   `MUMBAI-CUTOVER.md`, blocked only on creating the ap-south-1 project).
+   Measured RTT from the dev desk: ~48 ms median (vs ~100 ms Singapore). The
+   closing row has **two columns**: *dev-from-desk* — reads ~50–60 ms,
+   mutations ~120–160 ms, addRound ~500–600 ms (~8–10× from the 4.9 s start) —
+   and *production-co-located* — with the API deployed in/near ap-south-1 the
+   API↔DB RTT is ~1–5 ms, landing addRound **~150–250 ms** and reads in the
+   tens of ms. **API region choice is a performance decision**: deploying the
+   API outside ap-south-1 forfeits most of the migration.
 2. Optional residue, in Mumbai's shadow: capturePayment's loyalty writes
    (~3 statements) could batch; addRound's per-connection statement re-prepare
    (~200 ms outliers) shrinks proportionally with RTT; analytics' joined query

@@ -18,6 +18,16 @@ TCP RTT from the dev machine (6 samples each):
 ≈ 2.2–2.5× cut on every round trip. Projection at ~40–50 ms/query:
 mutations (2 RT) ~120–160 ms · reads ~50–60 ms · addRound (10 RT) ~500–600 ms.
 
+**⚠️ Those are dev-from-desk numbers — they define developer experience only.**
+In production the RTT that matters is API-server↔database. **Co-locate the API
+in/near ap-south-1 at deploy time** (any Mumbai-region VPS or platform) and
+that RTT is ~1–5 ms: addRound's 10 round trips cost ~50 ms of network and the
+endpoint lands **~150–250 ms total, reads in the tens of ms**. The closing
+trajectory row therefore has two columns — dev-from-desk (what the cutover
+bench measures) and production-co-located (what guests feel). **API region
+choice is a performance decision now, not just a hosting one** — deploying the
+API outside ap-south-1 forfeits most of this migration.
+
 ## Pre-migration inventory (what lives beyond Postgres)
 
 - **Auth users: 1** — the platform super-admin (`SUPER_ADMIN_SEED_EMAIL`).
@@ -68,18 +78,33 @@ It copies all tables in FK order, copies the storage bucket, rewrites
 re-runs just the comparison).
 
 **Step 5 — swap env + restart:**
-- `services/api/.env`: `DATABASE_URL` (Mumbai direct, keep
-  `?connection_limit=8`), `DIRECT_URL`, `SUPABASE_URL`,
-  `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`. Keep the pass-3 comment
-  block; append the Mumbai date.
+- `services/api/.env`: `DATABASE_URL` (Mumbai direct), `DIRECT_URL`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`. Keep the
+  pass-3 comment block; append the Mumbai date.
+- ⚠️ **Connection-string copy-check** — the dashboard's suggested string will
+  push its own pooler; the runtime URL must stay **direct port 5432 +
+  `?connection_limit=8` + NO `pgbouncer=true`**, or a paste error silently
+  reverts pass 3 (and %-encode any `@` in the password).
 - `apps/restaurant-admin/.env.local` + super-admin env: `VITE_SUPABASE_URL`,
   `VITE_SUPABASE_ANON_KEY`.
-- Restart the API (env is read at process start). Staff JWTs (`JWT_SECRET`)
-  are ours, not Supabase's — existing staff logins survive.
+- Restart the API (env is read at process start).
+- **Expected session behavior (not a cutover failure):** staff logins survive —
+  staff tokens are signed with our own `JWT_SECRET` (`auth.module.ts`), which
+  doesn't change with the project. The **super-admin panel session dies** (it's
+  a Supabase-signed session verified against `SUPABASE_JWT_SECRET`) — one
+  re-login, by design.
 
 **Step 6 — verify + close the trajectory:**
+- **Storage policy check** — the script copies objects and creates the bucket
+  `public: true`, but access policies are project-level config that does NOT
+  ride along with objects. Verify a menu image actually renders in the
+  customer app (or curl a public object URL → 200) before declaring the copy
+  complete — the URL rewrite is only half of "images work".
+- Super-admin re-login works against the new project (auth re-link check).
 - Sad-path matrix + endpoint bench + burst harness once against Mumbai.
-- Append the closing row to `PERFORMANCE_RESULTS.md` (the pass-6 numbers).
+- Append the closing row to `PERFORMANCE_RESULTS.md` — **two columns**:
+  dev-from-desk (measured now) and production-co-located (~1–5 ms RTT,
+  measured at deploy).
 
 **Step 7 — rollback + retirement:** keep the Singapore project **paused for
 one week** as the rollback (rollback = swap the env values back). Then delete
