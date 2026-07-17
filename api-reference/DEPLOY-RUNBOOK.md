@@ -65,6 +65,26 @@ In the real `services/api/.env` (never commit it). Values, not placeholders:
 
 ---
 
+## Step 2b — Terminate HTTP/2 in front of the API  ⏱ ~10 min · REQUIRED
+
+**Non-negotiable for launch** (BUGS.md BUG-005). Every restaurant-admin tab
+holds two permanent SSE streams, and browsers cap HTTP/1.1 at ~6 connections
+per host across all tabs of a profile — a till PC with three panel tabs open
+saturates the cap and every further API call hangs (identical symptom to the
+old BUG-003 pool starvation, with a perfectly healthy API). HTTP/2 multiplexes
+all streams over one connection and dissolves the cap entirely.
+
+- Put the API behind a reverse proxy that speaks **HTTP/2 to browsers** (nginx
+  `listen 443 ssl http2;`, Caddy does it by default with TLS) and plain
+  HTTP/1.1 upstream to Nest.
+- HTTP/2 requires TLS in every browser — so this also means real certificates
+  on the API origin, not `http://<ip>:3001`.
+- **Verify:** DevTools → Network → Protocol column shows `h2` for
+  `/orders/stream`, and 4+ admin tabs stay live simultaneously while a fifth
+  tab's API calls still answer instantly.
+
+---
+
 ## Step 3 — Prove the deploy fails CLOSED  ⏱ ~3 min
 
 The #3 fix only has value if it actually refuses a bad config. Before trusting
@@ -114,5 +134,6 @@ Anything beyond those two = a new advisory since this pass; triage before launch
 
 ## One-line go/no-go
 
-**Go** when: Step 0 clean · Supabase signup locked · env table filled · box proven
-to fail-closed · #4 resolved-or-disabled. Everything else is scheduled, not gating.
+**Go** when: Step 0 clean · Supabase signup locked · env table filled · **HTTP/2
+proxy in front of the API (step 2b)** · box proven to fail-closed · #4
+resolved-or-disabled. Everything else is scheduled, not gating.

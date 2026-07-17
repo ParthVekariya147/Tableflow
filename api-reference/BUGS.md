@@ -24,7 +24,34 @@
 
 ## Open
 
-_(none)_
+### BUG-005 — 3+ admin tabs in one Chrome saturate the HTTP/1.1 connection cap; every API call then hangs 🔴 S1
+- **Reported:** found during perf pass 3 (2026-07-17): with dashboard + tables +
+  KDS-display tabs open (plus one more), the customer app's boot fetches hung
+  until the api-client's 15s timeout ("This code didn't work / We couldn't reach
+  the restaurant") while the API answered curl in ~100ms the whole time.
+- **Repro:** open 3–4 restaurant-admin tabs in one Chrome profile (any mix of
+  routes), then load any page that calls the API from that same profile. Check
+  `Get-NetTCPConnection -LocalPort 3001 -State Established` → exactly 6
+  Chrome-owned connections; further fetches queue behind them indefinitely.
+- **Expected:** any realistic number of panel tabs on a till PC keeps working.
+- **Analysis (confirmed):** every admin tab holds TWO permanent SSE streams
+  (`/orders/stream` + `/service-requests/stream` — `ServiceRequestsProvider` is
+  mounted app-wide in `main.tsx`, so even chrome-free `/kds/display` carries the
+  notification-bell stream it never renders). Chrome caps HTTP/1.1 at ~6
+  concurrent connections **per host:port across all tabs of a profile**; SSE
+  occupies a connection permanently, so 3 tabs ≈ the whole budget and the next
+  fetch waits forever. Symptom is identical to the old BUG-003 pool starvation
+  (multi-second hangs, healthy API) — diagnose with netstat before blaming the DB.
+- **Suspected files:** `apps/restaurant-admin/src/main.tsx` (provider mount),
+  `apps/restaurant-admin/src/notifications/useServiceRequests.tsx`,
+  deploy infra (no HTTP/2 termination in front of the API).
+- **Fix plan:** (1) **deploy requirement, non-negotiable for launch** — terminate
+  HTTP/2 at the reverse proxy in front of the API (see DEPLOY-RUNBOOK.md step 2b);
+  HTTP/2 multiplexes all streams over one connection and dissolves the cap.
+  (2) client mitigation, separate scoped task — don't mount the service-requests
+  stream on routes that don't render the bell (`/kds/display`), and/or share one
+  stream across tabs via SharedWorker/BroadcastChannel.
+- **Status:** 🔴 open — mechanism confirmed by connection counting; fix not started.
 
 <!--
 TEMPLATE for new bugs — copy this block:
