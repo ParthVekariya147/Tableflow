@@ -139,7 +139,7 @@ All shapes are Zod schemas with inferred types. Key entities:
   powers the bill-request flow; `Order.customerName/customerPhone` (both optional)
   hold guest contact for the bill/receipt. ⚠️ Online-pay provider fields,
   kitchen-station routing and audit log are still **deliberately deferred**
-  (see `FEATURES.md` §5). **Auth is implemented** (email+password login → JWT →
+  (see `api-reference/FEATURES.md` §5). **Auth is implemented** (email+password login → JWT →
   role/permission resolution; see the `auth/` module below), and newer slices
   landed since: **SaaS billing** (`billing/` — platform plans + per-tenant
   subscriptions, `/admin/billing` super-admin routes + `GET /billing/me`),
@@ -385,8 +385,9 @@ for a different tenant. `ApiError` for non-2xx.
   ⚠️ The live **KDS board still flows through the relay** (`src/kitchen.js` →
   `createHttpKdsTransport` :4001), separate from the persisted API — so KDS status
   changes don't yet write back to the Order. Unifying KDS on the API is the next step.
-  Screens + contexts are still `.jsx` (incremental TS migration pending);
-  `src/data/menu.json` is now unused.
+  Screens + contexts are still `.jsx` (incremental TS migration pending). Dead
+  pre-API files (`src/data/menu.json`, `src/tenant/defaultTenant.ts`, the empty
+  `components/KDS.jsx` stub) have been deleted.
   **QR entry flow (implemented):** routing is `BrowserRouter`; the guest scans a table
   QR encoding `/{tenantSlug}/t/{qrToken}`. `context/BootContext.jsx` (`BootProvider`)
   parses the path, builds the api-client from the scanned `slug` (`src/api.js`
@@ -448,9 +449,10 @@ for a different tenant. `ApiError` for non-2xx.
   **phone** — the statutory fields printed on every bill), **`PaymentsPage`**
   (`/settings/payments`: UPI id/mobile for the bill's payment QR),
   **`PrinterPage`** (`/settings/printer`: print-agent + receipt layout — see
-  flow 9), **`LoyaltySettingsPage`** (`/settings/loyalty`), and
-  **`PlanBillingPage`** (`/settings/billing`, read-only subscription). Beyond
-  Settings, newer operational pages: **`QuickSalePage`** (`/quick-sale`,
+  flow 9), and **`LoyaltySettingsPage`** (`/settings/loyalty`).
+  (`PlanBillingPage` — read-only subscription via `GET /billing/me` — exists as
+  a file but is currently **unrouted**: the `/settings/billing` route was
+  removed.) Beyond Settings, newer operational pages: **`QuickSalePage`** (`/quick-sale`,
   walk-in counter sale), **`BillingQueuePage`** (`/billing`, floor-wide list of
   sessions awaiting payment), and **`LoyaltyPage`** (`/loyalty`,
   `loyalty.manage`-gated customer points directory + adjust).
@@ -740,11 +742,66 @@ kitchen ticket. Mirrors flow 7's SSE architecture end-to-end:
   toast icon, a symptom of the old design routing these through the food-order
   `bringIt` path instead of their own channel.
 
+### 9. Receipt & KOT printing (print-agent bridge)
+Browsers can't talk to thermal/label printers, so printing goes **browser → local
+print agent** (`services/print-agent`, Express on **:9200**, runs on the till PC next
+to the printer). The agent is **stateless** — every request carries the full printer
+connection config, so the tenant's settings are the single source of truth.
+- **Settings.** `PrinterSettings` (`@amber/domain` `printer.ts`) lives on the tenant
+  as two JSON blobs: `Tenant.printer` (receipts) + `Tenant.kitchenPrinter` (KOTs).
+  Edited in restaurant-admin `/settings/printer` (`PrinterPage.tsx`), saved via
+  `PATCH /tenant`. Fields: `agentUrl`/`agentSecret`, `connectionType`
+  (`usb`|`bluetooth`|`network` + per-type address), `commandLanguage`
+  (`auto`|`escpos`|`tspl`), `paperWidth` (`"<mm>mm"`, presets 58/76/80/101 + custom
+  40–210 mm), and an ordered toggle-able `sections` layout. `mergeReceiptSections`
+  appends section types added to the codebase after a tenant saved their layout
+  (e.g. `customerInfo`), so old saved configs pick up new sections automatically.
+- **The shared layout engine** (`@amber/domain` `print-format.ts`) is used by BOTH
+  the agent's renderers and `PrinterPage`'s live preview, so the on-screen preview
+  matches the paper **character-for-character**: `printerColumns` (ESC/POS 58→32,
+  76→42, 80→48 cols; TSPL computed from mm at 8 dots/mm), `formatAmount` (plain
+  numbers, **no currency symbol** — thermal charsets can't print ₹), `wrapText`,
+  `labelValueRow` (truncates the label, never the amount), `itemTableColumns/
+  Header/Rows` (Item·Qty·Price·Amount; drops the unit-Price column under 34 cols),
+  `taxRows` (CGST/SGST split when `gstNumber` is set), `shouldUseTspl` (explicit
+  `commandLanguage`, else sniffs `tsc`/`da310` in the device address).
+- **Build the receipt.** `PaymentCompletePage.tsx`'s `buildReceipt` (client-side)
+  re-fetches order + payment and assembles the `Receipt` (`receipt.ts`): tenant
+  identity incl. statutory `address`/`phone`/`gstNumber`/`fssaiNumber`, guest
+  `customerName`/`customerPhone`, lines (cancelled excluded), totals,
+  `settled: !!payment` (UPI payment QR is printed only while **unsettled**).
+  "Print Again" just re-sends. `lib/printAgent.ts` (`printReceipt`/
+  `printTestReceipt`/`checkAgentHealth`) does a direct `fetch` to the agent (8s
+  timeout, `X-Agent-Secret` header) — deliberately NOT via `@amber/api-client`
+  (the agent is a LAN device, not the API).
+- **Agent routes** (`services/print-agent/src/routes/`): `POST /print` (receipt),
+  `POST /print/test`, `POST /print/kot` — all gated by `X-Agent-Secret` when
+  `AGENT_SECRET` is set; `GET /health` open. Each branches on `shouldUseTspl`:
+  **ESC/POS** → `node-thermal-printer` (`handlePrint.ts` + `printer/render.ts`/
+  `renderKot.ts`; `connect.ts` pins width via `printerColumns` + charset PC437);
+  **TSPL** (label printers like the TSC DA310) → `printer/renderTspl.ts` builds the
+  command buffer (TEXT/native QRCODE/BITMAP — the logo is fetched and converted to
+  a 1-bit bitmap via `pngjs`) and `printer/rawPrint.ts` sends the raw bytes:
+  `network` → TCP :9100; `usb`/`bluetooth` → the OS queue (`osPrintDriver.ts`) —
+  **Windows** via winspool RAW (PowerShell `Add-Type` `RawPrinterHelper`, queue
+  matched by Name OR ShareName — printer sharing is NOT required anymore),
+  macOS/Linux via `lp -d <name> -o raw`.
+- **Errors** map to UX: agent unreachable / bad secret / **400** = config problem
+  (fix settings) / **502** = printer failure (check the device). Surfaced as
+  `PrintResult` reasons in `lib/printAgent.ts`.
+- ⚠️ **KOT printing is agent-ready but not wired**: `POST /print/kot`,
+  `renderKot`/`renderTsplKot` and `Tenant.kitchenPrinter` all exist, but no admin
+  code sends a KOT yet (deferred — will hook into round-created events).
+
 ## Conventions & gotchas
-- Money is **integer cents** in the domain/API. The legacy customer screens still
-  use float dollars from `menu.json` — reconcile when migrating to the API.
+- Money is **integer cents** in the domain/API. The customer screens map to float
+  dollars in `MenuContext` for display — keep `priceCents` for anything sent back.
 - Add new color tokens in BOTH `packages/config/tailwind/tokens.cjs` and the baseline
   `packages/ui/src/tokens.css`; optionally expose them in `themeColorsSchema`.
-- `apps/customer/src/components/KDS.jsx` is an empty legacy stub; the real KDS lives in `apps/restaurant-admin`.
+- **Unfinished features kept on purpose** (don't "clean up" as dead code):
+  restaurant-admin's `PlanBillingPage.tsx` + `lib/currency.ts` (billing UI, route
+  removed) and `lib/auth.ts` + `ImpersonationBanner.tsx` + `BillingLockoutGate.tsx`
+  (impersonation receiving side — super-admin already sends `?impersonationToken=`;
+  wiring = mount the banner + point `lib/api.ts` at `getAuthToken`/`getActiveTenantSlug`).
 - Build order matters: `@amber/domain` emits `dist/`; `ui`/`api-client` are consumed
   as source by Vite. Turbo's `^build` enforces dependency order.

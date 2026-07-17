@@ -9,25 +9,37 @@ The staff-facing application. Restaurant owners/managers use it to manage the me
 
 **`src/main.tsx`** — wraps in `TenantThemeProvider`, `AdminStoreProvider`, `BrowserRouter`.
 
-**`src/App.tsx`** — Route structure:
+**`src/App.tsx`** — every route is wrapped in `RequirePermission` (the permission
+shown after each page):
 ```
-Shell-wrapped (RequireSession guard):
-  /              → DashboardPage
-  /menu          → MenuPage
-  /tables        → TablesPage
-  /tables/:id    → TableSessionPage
-  /history       → OrderHistoryPage
-  /analytics     → AnalyticsPage
-  /settings/billing → PlanBillingPage
-  /settings/printer → PrinterPage
-  /kds           → KdsPage (in-shell, manager view)
+Shell-wrapped:
+  /                  → DashboardPage          dashboard.view
+  /menu              → MenuPage               menu.manage
+  /tables            → TablesPage             tables.manage
+  /tables/:id        → TableSessionPage       tables.manage
+  /quick-sale        → QuickSalePage          tables.manage
+  /billing           → BillingQueuePage       tables.manage
+  /history           → OrderHistoryPage       orders.history
+  /analytics         → AnalyticsPage          analytics.view
+  /kds               → KdsPage (in-shell)     kds.use
+  /loyalty           → LoyaltyPage            loyalty.manage
+  /settings          → SettingsPage           settings.manage (card landing)
+  /settings/team     → TeamPage               team.manage
+  /settings/roles    → RolesPage              team.manage
+  /settings/profile  → RestaurantProfilePage  settings.manage
+  /settings/branding → BrandingPage           settings.manage
+  /settings/payments → PaymentsPage           settings.manage
+  /settings/loyalty  → LoyaltySettingsPage    settings.manage
+  /settings/printer  → PrinterPage            settings.manage
 
 Full-screen (no shell):
-  /login              → LoginPage
-  /tables/:id/billing → BillingPage
-  /tables/:id/complete → PaymentCompletePage
-  /kds/display        → KdsPage (chrome-free, kitchen staff)
+  /login               → LoginPage
+  /tables/:id/billing  → BillingPage          tables.manage
+  /tables/:id/complete → PaymentCompletePage  tables.manage
+  /kds/display         → KdsPage (chrome-free) kds.use
 ```
+(`PlanBillingPage` still exists as a file but is **unrouted** — the old
+`/settings/billing` route was removed; see Dead code below.)
 
 ## Central Store — `src/store/AdminStore.tsx`
 
@@ -108,11 +120,28 @@ Subscribes to `api.orders.stream` (SSE):
 - Staff can: add an item, cancel an item, cancel the whole order, navigate to billing
 - Calls `refresh()` on mount (fresh state, not cached)
 
+### QuickSalePage (`/quick-sale`)
+- Walk-in counter sale with no table: builds a cart from the menu, then opens a
+  session on the tenant's virtual **"Counter Sale" table** (`GET /tables/counter`
+  find-or-creates it), submits the lines as one round, and goes straight to billing.
+
+### BillingQueuePage (`/billing`)
+- Floor-wide list of sessions awaiting payment (billed first, then open), each
+  linking to that table's `BillingPage` — the cashier's queue view.
+
+### LoyaltyPage (`/loyalty`, `loyalty.manage`)
+- Customer points directory: search accounts (`api.loyalty` — keyed tenant+phone),
+  open one for its transaction ledger + linked order summaries, and apply a manual
+  points adjustment. Earn-on-capture and redemption happen in the order flow
+  (`POST /orders/:id/loyalty/redeem` from `BillingPage`), not here.
+
 ### BillingPage (`/tables/:id/billing`) — full screen
 - Line items with quantities and modifiers
 - Subtotal / tax / tip / total computed from `billTotals()`
 - Method selector: Cash vs Card
 - Cash: numpad for tendered amount, shows change due
+- Loyalty: look up / apply a points redemption before capture
+  (`POST /orders/:id/loyalty/redeem`, `loyalty.manage`)
 - Dispatches `COMPLETE_PAYMENT` → `api.orders.capturePayment`
 
 ### OrderHistoryPage (`/history`)
@@ -120,6 +149,8 @@ Subscribes to `api.orders.stream` (SSE):
 - Calls `api.orders.sales({ from, to })` directly (not via store dispatch)
 - Expandable rows: lazy-loads each order's items via `api.orders.get(id)` on expand
 - Revenue summary + order count at top
+- **Export**: downloads the range as an `.xlsx` workbook (`GET /orders/export` —
+  Summary / Daily Sales / Orders / Order Items / Item Summary sheets)
 
 ### AnalyticsPage (`/analytics`)
 - Date-range selector (Today / Yesterday / 7 Days / 30 Days)
@@ -131,48 +162,78 @@ Subscribes to `api.orders.stream` (SSE):
   - Peak hours (bar)
 - Period-over-period KPI deltas shown on cards
 
-### PlanBillingPage (`/settings/billing`)
-- Shows current plan name, price, billing interval
-- Shows subscription status (`trialing | active | past_due | canceled`)
-- Calls `api.billing.me()`
+### Settings pages (`/settings/*`, all `settings.manage` unless noted)
+`SettingsPage` (`/settings`) is a card landing linking to:
+- **RestaurantProfilePage** (`/settings/profile`) — name, currency, tax rate,
+  GST number, **FSSAI license** (14-digit validation), **address**, **phone** —
+  the statutory fields printed on every bill. Saves via `api.tenant.update`.
+- **BrandingPage** (`/settings/branding`) — brand colors, font pairing, logo
+  upload, with a live whole-app preview (`useTenantBrand().applyTenant`);
+  Save persists `theme`, leaving without saving reverts.
+- **PaymentsPage** (`/settings/payments`) — UPI id / UPI mobile for the
+  receipt's payment QR.
+- **LoyaltySettingsPage** (`/settings/loyalty`) — the tenant's `LoyaltyProgram`
+  config (earn/redeem rates etc., persisted as `Tenant.loyalty`).
+- **TeamPage** / **RolesPage** (`/settings/team`, `/settings/roles`,
+  `team.manage`) — see the RBAC section below.
+- **PrinterPage** (`/settings/printer`) — see below.
+
+`PlanBillingPage` (read-only subscription info via `api.billing.me()`) exists as
+a file but is currently **unrouted** — no `/settings/billing` route or settings
+card links to it.
 
 ### PrinterPage (`/settings/printer`)
-Configures receipt printing — see `PRINT_RECEIPT_PLAN.md` for the full architecture.
+Configures receipt printing — see `api-reference/PRINT_RECEIPT_PLAN.md` for the
+original architecture and CLAUDE.md flow 9 for the current end-to-end path.
 Loads/saves `Tenant.printer` via `api.tenant.current()` / `api.tenant.update({ printer })`,
-same shape as `PaymentsPage`. Fields: print-agent URL, an optional security key
-(`agentSecret`, sent as `X-Agent-Secret` — a "Generate" button fills a random
-default; an inline warning shows while it's empty, since open mode is only
-safe when the agent and printer stay on the browser's own PC), connection
-type (network/USB/Bluetooth) with the fields relevant to each, and paper
-width. **Test Connection** hits the agent's `GET /health` (no secret needed).
+same shape as `PaymentsPage`. Fields:
+- print-agent URL + an optional security key (`agentSecret`, sent as
+  `X-Agent-Secret` — a "Generate" button fills a random default; an inline
+  warning shows while it's empty, since open mode is only safe when the agent
+  and printer stay on the browser's own PC)
+- connection type (network / USB / Bluetooth) with the fields relevant to each
+- **printer language** (`commandLanguage`): Auto / ESC-POS / TSPL. Auto sniffs
+  the device address for label printers (`tsc` / `da310`) via the shared
+  `shouldUseTspl`; TSPL is the raw label-printer path (e.g. TSC DA310)
+- **paper width**: preset pills 58 / 76 / 80 / 101 mm (`PAPER_WIDTH_PRESETS`)
+  plus a custom mm input (clamped 40–210, committed only when plausible)
+
+**Test Connection** hits the agent's `GET /health` (no secret needed).
 **Print Test Receipt** calls `printTestReceipt()` (`lib/printAgent.ts`) to
 verify the exact connection before relying on it at checkout.
 
 Printing itself happens elsewhere: `BillingPage`'s `complete()` navigates to
 `PaymentCompletePage` with the paid order's id in the URL (`?order=`, so it
 survives a refresh — router state is only a fast-path hint). `PaymentCompletePage`
-rebuilds the receipt from `api.orders.get(id)` (line items) +
-`api.orders.getPayment(id)` (method/tax/tip/tendered breakdown — a new
-endpoint) + the tenant's printer settings, then calls
-`printReceipt()`/`printAgent.printReceipt(...)`, replacing the old bare
-`window.print()` stub. A persistent "Print Again" button covers reprints and
-paper jams alike; failures are surfaced distinctly (agent unreachable /
-wrong security key / printer offline / not configured).
+rebuilds the receipt from `api.orders.get(id)` (line items + guest
+name/phone) + `api.orders.getPayment(id)` (method/tax/tip/tendered breakdown)
++ the tenant's statutory fields (address/phone/GSTIN/FSSAI) + printer settings,
+then calls `printReceipt()` (`lib/printAgent.ts` — a direct `fetch` to the
+agent, not via `@amber/api-client`). A persistent "Print Again" button covers
+reprints and paper jams alike; failures are surfaced distinctly (agent
+unreachable / wrong security key / printer offline / not configured).
 
 **Receipt Layout designer**: also on this page, a draggable (native HTML5
-DnD, no added dependency), toggle-able ordered list of 9 receipt sections
-(logo, name/GST, table/check info, line items, totals, payment method, UPI
-payment QR, "rate us" QR, footer message) — order in the array is print
-order. Persisted as `printer.sections` (falls back to
-`DEFAULT_RECEIPT_SECTIONS` if unset). Logo/UPI-ID/review-link aren't edited
-here — they're owned by Branding/Payments/Profile — this only controls
-whether and where they print; a row shows an inline hint + link to the
-relevant settings page when it's toggled on but its data isn't configured. A
-live preview (real `QRCodeCanvas` for the QR sections, the tenant's actual
-name/logo/GST, sample line items) re-renders instantly next to the form as
-sections are toggled/reordered — the real "Print Test Receipt" button
-remains the way to verify actual hardware output. See `PRINT_RECEIPT_PLAN.md`
-§11.
+DnD, no added dependency), toggle-able ordered list of **10** receipt sections
+(logo, header w/ name/address/GSTIN/FSSAI, order info, **customer info**,
+line items, totals, payment method, UPI payment QR, "rate us" QR, footer
+message) — order in the array is print order. Persisted as `printer.sections`;
+`mergeReceiptSections` appends section types added after a layout was saved,
+so old configs pick up new sections (e.g. `customerInfo`) automatically.
+Logo/UPI-ID/review-link aren't edited here — they're owned by
+Branding/Payments/Profile — this only controls whether and where they print;
+a row shows an inline hint + link to the relevant settings page when it's
+toggled on but its data isn't configured.
+
+The **live preview** is a character grid built with the same
+`@amber/domain` `print-format.ts` helpers the print agent's renderers use
+(`printerColumns`, `wrapText`, `labelValueRow`, `itemTableColumns/Header/Rows`,
+`taxRows`, `formatAmount`) — so what's on screen matches the paper
+**character-for-character**, including width-dependent behavior (the unit-Price
+column drops below 34 columns; amounts are plain numbers with no currency
+symbol, since thermal charsets can't print ₹). A deliberately long sample item
+name demonstrates wrapping. The real "Print Test Receipt" button remains the
+way to verify actual hardware output.
 
 ## KDS — Kitchen Display System
 
@@ -259,9 +320,9 @@ the page — **hide, don't tease**. No allowed destination at all → a neutral
 through `can()` the same way — a user only ever sees the sidebar entries they
 can open.
 
-**Permission catalog** (`@amber/domain`'s `PERMISSIONS` — a closed set):
+**Permission catalog** (`@amber/domain`'s `PERMISSIONS` — a closed set of 9):
 `dashboard.view`, `menu.manage`, `tables.manage`, `kds.use`, `orders.history`,
-`analytics.view`, `settings.manage`, `team.manage`. Roles are NOT a fixed
+`analytics.view`, `settings.manage`, `team.manage`, `loyalty.manage`. Roles are NOT a fixed
 enum — Admins create/rename/edit custom roles bundling these keys
 (`/settings/roles` → `RolesPage.tsx`, `team.manage`-gated) and manage team
 members' role + per-user permission overrides (`/settings/team` →
@@ -281,10 +342,11 @@ member still on the seeded default `changeme123`), `App.tsx` renders
 combination can bypass it.
 
 ⚠️ **Dead code, not wired into the app:** `src/lib/auth.ts`,
-`src/components/ImpersonationBanner.tsx`, and
-`src/components/BillingLockoutGate.tsx` still exist as files (leftovers from
-before the JWT/RBAC rewrite — the old impersonation-banner / Supabase-driven
-billing lockout) but are no longer imported or rendered anywhere.
+`src/components/ImpersonationBanner.tsx`,
+`src/components/BillingLockoutGate.tsx`, and `src/pages/PlanBillingPage.tsx`
+still exist as files (leftovers from before the JWT/RBAC rewrite — the old
+impersonation-banner / Supabase-driven billing lockout / the removed
+`/settings/billing` route) but are no longer imported or routed anywhere.
 Impersonation is now handled directly inside `AuthContext.tsx`'s mount effect
 instead. Safe to delete; kept only because nobody has cleaned them up yet.
 
@@ -311,7 +373,7 @@ Full modal (centered, not a slide-over) for creating/editing menu items.
 - Per option: name, price delta (can be negative), availability
 - Entire group set is **replace-on-save** — the API transactionally replaces all groups + options for the item
 
-See `MODIFIERS.md` for full modifier system spec.
+See `api-reference/MODIFIERS.md` for full modifier system spec.
 
 ## API Client Usage
 
@@ -338,12 +400,17 @@ super-admin app still talks to Supabase.
 - `/kds` board tickets do not support multi-station routing
 - 86'd items (unavailable) count on Dashboard is derived from menu state only
 - Real-time KDS stage changes don't yet reflect on the guest Status screen
-- RBAC is enforced **client-side** here for nav/route gating; the API already
-  enforces it on `roles`/`members` (incl. the Admin-tier guard) — `menu/`,
-  `tables/`, `orders/`, `service-requests/` routes are not yet
-  `@RequirePermission`-annotated server-side (still rely on `X-Tenant-Slug`
-  only), though the guard/decorator already exist and are proven elsewhere.
-- Receipt printing supports one printer per tenant (no kitchen-station
-  routing — see `FEATURES.md`) and only prints from `PaymentCompletePage`
-  post-payment; a pre-payment "print a copy" button on `BillingPage` was
-  scoped out of the initial cut (see `PRINT_RECEIPT_PLAN.md` §6.3).
+- RBAC is now enforced **server-side everywhere** as well as client-side:
+  `menu/`, `tables/`, `orders/`, `roles/`, `members/`, `tenant/`, `billing/`,
+  `loyalty/` and the staff side of `service-requests/` all carry
+  `@RequirePermission(...)` / JWT guards. Guest routes stay unauthenticated by
+  design (device-id bound); a global per-IP rate limit (`@nestjs/throttler`,
+  120 req/60s) covers everything.
+- **KOT printing is agent-ready but not wired**: `Tenant.kitchenPrinter`,
+  `POST /print/kot` and the KOT renderers all exist, but no admin code sends a
+  KOT yet (`lib/printAgent.ts` has no KOT function) — deferred.
+- Receipt printing supports one receipt printer per tenant (no kitchen-station
+  routing — see `api-reference/FEATURES.md`) and only prints from
+  `PaymentCompletePage` post-payment; a pre-payment "print a copy" button on
+  `BillingPage` was scoped out of the initial cut
+  (see `api-reference/PRINT_RECEIPT_PLAN.md` §6.3).

@@ -12,16 +12,18 @@ export default function TopAppBar({ showBack = false, title }) {
   return (
     <header className="sticky top-0 z-50 bg-surface/90 backdrop-blur-md border-b border-outline-variant/30">
       <div className="flex items-center justify-between px-5 py-3 max-w-2xl mx-auto">
-        <button
-          onClick={() => showBack ? navigate(-1) : null}
-          className={`w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
-            showBack ? "hover:bg-surface-container-low cursor-pointer" : "cursor-default"
-          }`}
-        >
-          <span className="material-symbols-outlined text-on-surface-variant text-[22px]">
-            {showBack ? "arrow_back" : "local_cafe"}
-          </span>
-        </button>
+        {showBack ? (
+          <button
+            onClick={() => navigate(-1)}
+            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-95 hover:bg-surface-container-low cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-on-surface-variant text-[22px]">arrow_back</span>
+          </button>
+        ) : (
+          <div aria-hidden="true" className="w-10 h-10 flex items-center justify-center">
+            <span className="material-symbols-outlined text-on-surface-variant text-[22px]">local_cafe</span>
+          </div>
+        )}
 
         <h1 className="text-[18px] font-semibold text-primary font-serif">{heading}</h1>
 

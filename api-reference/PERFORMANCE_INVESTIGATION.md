@@ -71,7 +71,8 @@ Supabase (pgBouncer pooler, Singapore)
 │
 │  [G] Pool: max 5 connections (connection_limit=5)
 │      Request 6+ WAITS up to pool_timeout=20s
-│      Under SSE + concurrent mutation: pool exhausted → 20s timeout
+│      Under refetch storm + concurrent mutation: pool exhausted → 20s timeout
+│      (corrected 2026-07-17: SSE streams do NOT hold slots — §2.1)
 │
 ▼
 Supabase PostgreSQL (Singapore region)
@@ -99,17 +100,24 @@ Back to NestJS → Client
 DATABASE_URL="postgresql://...aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?connection_limit=5&pool_timeout=20"
 ```
 
-**Problem:** The Prisma pool is limited to **5 connections**. Each request holds a connection for the duration of all its DB queries. With the SSE stream (`GET /orders/stream`) open as a **persistent long-lived connection**, it occupies one pool slot continuously. Under normal usage:
+**Problem:** The Prisma pool is limited to **5 connections**. Each request holds a connection for the duration of all its DB queries. Any concurrent request beyond the available slots must wait. Since `pool_timeout=20`, a queued request waits exactly 20 seconds before timing out — **explaining the observed 15–20 second hangs exactly**.
 
-- 1 SSE stream from restaurant-admin (AdminStore)
-- 1 SSE stream from KDS page
-- 1 SSE stream from customer app
-- That leaves **2 connections** for all other requests
-
-Any concurrent request beyond the 2 remaining slots must wait. Since `pool_timeout=20`, a queued request waits exactly 20 seconds before timing out — **explaining the observed 15–20 second hangs exactly**.
+> ⚠️ **Correction (2026-07-17):** this section originally claimed each open SSE
+> stream (`GET /orders/stream`) "occupies one pool slot continuously", leaving
+> only 2 of 5 connections for requests. That is wrong — verified from
+> `orders.controller.ts` `stream()`: an SSE connect runs exactly **one** Prisma
+> snapshot query (whose connection returns to the pool when it resolves) and
+> then merges the **in-process** rxjs Subject (`OrdersEvents`), which never
+> touches the DB. An idle stream holds an HTTP socket, not a pool slot. The
+> starvation (BUG-003) was real, but its drivers were the **4-call refetch
+> storm after every mutation × multiple clients** (§5.1/§13.1) plus **3
+> auth/tenant DB queries per request** (§3.1/§4) crammed into a 5-connection
+> pool — both since fixed (perf passes 1–2, 2026-07-16). The same conflation of
+> HTTP connections with DB connections appears in §5.2, §13.2, §14 and P4 #17;
+> read those with this correction in mind.
 
 **Estimated cost:** Up to 20,000ms (timeout) when pool is saturated.
-**Confidence:** CONFIRMED — the 20s timeout matches `pool_timeout=20`.
+**Confidence:** CONFIRMED — the 20s timeout matches `pool_timeout=20`. (Mechanism re-attributed 2026-07-17, see correction above.)
 
 ### 2.2 Geographic Latency — HIGH
 
@@ -428,7 +436,7 @@ useEffect(() => {
 }, []);
 ```
 
-The KDS page holds **two simultaneous connections**: one SSE to the API (consuming a pool slot) + one connection to the KDS relay. Under load, this is one of the SSE connections that consumes a Prisma pool slot.
+The KDS page holds **two simultaneous connections**: one SSE to the API + one connection to the KDS relay. *(Corrected 2026-07-17: neither consumes a Prisma pool slot beyond the one-shot snapshot query — see §2.1 correction. The dual subscription is an architecture smell (flow 4's relay unification), not a pool cost.)*
 
 ### 5.3 Customer App Boot — Loads Full Order List for Occupancy Check
 
@@ -663,7 +671,7 @@ Menu data is loaded on every `refresh()` call, including after order mutations t
 
 **File:** `apps/restaurant-admin/src/kds/useKds.ts:94–191`
 
-The KDS page connects to **both the KDS relay and the API SSE stream simultaneously**. Each connection holds a server resource (an SSE subscription and a Prisma pool slot). With the restaurant-admin also having an SSE stream open (AdminStore), opening the KDS creates a third concurrent SSE connection.
+The KDS page connects to **both the KDS relay and the API SSE stream simultaneously**. Each connection holds an HTTP socket and an rxjs subscription *(corrected 2026-07-17: not a Prisma pool slot — see §2.1 correction)*. With the restaurant-admin also having an SSE stream open (AdminStore), opening the KDS creates a third concurrent SSE connection.
 
 ### 13.3 `OPEN_SESSION` Discards Return Value and Re-fetches
 
@@ -690,7 +698,7 @@ case "OPEN_SESSION":
 | `GET /tables` | 2 parallel (tables + live orders ROUND_INCLUDE) | 240–600ms | Medium | P2 |
 | `GET /orders` | 1 (orders with ROUND_INCLUDE) | 160–450ms | Medium | P2 |
 | `GET /orders/analytics` | 2 sequential (deep join + aggregate) | **2,000–10,000ms** | **Critical** | **P1** |
-| `GET /orders/stream` (SSE) | 1 (snapshot) + holds pool slot indefinitely | Ongoing | **Critical** | **P1** |
+| `GET /orders/stream` (SSE) | 1 (snapshot only; no held pool slot — see §2.1 correction) | Ongoing | Medium | P3 |
 | `POST /orders` | 3 sequential (table + occupancy + create) | 240–450ms | High | P2 |
 | `POST /orders/:id/rounds` | 1 + N parallel (modifier lookup per item) + refresh | 320–800ms | High | P2 |
 | `PATCH /orders/:id/items/:itemId` | 4 sequential | **320–600ms** | High | **P1** |
@@ -741,7 +749,7 @@ case "OPEN_SESSION":
 | # | Issue | Est. Gain |
 |---|-------|-----------|
 | 16 | Zod parse of large analytics/menu responses on client | −10–50ms |
-| 17 | KDS dual subscription (relay + API stream both open) | −1 pool slot |
+| 17 | KDS dual subscription (relay + API stream both open) | architecture cleanup only (no pool cost — §2.1 correction) |
 | 18 | `members.update` extra role lookup inside sequential flow | −80–150ms |
 | 19 | `admin/audit-log` runs `findMany` + `count` always, even for small results | Minimal |
 
@@ -758,7 +766,7 @@ case "OPEN_SESSION":
 connection_limit=5&pool_timeout=20
 ```
 
-With 5 Prisma connections and 3 SSE streams typically open (restaurant-admin AdminStore + KDS display + customer app), only 2 connections are available for regular requests. A mutation that needs a DB connection must wait up to `pool_timeout=20` seconds if those 2 are busy. **This is the exact mechanism producing 20-second timeouts.**
+With 5 Prisma connections, a mutation that needs a DB connection must wait up to `pool_timeout=20` seconds if all slots are busy. **This is the exact mechanism producing 20-second timeouts.** *(Corrected 2026-07-17: SSE streams do NOT hold pool slots — see §2.1's correction. The slots were consumed by the per-mutation 4-call refetch storm across clients plus 3 auth/tenant queries per request, not by idle streams.)*
 
 During a `dispatch()` call: the mutation uses connections, then `refresh()` fires 4 parallel API calls — each needing its own connection. With 4 calls competing for 2 connections, some queue. If the 20s timeout is reached before a connection frees, the request fails silently (the `refresh()` catch is `() => {}`).
 

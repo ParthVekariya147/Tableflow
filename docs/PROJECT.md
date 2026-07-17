@@ -1,4 +1,7 @@
-# Amber & Grain — Project Overview
+# TableFlow — Project Overview
+
+> Internal codename "Amber" (packages are scoped `@amber/*`; "Amber & Grain" is the
+> demo tenant). The product name in all user-facing copy is **TableFlow**.
 
 ## What It Is
 A **multi-tenant restaurant ordering platform**. One codebase serves many restaurant tenants. Each restaurant is a database row; the same app code loads one tenant's config at runtime and renders that brand's experience — no code is forked per restaurant.
@@ -23,15 +26,15 @@ D:\Tableflow\
 │   ├── dev.mjs                # One-command dev orchestrator
 │   ├── kds-relay.mjs          # In-memory KDS relay — port 4001
 │   └── sync-lan-env.mjs       # Auto-writes LAN IP into .env.local files
-├── BRAIN.md                   # Compact cheatsheet — read first
-├── CLAUDE.md                  # Deep technical reference
-├── FEATURES.md                # Feature inventory per app
-├── MODIFIERS.md               # Modifier system documentation
-├── PLATFORM_PLAN.md           # Platform architecture + phased rollout
-├── PENDING_TASKS.md           # Outstanding work
-├── CHANGES.md                 # Changelog
-├── PRINT_RECEIPT_PLAN.md      # Thermal receipt printing architecture + plan
-└── REALTIME-SYNC-PLAN.md      # Plan for unifying KDS onto SSE stream
+├── CLAUDE.md / AGENTS.md      # Deep technical reference (kept as identical copies)
+├── README.md                  # Project intro + quick start
+├── docs/
+│   ├── PROJECT.md             # This file
+│   └── apps/                  # Per-app write-ups (customer / restaurant-admin / super-admin)
+└── api-reference/             # BRAIN.md (compact cheatsheet), API-ENDPOINTS.md,
+                               # FEATURES.md, MODIFIERS.md, PLATFORM_PLAN.md,
+                               # PENDING_TASKS.md, CHANGES.md, PRINT_RECEIPT_PLAN.md,
+                               # REALTIME-SYNC-PLAN.md, security reviews/audits
 ```
 
 ## Detailed Directory Trees
@@ -85,14 +88,26 @@ apps/restaurant-admin/
 │   ├── pages/
 │   │   ├── DashboardPage.tsx  # Today's revenue + live floor summary
 │   │   ├── MenuPage.tsx       # Category + item CRUD
-│   │   ├── TablesPage.tsx     # Floor view + QR codes
+│   │   ├── TablesPage.tsx     # Floor view + QR codes + service-request badges
 │   │   ├── TableSessionPage.tsx # Live session detail
-│   │   ├── BillingPage.tsx    # Cash numpad + payment capture
-│   │   ├── PaymentCompletePage.tsx
-│   │   ├── OrderHistoryPage.tsx # Date-range sales list
+│   │   ├── QuickSalePage.tsx  # Walk-in counter sale (virtual "Counter" table)
+│   │   ├── BillingPage.tsx    # Cash numpad + payment capture + loyalty redeem
+│   │   ├── BillingQueuePage.tsx # /billing — floor-wide sessions awaiting payment
+│   │   ├── PaymentCompletePage.tsx # Receipt build + print (buildReceipt → print agent)
+│   │   ├── OrderHistoryPage.tsx # Date-range sales list + .xlsx export
 │   │   ├── AnalyticsPage.tsx  # Charts: revenue trend, category donut, etc.
-│   │   ├── LoginPage.tsx      # Supabase login
-│   │   └── PlanBillingPage.tsx # Subscription info
+│   │   ├── LoyaltyPage.tsx    # /loyalty — customer points directory + adjust
+│   │   ├── LoginPage.tsx      # Email+password JWT login (+ tenant picker)
+│   │   ├── ChangePasswordPage.tsx
+│   │   ├── SettingsPage.tsx   # /settings card landing
+│   │   ├── TeamPage.tsx       # /settings/team — members + per-user overrides
+│   │   ├── RolesPage.tsx      # /settings/roles — custom-role CRUD
+│   │   ├── BrandingPage.tsx   # /settings/branding — theme editor + live preview
+│   │   ├── RestaurantProfilePage.tsx # /settings/profile — name/currency/tax/GST/FSSAI/address/phone
+│   │   ├── PaymentsPage.tsx   # /settings/payments — UPI id/mobile for the bill QR
+│   │   ├── PrinterPage.tsx    # /settings/printer — agent config + receipt layout + live preview
+│   │   ├── LoyaltySettingsPage.tsx # /settings/loyalty — loyalty program config
+│   │   └── PlanBillingPage.tsx # /settings/billing — subscription info (read-only)
 │   ├── kds/
 │   │   ├── KdsPage.tsx        # Board UI (3-column: New/Preparing/Ready)
 │   │   ├── KdsColumn.tsx      # One column
@@ -172,9 +187,10 @@ services/api/
 │   ├── app.module.ts          # Root module + TenantMiddleware
 │   ├── tenant/
 │   │   ├── tenant.middleware.ts      # X-Tenant-Slug / ?tenant= → req.tenant
-│   │   ├── tenant.controller.ts     # GET /tenant, /tenants/:slug
+│   │   ├── tenant.controller.ts     # GET /tenant, PATCH /tenant (settings.manage), /tenants/:slug
 │   │   ├── tenant.service.ts
 │   │   ├── tenant.mapper.ts
+│   │   ├── tenant.dto.ts             # updateTenantRequestSchema passthrough
 │   │   └── current-tenant.decorator.ts
 │   ├── menu/
 │   │   ├── menu.controller.ts        # GET /menu, CRUD /menu/categories, /menu/items, POST /menu/upload
@@ -187,17 +203,25 @@ services/api/
 │   │   ├── tables.mapper.ts
 │   │   └── tables.dto.ts
 │   ├── orders/
-│   │   ├── orders.controller.ts      # SSE stream + full order lifecycle
+│   │   ├── orders.controller.ts      # SSE stream + full order lifecycle + loyalty redeem
 │   │   ├── orders.service.ts         # Core business logic + analytics aggregation
 │   │   ├── orders.events.ts          # Per-tenant rxjs Subject (pub/sub)
+│   │   ├── orders.export.ts          # GET /orders/export — .xlsx sales report
+│   │   ├── order-stream.guard.ts     # SSE auth: ?token= (staff) / ?deviceId= (guest)
 │   │   ├── orders.mapper.ts
 │   │   └── orders.dto.ts
 │   ├── service-requests/             # Guest "water/call staff/call manager" — NOT an Order
 │   │   ├── service-requests.controller.ts  # SSE stream + create/list/updateStatus
 │   │   ├── service-requests.service.ts     # Dedupe (1 pending per table+type) + status stamps
 │   │   ├── service-requests.events.ts      # Per-tenant rxjs Subject (mirrors orders.events.ts)
+│   │   ├── service-request-stream.guard.ts # SSE auth (mirrors order-stream.guard.ts)
 │   │   ├── service-requests.mapper.ts
 │   │   └── service-requests.dto.ts
+│   ├── loyalty/                      # Staff-only points accounts — loyalty.manage-gated
+│   │   ├── loyalty.controller.ts     # GET /loyalty/accounts(?search=), GET /:id, PATCH /:id/adjust
+│   │   ├── loyalty.service.ts        # Account+ledger reads, manual adjust (earn/redeem live in OrdersService)
+│   │   ├── loyalty.mapper.ts
+│   │   └── loyalty.dto.ts
 │   ├── admin/
 │   │   ├── admin.controller.ts       # /admin/* cross-tenant endpoints
 │   │   ├── admin.service.ts          # createTenant, updateTenant, platformAnalytics, auditLog
@@ -229,6 +253,12 @@ services/api/
 │   │   └── billing.dto.ts
 │   ├── storage/
 │   │   └── storage.service.ts        # Supabase Storage upload (menu-images bucket)
+│   ├── health/
+│   │   └── health.controller.ts      # GET /health — liveness probe
+│   ├── common/
+│   │   ├── http-exception.filter.ts
+│   │   ├── ttl-cache.ts
+│   │   └── timing-safe-equal.ts
 │   └── prisma/
 │       ├── prisma.service.ts         # Extends PrismaClient, global module
 │       └── prisma.module.ts
@@ -245,33 +275,52 @@ services/print-agent/
 ├── src/
 │   ├── index.ts                # Express bootstrap — port 9200, open CORS, GET /health (no auth)
 │   ├── auth.ts                 # requireAgentSecret — 401s /print* when AGENT_SECRET is set
+│   ├── handlePrint.ts          # Shared ESC/POS execute step (connect → render → send)
 │   ├── routes/
-│   │   └── print.ts            # POST /print, POST /print/test (both behind auth.ts)
+│   │   ├── print.ts            # POST /print (receipt), POST /print/test — branch on shouldUseTspl
+│   │   └── kot.ts              # POST /print/kot (kitchen ticket) — same TSPL/ESC-POS branch
 │   └── printer/
 │       ├── connect.ts          # PrinterSettings → node-thermal-printer interface string
-│       └── render.ts           # Receipt → node-thermal-printer draw calls
+│       ├── render.ts           # Receipt → node-thermal-printer draw calls (ESC/POS)
+│       ├── renderKot.ts        # Kot → node-thermal-printer draw calls (ESC/POS)
+│       ├── renderTspl.ts       # Receipt/Kot/test → raw TSPL buffer (TEXT/QRCODE/BITMAP;
+│       │                       #   logo → 1-bit bitmap via pngjs; TSC DA310 etc.)
+│       ├── rawPrint.ts         # Raw bytes out: network TCP :9100, or the OS queue
+│       └── osPrintDriver.ts    # OS queue write — Windows winspool RAW (no printer
+│                               #   sharing needed; queue matched by Name OR ShareName),
+│                               #   macOS/Linux `lp -d <name> -o raw`
 ├── README.md                    # Install/run instructions, incl. setting AGENT_SECRET
 └── package.json
 ```
 Standalone local service — NOT deployed with the cloud API; it runs on-site (the
-same PC as the browser, or another device near the printer) per restaurant. See
-`PRINT_RECEIPT_PLAN.md` for the full architecture and rationale.
+same PC as the browser, or another device near the printer) per restaurant. Text
+layout (columns, wrapping, amount formatting) comes from `@amber/domain`'s
+`print-format.ts`, shared with the admin's live preview. See
+`api-reference/PRINT_RECEIPT_PLAN.md` for the architecture and CLAUDE.md flow 9
+for the end-to-end path.
 
 ### `packages/`
 ```
 packages/
 ├── domain/src/
 │   ├── common.ts       # id, slug, money, timestamp primitives
-│   ├── tenant.ts       # Tenant, ThemeConfig, ThemeColors
+│   ├── tenant.ts       # Tenant (+ statutory/UPI fields, printer/loyalty blobs), ThemeConfig
 │   ├── menu.ts         # Menu, MenuItem, ModifierGroup, ModifierOption
 │   ├── table.ts        # Table, FloorTable
 │   ├── order.ts        # Order, Round, OrderItem — ItemStatus, helpers
 │   ├── service-request.ts  # ServiceRequest, SERVICE_REQUEST_META (icon/label per type)
 │   ├── payment.ts      # Payment, Sale
 │   ├── analytics.ts    # AnalyticsSummary and sub-types
-│   ├── auth.ts         # AuthUser, Membership, Role, ImpersonationToken
+│   ├── auth.ts         # AuthUser, LoginResult (+ user.ts, role.ts)
+│   ├── permission.ts   # PERMISSIONS fixed 9-key catalog + PERMISSION_LABELS + hasPermission
+│   ├── loyalty.ts      # LoyaltyProgram, LoyaltyAccount, LoyaltyTransaction + earn/redeem math
 │   ├── billing.ts      # Plan, Subscription, SubscriptionStatus
+│   ├── printer.ts      # PrinterSettings, PAPER_WIDTH_PRESETS, mergeReceiptSections
+│   ├── receipt.ts      # Receipt (tenant identity + guest contact + lines/totals/UPI)
+│   ├── kot.ts          # Kot (kitchen ticket — no prices)
+│   ├── print-format.ts # Shared text-layout engine (agent renderers + admin preview)
 │   └── index.ts        # Re-exports all
+├── domain/test/        # Vitest unit tests (money, loyalty, order, print-format)
 │
 ├── api-client/src/
 │   ├── http.ts         # ApiClientConfig, ApiError, central request() fn
@@ -340,7 +389,8 @@ Guest phone  ──scan QR──►  BootContext (parse slug/qrToken)
 ## Prisma Schema Key Relationships
 
 ```
-Tenant
+Tenant  (theme / printer / kitchenPrinter / loyalty as JSON;
+         statutory bill fields gstNumber/fssaiNumber/address/phone; UPI upiId/upiMobile)
   ├── Role (per-tenant, NOT a fixed enum — Admin-named, {name, permissions[], protected})
   │     └── Membership ──► User (roleId + optional per-user permissions[] override)
   ├── Room ──► Table (qrToken UUID)
@@ -355,6 +405,8 @@ Tenant
   │     └── Review
   ├── ServiceRequest (type: water|call_staff|call_manager; status: pending|acknowledged|resolved)
   │     └── optional orderId link to the table's live Order (best-effort, not required)
+  ├── LoyaltyAccount (keyed tenant+phone)
+  │     └── LoyaltyTransaction (earn/redeem/adjust ledger, optional orderId)
   ├── Subscription ──► Plan
   └── AuditLog
 ```
@@ -364,6 +416,7 @@ Tenant
 ```
 Tenant-scoped (X-Tenant-Slug or ?tenant=):
   GET  /tenant                     current tenant
+  PATCH /tenant                    update own settings (settings.manage) — profile/theme/UPI/printer/loyalty
   GET  /tenants/:slug              by slug
   GET  /menu                       full menu
   POST /menu/categories
@@ -373,23 +426,31 @@ Tenant-scoped (X-Tenant-Slug or ?tenant=):
   POST /menu/upload                image upload → Supabase Storage
   GET  /tables                     floor list + live status
   GET  /tables/qr/:token           by QR token
+  GET  /tables/counter             find-or-create the virtual "Counter Sale" table (quick sale)
   POST /tables
   PATCH /tables/:id
   POST  /tables/:id/qr             regenerate token
   DELETE /tables/:id
-  GET  /orders                     live list (optional ?status=)
-  GET  /orders/sales               completed sales (optional ?from=&to=)
-  GET  /orders/analytics           aggregated analytics (?from=&to=)
-  GET  /orders/stream              SSE event bus
-  GET  /orders/:id
+  GET  /orders                     live list (optional ?status=) — staff (tables.manage)
+  GET  /orders/open-table-ids      lean occupancy check for guest boot (public)
+  GET  /orders/sales               completed sales (optional ?from=&to=) — orders.history
+  GET  /orders/analytics           aggregated analytics (?from=&to=) — analytics.view|dashboard.view
+  GET  /orders/export              .xlsx sales report (?from=&to=) — orders.history|analytics.view
+  GET  /orders/stream              SSE event bus (?token= staff / ?deviceId= guest)
+  GET  /orders/:id                 guest (device-bound) or staff (token)
   GET  /orders/:id/payment         captured Payment for an order, or null (receipt reprints)
   POST /orders                     create (409 if table occupied)
+  POST /orders/reclaim             re-bind an open session to a new device (phone-number proof)
   POST /orders/:id/rounds          add round (modifier validation server-side)
-  POST /orders/:id/items           add item
-  PATCH /orders/:id/items/:itemId  update qty/status
-  POST /orders/:id/bill            request bill
-  POST /orders/:id/cancel
-  POST /orders/:id/payment         capture payment
+  POST /orders/:id/items           add item — staff only
+  PATCH /orders/:id/items/:itemId  update qty/status (409 if order closed/paid)
+  POST /orders/:id/bill            request bill (guest, device-bound)
+  POST /orders/:id/cancel          staff only (tables.manage)
+  POST /orders/:id/payment         capture payment (guest card / staff cash)
+  POST /orders/:id/loyalty/redeem  apply/clear a points redemption pre-capture (loyalty.manage)
+  GET  /loyalty/accounts           search points accounts (loyalty.manage)
+  GET  /loyalty/accounts/:id       account + transaction ledger + order summaries
+  PATCH /loyalty/accounts/:id/adjust  manual points adjustment
   POST /service-requests           guest creates (water/call staff/call manager); dedupes pending
   GET  /service-requests           staff list (tables.manage), optional ?status=
   PATCH /service-requests/:id      staff acknowledge/resolve (tables.manage)
@@ -407,16 +468,23 @@ Auth (email-first login, NOT tenant-scoped — excluded from TenantMiddleware):
 
 Admin (cross-tenant, SuperAdmin guard):
   GET/POST    /admin/tenants
-  PATCH       /admin/tenants/:id
+  GET/PATCH   /admin/tenants/:id
   GET/POST    /admin/plans
   PATCH       /admin/plans/:id
   POST        /admin/tenants/:id/subscription
   PATCH       /admin/tenants/:id/subscription
   GET         /admin/tenants/:id/subscription
+  GET         /admin/tenants/:id/payments
+  POST        /admin/tenants/:id/reset-owner-password
+  GET         /admin/credentials
   POST        /admin/impersonate
   GET         /admin/analytics
   GET         /admin/audit-log
-  GET         /admin/tenants/:id/payments
+  GET         /admin/loyalty/accounts
+  GET         /admin/loyalty/accounts/:id
+
+Unscoped:
+  GET  /health                     liveness probe
 ```
 
 ## Tech Decisions & Why

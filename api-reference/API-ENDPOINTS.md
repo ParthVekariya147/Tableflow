@@ -33,7 +33,7 @@ Source layout per module: `*.controller.ts` (routes/guards) → `*.service.ts`
 | M | Path | Gate | Body |
 |---|---|---|---|
 | GET | `/tenant` | 🏷️ | active tenant |
-| ✏️ PATCH | `/tenant` | 🏷️🔑 `settings.manage` | `{ name, currency, taxRate, gstNumber?, upiId?, upiMobile?, theme }` |
+| ✏️ PATCH | `/tenant` | 🏷️🔑 `settings.manage` | `{ name, currency, taxRate, gstNumber?, fssaiNumber?, address?, phone?, upiId?, upiMobile?, theme?, printer?, kitchenPrinter?, loyalty? }` (all optional) |
 | GET | `/tenants/:slug` | 🔓 | public tenant by slug (guest boot) |
 
 ## Menu — `menu/`  (all writes gated by `menu.manage`)
@@ -53,6 +53,7 @@ Source layout per module: `*.controller.ts` (routes/guards) → `*.service.ts`
 |---|---|---|---|
 | GET | `/tables` | 🏷️🔑 `tables.manage` | floor + live sessions |
 | GET | `/tables/qr/:token` | 🏷️🔓 | resolve table by QR token (guest boot) |
+| GET | `/tables/counter` | 🏷️🔑 `tables.manage` | find-or-create the virtual "Counter Sale" table (quick sale) |
 | ✏️ POST | `/tables` | 🏷️🔑 `tables.manage` | `{ label, seats?, room?, sortOrder? }` |
 | ✏️ PATCH | `/tables/:id` | 🏷️🔑 `tables.manage` | partial table |
 | ✏️ POST | `/tables/:id/qr` | 🏷️🔑 `tables.manage` | regenerate QR token |
@@ -66,7 +67,8 @@ Source layout per module: `*.controller.ts` (routes/guards) → `*.service.ts`
 | GET | `/orders/open-table-ids` | 🏷️🔓 | occupancy list (guest boot) |
 | GET | `/orders/sales` | 🏷️🔑 `orders.history` | `?from=&to=` |
 | GET | `/orders/analytics` | 🏷️🔑 `analytics.view`\|`dashboard.view` | `?from=&to=` |
-| GET | `/orders/:id` | 🏷️📱 | guest reads own order (device check) |
+| GET | `/orders/export` | 🏷️🔑 `orders.history`\|`analytics.view` | `?from=&to=` → `.xlsx` sales report |
+| GET | `/orders/:id` | 🏷️📱 | guest reads own order (device check; staff token bypasses) |
 | GET | `/orders/:id/payment` | 🏷️🔑 `tables.manage` | |
 | ✏️ POST | `/orders/reclaim` | 🏷️📱 | `{ tableId, customerPhone }` — re-bind lost session |
 | ✏️ POST | `/orders` | 🏷️📱🔓 | `{ tableId, customerName?, customerPhone? }` — guest reserve |
@@ -75,12 +77,28 @@ Source layout per module: `*.controller.ts` (routes/guards) → `*.service.ts`
 | ✏️ PATCH | `/orders/:id/items/:itemId` | 🏷️🔑 `kds.use`\|`tables.manage` | `{ qty?\|qtyDelta?, status? }` |
 | ✏️ POST | `/orders/:id/bill` | 🏷️📱 | guest requests bill |
 | ✏️ POST | `/orders/:id/cancel` | 🏷️🔑 `tables.manage` | staff cancels session |
-| ✏️ POST | `/orders/:id/payment` | 🏷️📱 | `{ method, tip, tendered? }` — capture + close |
+| ✏️ POST | `/orders/:id/payment` | 🏷️📱 | `{ method, tip, tendered? }` — capture + close (staff token bypasses device check) |
+| ✏️ POST | `/orders/:id/loyalty/redeem` | 🏷️🔑 `loyalty.manage` | `{ points }` — apply/clear a redemption pre-capture |
 
-> ⚠️ The guest-facing `/orders` write routes (create, rounds, bill, payment,
+> The guest-facing `/orders` write routes (create, rounds, bill, payment,
 > reclaim) are **not JWT-gated by design** — they rely on the `X-Device-Id`
-> capability + the create-order occupancy guard. See `SECURITY-REVIEW.md` for the
-> residual gaps (a caller who omits the header is indistinguishable from staff).
+> capability + the create-order occupancy guard. On the routes shared by guests
+> and staff (`GET /orders/:id`, `POST /orders/:id/payment`, item PATCH), staff
+> bypass is **token-based**: a valid staff JWT skips the device check; a missing
+> or invalid token falls back to strict device matching — so omitting the header
+> no longer impersonates staff (the gap flagged in `SECURITY-REVIEW.md` is closed).
+> A global per-IP throttle (`@nestjs/throttler`, 120 req/60s) covers everything;
+> SSE stream endpoints opt out via `@SkipThrottle()`.
+
+## Loyalty — `loyalty/`  (whole controller: `loyalty.manage`; guests never call it)
+| M | Path | Body |
+|---|---|---|
+| GET | `/loyalty/accounts` | `?search=` — points accounts (keyed tenant+phone) |
+| GET | `/loyalty/accounts/:id` | account + transaction ledger + order summaries |
+| ✏️ PATCH | `/loyalty/accounts/:id/adjust` | manual points adjustment |
+
+(Earn-on-capture and redemption happen inside `orders/` — see
+`POST /orders/:id/loyalty/redeem` above and `capturePayment`.)
 
 ## Service Requests — `service-requests/`
 | M | Path | Gate | Body |
@@ -119,6 +137,8 @@ Source layout per module: `*.controller.ts` (routes/guards) → `*.service.ts`
 | ✏️ POST | `/admin/impersonate` | `{ tenantSlug, masterPassword }` → 30-min token (audit-logged) |
 | GET | `/admin/analytics` | platform analytics |
 | GET | `/admin/audit-log` | `?type&tenantId&from&to&limit&offset` |
+| GET | `/admin/loyalty/accounts` | cross-tenant loyalty accounts |
+| GET | `/admin/loyalty/accounts/:id` | one account + ledger |
 
 ## Billing — `billing/`
 | M | Path | Gate | Body |

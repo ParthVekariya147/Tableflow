@@ -2,7 +2,15 @@
 
 > Working checklist mirroring `PLATFORM_PLAN.md`'s phase plan. Update
 > checkboxes as items land; re-verify against the actual code before trusting
-> a ✅ if this drifts. Last refreshed: 2026-06-26.
+> a ✅ if this drifts. Last refreshed: 2026-07-16.
+>
+> ⚠️ **Track D below is historical.** Restaurant-admin has since moved OFF the
+> Supabase-session flow it describes to email+password → JWT with custom
+> per-tenant RBAC roles (`auth/`, `roles/`, `members/`; see
+> `docs/apps/restaurant-admin.md`). Its Supabase artifacts (`lib/auth.ts`,
+> `ImpersonationBanner`, `BillingLockoutGate`, `PlanBillingPage`) are now
+> unrouted dead code. Supabase auth remains only for the super-admin platform
+> panel (Track C).
 
 ## Phase 0 — Contracts & Schema
 ✅ **Done.**
@@ -177,11 +185,39 @@
 - [ ] End-to-end manual pass: create tenant → assign plan → impersonate → confirm
       restaurant-admin banner → cancel → confirm lockout → check audit log shows
       all events.
-- [ ] Add `AuthGuard` to every remaining tenant-scoped route (menu/tables/orders —
-      the long-standing "auth deferred" gap). `/billing/me` is now guarded; the
-      rest remain open and trust `X-Tenant-Slug` alone.
+- [x] ~~Add `AuthGuard` to every remaining tenant-scoped route~~ **Done** (via
+      the JWT RBAC rewrite, not Supabase `AuthGuard`): `menu/`, `tables/`,
+      `orders/`, `tenant/`, `loyalty/`, `billing/` and the staff side of
+      `service-requests/` all carry `JwtAuthGuard` + `@RequirePermission(...)`;
+      guest routes stay device-id-bound by design; global per-IP throttler
+      (120 req/60s) added.
 - [ ] Rotate `PLATFORM_MASTER_PASSWORD` to a long random value
       (`openssl rand -base64 32`) — never in a committed file.
+
+## Launch gates & post-perf residuals (added 2026-07-17)
+
+Carried from the performance thread (`PERFORMANCE_RESULTS.md`) so they survive
+its closure:
+
+- [ ] **Mumbai cutover** — the last perf pass. RTT measured (~38–48 ms vs
+      ~100 ms), baseline migration created + drift-checked, copy script +
+      checklist ready (`api-reference/MUMBAI-CUTOVER.md`,
+      `tools/mumbai-cutover.mjs`). Blocked only on creating the ap-south-1
+      project in the dashboard (human step 0).
+- [ ] **HTTP/2 at the reverse proxy** — REQUIRED for launch
+      (DEPLOY-RUNBOOK.md step 2b, BUGS.md BUG-005). Becomes real at deploy time.
+- [ ] **Analytics at production volume** — pass 5's joined analytics query was
+      measured at seed scale (~280 ms). **Trigger: re-measure
+      `GET /orders/analytics` when any tenant passes ~10k orders**; if it
+      regresses, consider `relationLoadStrategy: "query"` on that one call or
+      SQL-side aggregation.
+- [ ] **KDS relay retirement** — fold the KDS board onto the API order stream
+      (client-side; scoped before the server perf work began, see CLAUDE.md
+      flow 4).
+- [ ] **BUG-005 client stream-thinning** — don't mount the service-requests
+      stream on routes that don't render the bell (`/kds/display`); or share
+      one stream across tabs (SharedWorker/BroadcastChannel). Secondary to
+      HTTP/2, still worth doing.
 
 ## Quick status board
 
@@ -194,8 +230,18 @@
 | 2 | D — Restaurant-admin integration | ✅ done |
 | 3 | Security hardening | ✅ CORS + timing-safe + rate-limit done |
 | 3 | Analytics & audit endpoints | ✅ done |
-| 3 | Integration pass & auth guard | 🔲 not done |
+| 3 | Integration pass & auth guard | ✅ auth guards done (JWT RBAC); manual e2e pass still 🔲 |
 
-**Critical path now:** `npx prisma db push` to apply the AuditLog schema, then
-the end-to-end manual integration pass, then guarding the remaining
-tenant-scoped routes (menu/tables/orders) — the last open auth gap.
+**Critical path now:** the end-to-end manual integration pass (create tenant →
+plan → impersonate → lockout → audit log). Tenant-scoped route guarding is done
+via the JWT RBAC rewrite.
+
+## Ops backlog
+
+- [ ] **Stale empty session cleanup.** An `open` Order with zero items can be
+      orphaned when whatever created it loses track of it (seen 2026-07-16: an
+      unnamed, empty, open order held table T2 "occupied" for 19+ hours — a
+      miniature of `PRODUCTION_READINESS_AUDIT.md` C4's lost-session failure
+      mode; real service will produce these too, not just test harnesses).
+      Add a staff "force-close stale session" affordance on the admin floor
+      view and/or auto-expire `open` orders with zero items after N hours.

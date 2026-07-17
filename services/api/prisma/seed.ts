@@ -239,29 +239,29 @@ async function seedTables(
 const AMBER_CATEGORIES = ["Starters", "Mains", "Sides", "Drinks", "Desserts"];
 const AMBER_ITEMS: SeedItem[] = [
   // Starters
-  { name: "Vegetable Samosa", category: "Starters", price: 600, description: "Crisp pastry, spiced potato & pea, tamarind chutney.", icon: "lunch_dining", swatch: "from-yellow-200 to-amber-400", imageUrl: flickr("samosa") },
+  { name: "Vegetable Samosa", category: "Starters", price: 600, description: "Crisp pastry, spiced potato & pea, tamarind chutney.", icon: "lunch_dining", swatch: "from-yellow-200 to-amber-400", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Samosas%2C_snack_food_at_Wikipedia%27s_16th_Birthday_celebration_in_Chittagong_%2801%29.jpg/500px-Samosas%2C_snack_food_at_Wikipedia%27s_16th_Birthday_celebration_in_Chittagong_%2801%29.jpg" },
   { name: "Soft Shell Crab", category: "Starters", price: 1450, description: "Lightly fried, micro-greens, citrus aioli.", icon: "set_meal", swatch: "from-rose-200 to-red-300", available: false, imageUrl: flickr("crab") },
-  { name: "Paneer Tikka Bites", category: "Starters", price: 850, description: "Char-grilled paneer skewers, mint yogurt.", icon: "kebab_dining", swatch: "from-orange-200 to-amber-300", imageUrl: flickr("paneer-tikka") },
+  { name: "Paneer Tikka Bites", category: "Starters", price: 850, description: "Char-grilled paneer skewers, mint yogurt.", icon: "kebab_dining", swatch: "from-orange-200 to-amber-300", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Paneer_tikka.jpg/500px-Paneer_tikka.jpg" },
   // Mains
-  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature", imageUrl: flickr("burger"),
+  { name: "Wagyu Burger", category: "Mains", price: 1800, description: "Wagyu patty, aged cheddar, brioche bun.", icon: "lunch_dining", swatch: "from-stone-300 to-amber-500", badge: "Signature", imageUrl: "https://www.themealdb.com/images/media/meals/44bzep1761848278.jpg",
     modifiers: [
       { name: "Doneness", inputType: "single", required: true, options: [{ name: "Medium Rare" }, { name: "Medium" }, { name: "Well Done" }] },
       { name: "Add-ons", inputType: "toggle", options: [{ name: "Extra cheese", priceDelta: 200 }, { name: "Bacon", priceDelta: 300 }, { name: "Fried egg", priceDelta: 250 }] },
       { name: "Notes for the kitchen", inputType: "text", maxLength: 140, placeholder: "e.g. no pickles" },
     ] },
   { name: "Ribeye Steak", category: "Mains", price: 4400, description: "12oz dry-aged ribeye, peppercorn jus.", icon: "restaurant", swatch: "from-red-300 to-rose-500", imageUrl: flickr("steak") },
-  { name: "Grilled Salmon", category: "Mains", price: 2600, description: "Atlantic salmon, lemon butter, seasonal veg.", icon: "set_meal", swatch: "from-rose-200 to-orange-300", imageUrl: flickr("grilled-salmon") },
-  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular", imageUrl: flickr("butter-chicken"),
+  { name: "Grilled Salmon", category: "Mains", price: 2600, description: "Atlantic salmon, lemon butter, seasonal veg.", icon: "set_meal", swatch: "from-rose-200 to-orange-300", imageUrl: "https://www.themealdb.com/images/media/meals/xxyupu1468262513.jpg" },
+  { name: "Butter Chicken", category: "Mains", price: 1900, description: "Tandoori chicken, tomato-cream gravy, basmati.", icon: "ramen_dining", swatch: "from-orange-300 to-red-400", badge: "Popular", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/Butter_Chicken_%26_Butter_Naan_-_Home_-_Chandigarh_-_India_-_0006.jpg/500px-Butter_Chicken_%26_Butter_Naan_-_Home_-_Chandigarh_-_India_-_0006.jpg",
     modifiers: [
       { name: "Spice Level", inputType: "single", required: true, options: [{ name: "Mild" }, { name: "Medium" }, { name: "Hot" }] },
       { name: "Add naan", inputType: "toggle", options: [{ name: "Garlic naan", priceDelta: 500 }, { name: "Butter naan", priceDelta: 400 }] },
     ] },
   // Sides
-  { name: "Truffle Fries", category: "Sides", price: 900, description: "Hand-cut fries, truffle oil, parmesan.", icon: "fastfood", swatch: "from-yellow-200 to-amber-400", imageUrl: flickr("fries") },
-  { name: "House Salad", category: "Sides", price: 1200, description: "Mixed greens, heirloom tomato, vinaigrette.", icon: "eco", swatch: "from-green-200 to-emerald-400", imageUrl: flickr("salad") },
-  { name: "Garlic Naan", category: "Sides", price: 500, description: "Tandoor-baked flatbread, garlic butter.", icon: "bakery_dining", swatch: "from-amber-100 to-yellow-300", imageUrl: flickr("naan") },
+  { name: "Truffle Fries", category: "Sides", price: 900, description: "Hand-cut fries, truffle oil, parmesan.", icon: "fastfood", swatch: "from-yellow-200 to-amber-400", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/French_Fries.JPG/500px-French_Fries.JPG" },
+  { name: "House Salad", category: "Sides", price: 1200, description: "Mixed greens, heirloom tomato, vinaigrette.", icon: "eco", swatch: "from-green-200 to-emerald-400", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/94/Salad_platter.jpg/500px-Salad_platter.jpg" },
+  { name: "Garlic Naan", category: "Sides", price: 500, description: "Tandoor-baked flatbread, garlic butter.", icon: "bakery_dining", swatch: "from-amber-100 to-yellow-300", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Annapurna_Naan.jpg/500px-Annapurna_Naan.jpg" },
   // Drinks
-  { name: "Masala Chai", category: "Drinks", price: 450, description: "Spiced black tea simmered with milk, cardamom & ginger.", icon: "local_cafe", swatch: "from-amber-200 to-orange-300", imageUrl: flickr("chai") },
+  { name: "Masala Chai", category: "Drinks", price: 450, description: "Spiced black tea simmered with milk, cardamom & ginger.", icon: "local_cafe", swatch: "from-amber-200 to-orange-300", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/89/Chai_In_Sakora.jpg/500px-Chai_In_Sakora.jpg" },
   // Curated exact shot from TheCocktailDB.
   { name: "House Old Fashioned", category: "Drinks", price: 1400, description: "Bourbon, bitters, demerara, orange twist.", icon: "local_bar", swatch: "from-amber-400 to-orange-600", badge: "Signature", imageUrl: "https://www.thecocktaildb.com/images/media/drink/vrwquq1478252802.jpg" },
   { name: "Oat Latte", category: "Drinks", price: 550, description: "Double espresso, steamed oat milk.", icon: "coffee", swatch: "from-stone-200 to-amber-300", imageUrl: flickr("latte") },
@@ -269,7 +269,7 @@ const AMBER_ITEMS: SeedItem[] = [
   { name: "Fresh Lemonade", category: "Drinks", price: 600, description: "Hand-pressed lemon, mint, soda.", icon: "local_drink", swatch: "from-lime-200 to-yellow-300", imageUrl: "https://www.thecocktaildb.com/images/media/drink/b3n0ge1503565473.jpg" },
   // Desserts — curated cheesecake shot from TheMealDB.
   { name: "Burnt Basque Cheesecake", category: "Desserts", price: 1100, description: "Caramelised top, vanilla cream.", icon: "cake", swatch: "from-amber-200 to-yellow-400", imageUrl: "https://www.themealdb.com/images/media/meals/swttys1511385853.jpg" },
-  { name: "Gulab Jamun", category: "Desserts", price: 700, description: "Warm milk dumplings, rose syrup.", icon: "icecream", swatch: "from-orange-200 to-rose-300", imageUrl: flickr("gulab-jamun") },
+  { name: "Gulab Jamun", category: "Desserts", price: 700, description: "Warm milk dumplings, rose syrup.", icon: "icecream", swatch: "from-orange-200 to-rose-300", imageUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Gulab-jamun-wallpaper-1.jpg/500px-Gulab-jamun-wallpaper-1.jpg" },
 ];
 
 const AMBER_TABLES: TableDef[] = [

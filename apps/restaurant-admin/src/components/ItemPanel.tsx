@@ -4,7 +4,7 @@ import { Toggle } from "./Toggle";
 import { DietaryMark } from "./DietaryMark";
 import { useAdmin } from "../store/AdminStore";
 import type { MenuItem, ModifierGroup, ModifierInputType } from "../data/types";
-import { uid } from "../data/seed";
+import { uid } from "../lib/uid";
 
 const SWATCHES = [
   "from-amber-200 to-orange-300",

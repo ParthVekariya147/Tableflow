@@ -27,7 +27,7 @@ from the browser at the URL entered in Settings → Printer → Agent URL —
 
 Set an `AGENT_SECRET` environment variable before starting the agent, and
 enter the **same value** as the "Security key" in Settings → Printer. Every
-`/print` and `/print/test` request must then include a matching
+`/print`, `/print/test` and `/print/kot` request must then include a matching
 `X-Agent-Secret` header or the agent rejects it with 401. Leaving
 `AGENT_SECRET` unset runs the agent in open mode — only safe when the agent
 and the printer never leave the same PC as the browser.
@@ -41,8 +41,11 @@ AGENT_SECRET=some-long-random-value pnpm start
 - `GET /health` — `{ ok, version }`. No auth required.
 - `POST /print/test` — `{ connection }`. Prints a short test slip.
 - `POST /print` — `{ connection, receipt }`. Formats and prints a full receipt.
+- `POST /print/kot` — `{ connection, kot }`. Prints a kitchen order ticket
+  (table/round/items/modifiers/notes, no prices). The endpoint is live, but no
+  admin-app code sends KOTs yet — kitchen auto-printing is deferred.
 
-Both `/print*` endpoints respond `{ success: true }` or
+All `/print*` endpoints respond `{ success: true }` or
 `{ success: false, error }`, with a `400` for a bad/incomplete `connection`
 config and a `502` for an actual printer failure (offline, timed out, etc.) —
 this lets the web app tell "printer isn't set up" apart from "printer isn't
@@ -51,19 +54,20 @@ responding."
 ## Connection types
 
 - **network** — `networkHost` + `networkPort` (default `9100`), talks raw
-  ESC/POS over TCP straight to the printer's IP.
+  bytes (ESC/POS or TSPL) over TCP straight to the printer's IP.
 - **usb** / **bluetooth** — both resolve to an OS-level print queue: install
   the printer (USB) or pair it (Bluetooth) at the operating-system level first
-  so it's addressable by a system printer/port name, then enter that name as
+  so it's addressable by a system printer name, then enter that name as
   `usbPath` / `bluetoothPort`. Sending to that queue is handled by
   `printer/osPrintDriver.ts` — a small hand-rolled driver with **no native
   (node-gyp) dependency**, so `pnpm install` never needs a C++ toolchain on
   the staff PC:
-  - **Windows**: the printer must also be **shared** (Printer Properties →
-    Sharing → "Share this printer"), not just installed — the driver writes
-    raw bytes straight to `\\localhost\<share name>`, so `usbPath`/
-    `bluetoothPort` must be the **share name**, not the display name, if they
-    differ.
+  - **Windows**: raw bytes are written through the spooler's winspool API
+    (a small PowerShell `Add-Type` helper calling
+    `OpenPrinter`/`StartDocPrinter(RAW)`/`WritePrinter`). The queue is matched
+    by its **Name OR ShareName**, so either works in `usbPath`/`bluetoothPort`,
+    and the printer does **not** need to be shared (older versions of the agent
+    wrote to `\\localhost\<share>` and required sharing — no longer).
   - **macOS/Linux**: pipes to CUPS's `lp -d <name> -o raw`, present by default
     on macOS and on Linux distros with `cups-client` installed.
 
@@ -77,3 +81,12 @@ Settings -> Printer has a "Printer language" option:
 - **TSC / TSPL** - TSC label printers such as DA310. These printers are USB
   connected and visible in Windows, but they do not understand ESC/POS receipt
   commands, so the agent sends a label-style TSPL slip instead.
+
+The TSPL path (`printer/renderTspl.ts`) renders the same layout as ESC/POS —
+text is laid out by the shared `@amber/domain` `print-format` engine, so the
+paper matches the admin's on-screen preview character-for-character. QR codes
+(UPI payment / review link) use the printer's **native `QRCODE`** command, and
+the tenant logo is fetched and converted to a **1-bit `BITMAP`** in-process via
+`pngjs` (no native dependency). Paper width comes from Settings → Printer
+(58/76/80/101 mm presets or a custom 40–210 mm value); column counts and the
+TSPL dot width are derived from it at 8 dots/mm.

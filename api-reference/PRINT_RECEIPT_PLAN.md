@@ -1,5 +1,20 @@
 # Print Receipt (Thermal Printer) — Architecture & Implementation Plan
 
+> **Status 2026-07-16: implemented AND extended past this plan.** Since it shipped,
+> printing gained: **TSPL support** for label printers (TSC DA310 etc. —
+> `commandLanguage` auto/escpos/tspl on `PrinterSettings`, raw-byte path via
+> `renderTspl.ts`/`rawPrint.ts`; Windows now prints through winspool RAW with no
+> printer sharing required), a **shared text-layout engine**
+> (`@amber/domain/print-format.ts`) used by both the agent renderers and the
+> admin's live preview (character-for-character parity; plain amounts without a
+> currency symbol), free-form **paper widths** (58/76/80/101 mm presets + custom
+> 40–210 mm), statutory bill fields on the receipt header
+> (address/phone/GSTIN/FSSAI) with CGST/SGST tax split, a **customerInfo**
+> section (10 sections now, auto-appended to saved layouts via
+> `mergeReceiptSections`), and an agent-side **KOT endpoint** (`POST /print/kot`
+> + `Tenant.kitchenPrinter` — no admin caller yet). For the current end-to-end
+> path see CLAUDE.md flow 9; the rest of this document is the original plan.
+>
 > Status: **implemented** (steps 1–9 of §8 complete, 2026-07-01). Written after reading
 > `CLAUDE.md`, `docs/PROJECT.md`, `docs/apps/restaurant-admin.md`, `docs/apps/customer.md`,
 > `FEATURES.md`, and the current `BillingPage.tsx` / `PaymentCompletePage.tsx` /

@@ -201,12 +201,6 @@ export function LoginPage() {
         </form>
         )}
 
-        <div className="mt-xl flex items-center justify-between border-t border-outline-variant/30 pt-lg">
-          <a href="#" className="font-label-md text-label-md text-on-surface-variant transition-colors hover:text-primary">
-            Forgot Password?
-          </a>
-          <span className="font-data-mono text-[12px] text-outline">System v1.2</span>
-        </div>
       </div>
     </div>
   );

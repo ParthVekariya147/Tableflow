@@ -10,7 +10,7 @@ Multi-tenant restaurant ordering platform. One codebase, many branded tenants. E
 - **Backend:** NestJS 10 + Prisma 6 + PostgreSQL (Supabase)
 - **Validation:** Zod in `@amber/domain` (shared contract for API + clients)
 - **Realtime:** SSE (`GET /orders/stream`, `GET /service-requests/stream`) via rxjs `Subject` per tenant
-- **Auth:** two separate systems. restaurant-admin = email+password → JWT + custom per-tenant RBAC roles (`auth/`, `roles/`, `members/` modules). super-admin (platform) = Supabase session + impersonation. Most tenant-scoped data routes (`menu/`, `tables/`, `orders/`, `service-requests/`) still rely on `X-Tenant-Slug` only — see Gaps.
+- **Auth:** two separate systems. restaurant-admin = email+password → JWT + custom per-tenant RBAC roles (`auth/`, `roles/`, `members/` modules). super-admin (platform) = Supabase session + impersonation. Staff routes are `@RequirePermission(...)`-gated server-side (`menu/`, `tables/`, `orders/`, `tenant/`, `loyalty/`, `billing/`, staff side of `service-requests/`); guest routes stay unauthenticated by design (device-id bound); global per-IP throttle (120 req/60s).
 
 ## Packages (internal `@amber/*`)
 | Package | Path | Role |
@@ -28,12 +28,13 @@ Multi-tenant restaurant ordering platform. One codebase, many branded tenants. E
 | Super Admin | 5175 | `apps/super-admin/src/App.tsx` | `docs/apps/super-admin.md` |
 | API | 3001 | `services/api/src/main.ts` | `docs/PROJECT.md` |
 | KDS Relay | 4001 | `tools/kds-relay.mjs` | (in-memory, dev-only) |
+| Print Agent | 9200 | `services/print-agent/src/index.ts` | `services/print-agent/README.md` |
 
 ## Commands
 ```bash
 pnpm install                    # install workspace
 pnpm dev                        # start all (via tools/dev.mjs)
-pnpm build / lint / typecheck   # fan out via Turbo
+pnpm build / lint / typecheck / test   # fan out via Turbo (Vitest tests in packages/domain/test/)
 pnpm db:generate                # prisma generate (required after schema change)
 pnpm db:migrate                 # prisma db push
 pnpm db:seed                    # seed 3 tenants (idempotent)
@@ -91,6 +92,10 @@ it on the floor grid, not just the bell.
 - `menu.ts` — MenuItem, ModifierGroup, ModifierOption
 - `billing.ts` — Plan, Subscription, SubscriptionStatus
 - `auth.ts` — AuthUser, Membership, Role, ImpersonationToken
+- `permission.ts` — PERMISSIONS (fixed 9-key catalog incl. loyalty.manage) + hasPermission
+- `loyalty.ts` — LoyaltyProgram, LoyaltyAccount, LoyaltyTransaction + earn/redeem math
+- `printer.ts` / `receipt.ts` / `kot.ts` — printing contract (PrinterSettings, Receipt, Kot)
+- `print-format.ts` — shared text-layout engine (print agent renderers + admin live preview)
 - `analytics.ts` — AnalyticsSummary shape
 
 ### Admin (`apps/restaurant-admin/src/`)
@@ -108,12 +113,12 @@ it on the floor grid, not just the bell.
 - `context/MenuContext.jsx` — menu loading from boot prefetch
 
 ## Known Gaps / Deferred
-- **Auth:** restaurant-admin's RBAC (JWT + custom roles/permissions, `auth/`+`roles/`+`members/`) is fully implemented and enforced both client-side (nav/routes) and server-side (on `roles`/`members` themselves). But `menu/`, `tables/`, `orders/`, `service-requests/` — the actual tenant data routes — are **not yet** `@RequirePermission`-gated server-side; they still rely on `X-Tenant-Slug` alone. `/admin/*` (super-admin, platform) uses a separate Supabase-based `SupabaseAuthGuard` + `super-admin.guard.ts`.
 - **KDS unification:** KDS relay (`tools/kds-relay.mjs`) is separate from the order SSE stream. Folding KDS onto the API stream = next major step.
+- **KOT printing:** agent-side ready (`POST /print/kot`, `Tenant.kitchenPrinter`) but no admin caller sends KOTs yet.
 - **Category reorder:** Edit/delete done. Reorder endpoint not yet built.
 - **Menu placements:** Schema exists (`MenuPlacement`), API not wired.
-- **Rate-limit on order creation:** Client-side only.
 - **SPA host fallback:** Deep QR links need server fallback for direct hits.
+- (Fixed since earlier revisions: staff data routes are now `@RequirePermission`-gated server-side, and a global per-IP throttler covers order creation.)
 
 ## Env vars required
 ```

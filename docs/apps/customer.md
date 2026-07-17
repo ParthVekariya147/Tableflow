@@ -113,7 +113,7 @@ This id is sent as `X-Device-Id` on every guest API call. The server (`orders.se
 - **Blocks add** until all `required` groups are satisfied
 - Carries chosen modifiers through cart → round → `addRound` payload
 
-See `MODIFIERS.md` for full modifier spec.
+See `api-reference/MODIFIERS.md` for full modifier spec.
 
 ## Guest Service Requests (Quick Actions)
 
@@ -181,6 +181,8 @@ For LAN/phone testing, create `.env.local` (git-ignored) with LAN IP. `tools/syn
 
 - KDS board status is relay-based, not API-backed — status doesn't survive relay restart
 - `crypto.randomUUID` needs a secure context (HTTPS) — falls back to `getRandomValues` for LAN dev
-- Rate-limit on order creation is client-side only
+- ~~Rate-limit on order creation is client-side only~~ — a global per-IP rate
+  limit now covers all routes server-side (`@nestjs/throttler`, 120 req/60s;
+  the SSE stream endpoints opt out via `@SkipThrottle()`)
 - SPA host fallback needed for direct deep QR link hits in production
 - `src/data/menu.json` is unused (legacy); `src/components/KDS.jsx` is an empty legacy stub

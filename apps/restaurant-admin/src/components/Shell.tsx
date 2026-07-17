@@ -108,13 +108,6 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
             )}
           </NavLink>
         )}
-        <a
-          href="#"
-          className="flex items-center gap-sm rounded-lg px-md py-sm text-on-surface-variant transition-colors duration-200 hover:bg-surface-container-low hover:text-primary"
-        >
-          <Icon name="help" />
-          <span className="font-label-md text-label-md">Support</span>
-        </a>
         <button
           onClick={signOut}
           className="mt-sm flex items-center gap-sm rounded-lg px-md py-sm text-error transition-colors duration-200 hover:bg-error-container hover:text-on-error-container"
@@ -281,30 +274,10 @@ function TopBar({
         >
           <Icon name={navOpen ? "menu_open" : "menu"} />
         </button>
-        <button className="rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10">
-          <Icon name="search" />
-        </button>
-        <nav className="hidden items-center gap-lg md:flex">
-          <a
-            href="#"
-            className="font-label-md text-label-md font-semibold text-primary after:absolute after:bottom-[-8px] after:left-0 after:h-[2px] after:w-full after:bg-primary relative"
-          >
-            Live Status
-          </a>
-          <a
-            href="#"
-            className="rounded-lg px-sm py-xs font-label-md text-label-md text-on-surface-variant transition-colors hover:bg-primary-container/10"
-          >
-            Global Orders
-          </a>
-        </nav>
       </div>
 
       <div className="flex items-center gap-md">
         <NotificationBell />
-        <button className="rounded-full p-sm text-on-surface-variant transition-colors hover:bg-primary-container/10">
-          <Icon name="sync" />
-        </button>
         <div className="mx-sm h-8 w-px bg-outline-variant" />
         <div className="flex cursor-pointer items-center gap-sm transition-opacity hover:opacity-80">
           <div className="text-right">
