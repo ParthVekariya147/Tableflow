@@ -523,76 +523,125 @@ export class OrdersService {
     itemId: string,
     dto: UpdateItemDto,
   ): Promise<Order> {
-    const order = await this.prisma.order.findFirst({
-      where: { id: orderId, tenantId },
-      select: { id: true, status: true },
-    });
-    if (!order) throw new NotFoundException(`Order not found: ${orderId}`);
-    // A cancelled/paid session is terminal. Refuse item edits — including the
-    // KDS status write-through — so a stale kitchen board can't resurrect a dead
-    // order (e.g. mark "preparing" after staff cancelled it, which would wrongly
-    // reach the guest's phone). The relay ticket should already be gone too.
-    if (order.status === "closed" || order.status === "paid")
-      throw new ConflictException(
-        "This session is closed; its items can no longer be changed.",
-      );
-
-    const item = await this.prisma.orderItem.findFirst({
-      where: { id: itemId, tenantId, round: { orderId } },
-      select: { id: true },
-    });
-    if (!item) throw new NotFoundException(`Order item not found: ${itemId}`);
+    // Guarded writes (pass 4): the item must belong to this order/tenant AND
+    // the order must still be live — enforced in the WHERE of the write
+    // itself (extended-where-unique: unique id + extra guard filters), so the
+    // happy path pays ONE round trip where two pre-flight reads used to run
+    // first. NOT updateMany/deleteMany — Prisma wraps those in an implicit
+    // BEGIN…COMMIT (+2 round trips), which would eat the entire saving.
+    // The live-status condition preserves the terminal-session rule: a
+    // cancelled/paid session refuses item edits — including the KDS status
+    // write-through — so a stale kitchen board can't resurrect a dead order.
+    // A no-match throws P2025 → throwItemUpdateError re-reads to pick the
+    // same 404/409 the old pre-flight checks threw (sad path only).
+    const itemWhere: Prisma.OrderItemWhereUniqueInput = {
+      id: itemId,
+      tenantId,
+      round: {
+        is: { order: { is: { id: orderId, tenantId, status: { in: ["open", "billed"] } } } },
+      },
+    };
+    const noMatch = (e: unknown) =>
+      e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025";
 
     if (dto.qty === 0) {
-      await this.prisma.orderItem.delete({ where: { id: itemId } });
+      try {
+        await this.prisma.orderItem.delete({ where: itemWhere });
+      } catch (e) {
+        if (noMatch(e)) await this.throwItemUpdateError(tenantId, orderId, itemId);
+        else throw e;
+      }
       return this.refreshAndEmit(tenantId, orderId, "updated");
     }
+
+    const stamp = dto.status !== undefined ? STATUS_STAMP[dto.status] : null;
+    const statusData =
+      dto.status !== undefined
+        ? { status: dto.status, ...(stamp ? { [stamp]: new Date() } : {}) }
+        : {};
 
     if (dto.qtyDelta !== undefined) {
       // Atomic increment at the DB layer (`qty = qty + delta`) — Postgres
       // serializes concurrent updates to the same row via its row lock, so two
       // rapid deltas (double-tap, or two staff devices) both land instead of
       // the second clobbering the first the way a client-computed absolute
-      // write would.
-      const updated = await this.prisma.orderItem.update({
-        where: { id: itemId },
-        data: { qty: { increment: dto.qtyDelta } },
-      });
-      if (updated.qty <= 0) {
-        await this.prisma.orderItem.delete({ where: { id: itemId } }).catch(() => {});
+      // write would. A simultaneous status change rides the same write.
+      let updated;
+      try {
+        updated = await this.prisma.orderItem.update({
+          where: itemWhere,
+          data: { qty: { increment: dto.qtyDelta }, ...statusData },
+        });
+      } catch (e) {
+        if (noMatch(e)) await this.throwItemUpdateError(tenantId, orderId, itemId);
+        throw e;
       }
-      if (dto.status !== undefined) {
-        const stamp = STATUS_STAMP[dto.status];
+      // A decrement that lands at/below zero removes the line. Guarded on the
+      // live qty so a concurrent +1 that raced us keeps the row.
+      if (updated.qty <= 0)
         await this.prisma.orderItem
-          .update({
-            where: { id: itemId },
-            data: { status: dto.status, ...(stamp ? { [stamp]: new Date() } : {}) },
-          })
-          .catch(() => {}); // item may have just been deleted by the qty<=0 branch above
-      }
+          .delete({ where: { id: itemId, tenantId, qty: { lte: 0 } } })
+          .catch(() => {});
       return this.refreshAndEmit(tenantId, orderId, "updated");
     }
 
-    const data: Record<string, unknown> = {};
-    if (dto.qty !== undefined) data.qty = dto.qty;
-    if (dto.status !== undefined) {
-      data.status = dto.status;
-      const stamp = STATUS_STAMP[dto.status];
-      if (stamp) data[stamp] = new Date();
+    try {
+      await this.prisma.orderItem.update({
+        where: itemWhere,
+        data: { ...(dto.qty !== undefined ? { qty: dto.qty } : {}), ...statusData },
+      });
+    } catch (e) {
+      if (noMatch(e)) await this.throwItemUpdateError(tenantId, orderId, itemId);
+      else throw e;
     }
-    await this.prisma.orderItem.update({ where: { id: itemId }, data });
     return this.refreshAndEmit(tenantId, orderId, "updated");
+  }
+
+  /**
+   * Failure-path diagnosis for updateItem's guarded writes: a count of 0 means
+   * missing order, terminal session, or missing item — re-read (one query) to
+   * throw the same error the old pre-flight checks did. Never runs on success.
+   */
+  private async throwItemUpdateError(
+    tenantId: string,
+    orderId: string,
+    itemId: string,
+  ): Promise<never> {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+      select: { status: true },
+    });
+    if (!order) throw new NotFoundException(`Order not found: ${orderId}`);
+    if (order.status === "closed" || order.status === "paid")
+      throw new ConflictException(
+        "This session is closed; its items can no longer be changed.",
+      );
+    throw new NotFoundException(`Order item not found: ${itemId}`);
   }
 
   /** Abandon a session without payment (walkout / mistake). Frees the table. */
   async cancel(tenantId: string, orderId: string): Promise<Order> {
     // Staff route (JwtAuthGuard) — the caller is authenticated, not a guest.
-    await this.assertOrder(tenantId, orderId, undefined, true);
+    // Pass 4: the full load happens ONCE, up front (it throws the 404 and is
+    // the emit payload), then a tenant-guarded write — instead of assert +
+    // write + a second full reload. The emitted order is the loaded one with
+    // the two fields this call changes patched on, same as capturePayment.
+    const order = await this.get(tenantId, orderId, undefined, true);
+    const closedAt = new Date();
+    // update, not updateMany — Prisma wraps updateMany in an implicit
+    // BEGIN…COMMIT (+2 round trips); extended-where-unique update emits one
+    // plain statement with the tenant guard in its WHERE.
     await this.prisma.order.update({
-      where: { id: orderId },
-      data: { status: "closed", closedAt: new Date() },
+      where: { id: orderId, tenantId },
+      data: { status: "closed", closedAt },
     });
-    return this.refreshAndEmit(tenantId, orderId, "closed");
+    const closed: Order = {
+      ...order,
+      status: "closed",
+      closedAt: closedAt.toISOString(),
+    };
+    this.events.emit(tenantId, { type: "closed", orderId, order: closed });
+    return closed;
   }
 
   /** Settle the bill: snapshot totals, record the payment, close the session. */
@@ -644,8 +693,14 @@ export class OrdersService {
             tendered: dto.tendered,
           },
         });
-        await tx.order.update({
-          where: { id: orderId },
+        // Guarded close (pass 4): the status checks above ran on a pre-read,
+        // so a staff cancel landing in between could otherwise be silently
+        // resurrected into a paid sale here. Guarding the write on the LIVE
+        // statuses makes the close atomic — count 0 = the order was closed/paid
+        // meanwhile → 409 and the whole transaction (payment row included)
+        // rolls back.
+        const closed = await tx.order.updateMany({
+          where: { id: orderId, tenantId, status: { in: ["open", "billed"] } },
           data: {
             status: "paid",
             closedAt: now,
@@ -654,6 +709,10 @@ export class OrdersService {
             redemptionValueCents: redemptionDiscount || null,
           },
         });
+        if (closed.count === 0)
+          throw new ConflictException(
+            "This session was closed while the payment was being captured.",
+          );
 
         // Loyalty bookkeeping — one read (for the live balance + the redeem
         // check), one atomic write (net delta, immune to a concurrent order
