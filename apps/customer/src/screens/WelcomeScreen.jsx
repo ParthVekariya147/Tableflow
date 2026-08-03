@@ -1,29 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { SERVICE_REQUEST_TYPES, SERVICE_REQUEST_META } from "@amber/domain";
+import { mergeQuickActions } from "@amber/domain";
 import { useSession } from "../context/SessionContext";
 import { useMenu } from "../context/MenuContext";
 import { useBoot } from "../context/BootContext";
 import { useMoney } from "../money";
 import FoodImage from "../components/FoodImage";
 
-// Swatch per request type — kept alongside the shared label/icon metadata
-// (@amber/domain's SERVICE_REQUEST_META) since the gradient is a customer-app
-// styling detail, not part of the cross-app contract.
-const QUICK_ACTION_SWATCH = {
-  water: "from-sky-100 to-blue-200",
-  call_staff: "from-amber-100 to-orange-200",
-  call_manager: "from-purple-100 to-violet-200",
+// Tailwind gradient per swatch — kept alongside the shared quick-action
+// config (@amber/domain's quick-action.ts only carries the swatch *name*)
+// since the actual gradient is a customer-app styling detail, not part of
+// the cross-app contract.
+const SWATCH_CLASSES = {
+  neutral: "from-stone-100 to-stone-200",
+  sky: "from-sky-100 to-blue-200",
+  amber: "from-amber-100 to-orange-200",
+  violet: "from-purple-100 to-violet-200",
+  rose: "from-rose-100 to-pink-200",
+  emerald: "from-emerald-100 to-teal-200",
 };
-
-// ── Quick Actions — guest service requests, NOT menu items. Tapping one
-// posts to /service-requests (api.serviceRequests.create), a channel fully
-// separate from Order/Round/KDS — see SessionContext's sendServiceRequest.
-const QUICK_ACTIONS = SERVICE_REQUEST_TYPES.map((type) => ({
-  type,
-  ...SERVICE_REQUEST_META[type],
-  swatch: QUICK_ACTION_SWATCH[type],
-}));
 
 // ── Menu item card ────────────────────────────────────────────────────────
 function ItemCard({ item, onBringIt, onAdd, added, money }) {
@@ -73,8 +68,11 @@ function ItemCard({ item, onBringIt, onAdd, added, money }) {
   );
 }
 
-// ── Quick-action card ─────────────────────────────────────────────────────
+// ── Quick-action card — renders both built-in + tenant-custom buttons, and
+// the navigational Full Menu entry (kind:"full_menu", which never shows a
+// "Sent" state) from one shared shape (@amber/domain's mergeQuickActions). ─
 function QuickCard({ action, onTap, sent }) {
+  const neutral = action.swatch === "neutral";
   return (
     <button
       onClick={() => onTap(action)}
@@ -85,10 +83,10 @@ function QuickCard({ action, onTap, sent }) {
       }`}
     >
       <div
-        className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br ${action.swatch}`}
+        className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br ${SWATCH_CLASSES[action.swatch] ?? SWATCH_CLASSES.neutral}`}
       >
         <span
-          className="material-symbols-outlined text-[24px] text-white drop-shadow-sm"
+          className={`material-symbols-outlined text-[24px] drop-shadow-sm ${neutral ? "text-stone-500" : "text-white"}`}
           style={{ fontVariationSettings: "'FILL' 1" }}
         >
           {sent ? "check_circle" : action.icon}
@@ -119,10 +117,19 @@ export default function WelcomeScreen() {
   const money = useMoney();
   const [added, setAdded] = useState(new Set());
   const [sent, setSent] = useState(new Set());
-  // Pending "sent" reset timers, keyed by action.type — cleared on unmount so
+  // Pending "sent" reset timers, keyed by action.id — cleared on unmount so
   // a screen change before the 4s tick doesn't call setState on an unmounted
   // component.
   const sentTimersRef = useRef(new Map());
+
+  // Tenant-configured row: built-in service requests + Full Menu (toggled/
+  // reordered from restaurant-admin Settings → Quick Actions) plus any
+  // custom buttons, merged against the defaults so an unconfigured tenant
+  // still gets today's 4-button row.
+  const quickActions = useMemo(
+    () => mergeQuickActions(tenant?.quickActions).filter((a) => a.enabled),
+    [tenant?.quickActions],
+  );
 
   useEffect(() => {
     const timers = sentTimersRef.current;
@@ -133,17 +140,21 @@ export default function WelcomeScreen() {
   }, []);
 
   async function handleQuickTap(action) {
-    if (sent.has(action.type)) return;
+    if (action.kind === "full_menu") {
+      navigate("/menu");
+      return;
+    }
+    if (sent.has(action.id)) return;
     // Optimistic — the server dedupes identical pending requests per table,
     // so a double-tap before this resolves is safe either way.
-    setSent((prev) => new Set(prev).add(action.type));
+    setSent((prev) => new Set(prev).add(action.id));
     const id = setTimeout(() => {
-      sentTimersRef.current.delete(action.type);
-      setSent((prev) => { const n = new Set(prev); n.delete(action.type); return n; });
+      sentTimersRef.current.delete(action.id);
+      setSent((prev) => { const n = new Set(prev); n.delete(action.id); return n; });
     }, 4000);
-    sentTimersRef.current.set(action.type, id);
+    sentTimersRef.current.set(action.id, id);
     try {
-      await sendServiceRequest(action.type);
+      await sendServiceRequest(action.id);
     } catch {
       showToast("Couldn't send — please try again", "error");
     }
@@ -195,34 +206,14 @@ export default function WelcomeScreen() {
             Quick actions
           </p>
           <div className="flex gap-3">
-            {QUICK_ACTIONS.map((action) => (
+            {quickActions.map((action) => (
               <QuickCard
-                key={action.type}
+                key={action.id}
                 action={action}
                 onTap={handleQuickTap}
-                sent={sent.has(action.type)}
+                sent={sent.has(action.id)}
               />
             ))}
-            {/* Full Menu shortcut */}
-            <button
-              onClick={() => navigate("/menu")}
-              className="flex-1 min-w-0 flex flex-col items-center gap-2 py-4 px-2 rounded-3xl border border-outline-variant bg-surface-container-lowest shadow-[0px_2px_12px_rgba(26,26,26,0.05)] active:scale-[0.96] transition-all"
-            >
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br from-stone-100 to-stone-200">
-                <span
-                  className="material-symbols-outlined text-[24px] text-stone-500"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
-                >
-                  menu_book
-                </span>
-              </div>
-              <div className="text-center">
-                <p className="text-[12px] font-bold text-on-surface leading-tight">Full Menu</p>
-                <p className="text-[10px] text-on-surface-variant leading-tight mt-0.5">
-                  Browse all items
-                </p>
-              </div>
-            </button>
           </div>
         </section>
 

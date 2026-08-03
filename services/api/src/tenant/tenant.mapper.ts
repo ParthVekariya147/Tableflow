@@ -2,8 +2,10 @@ import {
   themeConfigSchema,
   printerSettingsSchema,
   loyaltyProgramSchema,
+  quickActionSchema,
   type Tenant as DomainTenant,
 } from "@amber/domain";
+import { z } from "zod";
 import type { Tenant as PrismaTenant } from "@prisma/client";
 
 /** Map a Prisma Tenant row to the shared domain Tenant shape. */
@@ -26,6 +28,7 @@ export function toDomainTenant(row: PrismaTenant): DomainTenant {
     printer: printerSettingsSchema.parse(row.printer ?? {}),
     kitchenPrinter: printerSettingsSchema.parse(row.kitchenPrinter ?? {}),
     loyalty: loyaltyProgramSchema.parse(row.loyalty ?? {}),
+    quickActions: z.array(quickActionSchema).parse(row.quickActions ?? []),
   };
 }
 

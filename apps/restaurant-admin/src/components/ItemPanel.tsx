@@ -66,6 +66,7 @@ export function ItemPanel({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const busy = saving || deleting || uploading;
 
   // ── Modifier group helpers (immutable updates) ──────────────────────────────
@@ -124,15 +125,28 @@ export function ItemPanel({
     if (!name.trim() || busy) return;
     const modifierGroups = cleanGroups();
     const dietaryValue = dietary || null;
+    setSaveError(null);
     if (isEdit && item) {
+      // Awaited and only closes on success: a failed save now keeps the
+      // panel open with the edit intact instead of silently closing as if
+      // it had saved.
       setSaving(true);
-      await dispatch({
+      const ok = await dispatch({
         type: "UPDATE_ITEM",
         itemId: item.id,
         patch: { name, description, priceCents, categoryId, icon, swatch, available, dietary: dietaryValue, jain, imageUrl, modifierGroups },
       });
-      onClose();
+      setSaving(false);
+      if (ok) {
+        onClose();
+      } else {
+        setSaveError("Couldn't save — check your connection and try again.");
+      }
     } else {
+      // New items keep the original optimistic UX: the "crafting" placeholder
+      // (see pendingItems in AdminStore) shows in the grid immediately while
+      // this saves in the background; a failure surfaces via the store's
+      // error toast rather than reopening this already-closed panel.
       const newItem: MenuItem = {
         id: uid("it"),
         categoryId,
@@ -155,8 +169,14 @@ export function ItemPanel({
   async function remove() {
     if (!item || busy) return;
     setDeleting(true);
-    await dispatch({ type: "DELETE_ITEM", itemId: item.id });
-    onClose();
+    const ok = await dispatch({ type: "DELETE_ITEM", itemId: item.id });
+    setDeleting(false);
+    if (ok) {
+      onClose();
+    } else {
+      setConfirmDelete(false);
+      setSaveError("Couldn't delete — check your connection and try again.");
+    }
   }
 
   return (
@@ -455,7 +475,10 @@ export function ItemPanel({
           ) : (
             <span />
           )}
-          <div className="flex gap-md">
+          <div className="flex items-center gap-md">
+            {saveError && (
+              <p className="font-body-md text-body-md text-error">{saveError}</p>
+            )}
             <button
               onClick={onClose}
               disabled={busy}
@@ -469,7 +492,7 @@ export function ItemPanel({
               className="flex items-center justify-center gap-xs rounded-full bg-primary px-xl py-sm font-label-md text-label-md uppercase tracking-wider text-on-primary shadow-md transition-colors hover:bg-primary-container disabled:opacity-70"
             >
               {saving && <Icon name="progress_activity" size={18} className="ag-spin" />}
-              {saving ? "Saving…" : isEdit ? "Save Changes" : "Create Item"}
+              {saving ? "Saving…" : saveError ? "Retry Save" : isEdit ? "Save Changes" : "Create Item"}
             </button>
           </div>
         </footer>

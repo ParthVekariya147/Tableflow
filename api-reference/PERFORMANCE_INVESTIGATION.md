@@ -115,6 +115,30 @@ DATABASE_URL="postgresql://...aws-1-ap-southeast-1.pooler.supabase.com:5432/post
 > pool — both since fixed (perf passes 1–2, 2026-07-16). The same conflation of
 > HTTP connections with DB connections appears in §5.2, §13.2, §14 and P4 #17;
 > read those with this correction in mind.
+>
+> ⚠️ **Correction (2026-07-21) — superseding hypothesis for the P99 spikes.**
+> The 2026-07-17 pass-3 config moved `DATABASE_URL` off this pooler entirely,
+> to a **direct** connection (`connection_limit=8`, no `pool_timeout`, no
+> pgbouncer). §3.1/§4's "3 auth/tenant DB queries per request" was also fixed
+> (TTL caches with in-flight coalescing, `auth.service.ts`/`tenant.service.ts`).
+> A follow-up investigation (2026-07-21) initially hypothesized the
+> **auth-user cache's 5-minute TTL boundary** as the cause of remaining P99
+> spikes (`GET /tables` 9.1s, `GET /orders/sales` 6.8s observed in one
+> capture) — a real, naturally-occurring correlation, but **a controlled
+> concurrent-load probe (N=4/8/12 simultaneous requests, no auth cache
+> involved at all) reproduced the identical spike shape**, disproving auth-TTL
+> as the cause. The actual mechanism, confirmed against Prisma's own
+> connection-string defaults and the live Supabase project's session
+> settings: Prisma's built-in pool closes a connection after
+> `max_idle_connection_lifetime` (**default 300s** — the same period as the
+> auth-cache TTL, hence the coincidental correlation) with no idle-session
+> enforcement from the server side (`SHOW idle_session_timeout` on the live
+> project returns `0`, i.e. disabled) — so the connection was reusable the
+> whole time; Prisma's own client discarded it anyway. The next request after
+> any ~5-minute quiet period pays a fresh TCP+TLS+auth handshake to Singapore
+> (~1.2–1.5s observed per new connection in the N=8 burst, vs. ~200–350ms/query
+> once warm). See `PERF_OPTIMIZATION_PROTOCOL.md`'s design-phase doc for the
+> full evidence chain and candidate remedies (not yet implemented).
 
 **Estimated cost:** Up to 20,000ms (timeout) when pool is saturated.
 **Confidence:** CONFIRMED — the 20s timeout matches `pool_timeout=20`. (Mechanism re-attributed 2026-07-17, see correction above.)

@@ -391,6 +391,16 @@ export function createApiClient(config: ApiClientConfig) {
           body: { currentPassword, newPassword },
           schema: z.object({ ok: z.literal(true) }),
         }),
+      /**
+       * Remember which payment method this staff member last used at
+       * checkout, so it becomes their default next time.
+       */
+      updateLastPaymentMethod: (method: PaymentMethod): Promise<{ ok: true }> =>
+        request(config, "/auth/me/last-payment-method", {
+          method: "PATCH",
+          body: { method },
+          schema: z.object({ ok: z.literal(true) }),
+        }),
     },
 
     /** Tenant-scoped, read-only billing info (restaurant-admin plan page). */

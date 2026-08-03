@@ -61,9 +61,11 @@ Package names are scoped `@amber/*`. Internal deps use `workspace:*`.
 All shapes are Zod schemas with inferred types. Key entities:
 - `Tenant` (`tenant.ts`) — `{ id, slug, name, currency, taxRate, theme, active }`
   plus bill/statutory fields (`gstNumber?`, `fssaiNumber?`, `address?`, `phone?` —
-  printed on receipts), UPI (`upiId?`, `upiMobile?`), and three JSON config blobs:
-  `printer` + `kitchenPrinter` (`PrinterSettings`, see printing below) and
-  `loyalty` (`LoyaltyProgram`). `updateTenantRequestSchema` = the `PATCH /tenant`
+  printed on receipts), UPI (`upiId?`, `upiMobile?`), and four JSON config blobs:
+  `printer` + `kitchenPrinter` (`PrinterSettings`, see printing below),
+  `loyalty` (`LoyaltyProgram`), and `quickActions` (`QuickAction[]`, see
+  `quick-action.ts` above — the guest Welcome screen's action row).
+  `updateTenantRequestSchema` = the `PATCH /tenant`
   body (all fields optional; slug/active are platform-only).
   `ThemeConfig` = `{ colors (partial token overrides, hex), typography, logoUrl, mode }`.
 - `MenuItem` / `MenuCategory` / `Menu` (`menu.ts`) — price is **minor units (cents)**.
@@ -84,12 +86,30 @@ All shapes are Zod schemas with inferred types. Key entities:
 - `common.ts` — id/money/timestamp/slug primitives.
 - `service-request.ts` — `ServiceRequest` (`{ id, tenantId, tableId, tableLabel,
   orderId?, type, status, createdAt, acknowledgedAt?, resolvedAt? }`) — a guest's
-  request for staff attention (`water` | `call_staff` | `call_manager`),
-  deliberately **not** an Order/Round/OrderItem — it never touches the kitchen.
-  `status`: `pending → acknowledged → resolved`. `SERVICE_REQUEST_META` is the
-  single source of truth for each type's label/icon, shared by the customer
-  Quick Actions UI and the admin notification bell — an icon is always looked
-  up from the request's `type`, never a menu-item fallback. See flow 8.
+  request for staff attention, deliberately **not** an Order/Round/OrderItem —
+  it never touches the kitchen. `status`: `pending → acknowledged → resolved`.
+  `type` is a plain string now (was a closed 3-value enum): the 3 built-ins
+  (`water` | `call_staff` | `call_manager`, still in `SERVICE_REQUEST_TYPES`/
+  `SERVICE_REQUEST_META`, the source of truth for their label/icon/sublabel)
+  plus any tenant-authored custom quick-action id — see `quick-action.ts`.
+  Whether a given `type` is a currently-configured, enabled button for the
+  tenant is validated server-side (`service-requests.service.ts`), not by
+  this schema.
+- `quick-action.ts` — the guest Welcome screen's per-tenant configurable
+  "Quick Actions" row (Water / Call Staff / Manager / Full Menu by default).
+  `QuickAction` = `{ id, kind ("service_request"|"full_menu"), builtIn,
+  enabled, label, icon, sublabel?, swatch }`; `icon`/`swatch` are each a
+  small curated enum (`QUICK_ACTION_ICONS`/`QUICK_ACTION_SWATCHES`) so admin
+  pickers stay a fixed grid. `DEFAULT_QUICK_ACTIONS` is today's exact 4-entry
+  row (built from `SERVICE_REQUEST_META` + a `full_menu` entry); `mergeQuickActions(saved)`
+  (same "auto pick up new features" pattern as `printer.ts`'s
+  `mergeReceiptSections`) fills in any tenant's saved config against it —
+  critically, a built-in's `label`/`icon`/`sublabel`/`swatch` are **always**
+  re-stamped from the default (only `enabled` + order are tenant-editable for
+  built-ins); non-built-in entries are tenant-authored custom buttons, capped
+  at `MAX_CUSTOM_QUICK_ACTIONS` (4). Used both client-side (rendering) and
+  server-side (`service-requests.service.ts`, validating a create's `type`
+  against the tenant's live config). See flow 8.
 - `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row).
 - `analytics.ts` — `AnalyticsSummary` (revenue/orders/avgTicket + deltas, revenue
   series, top items, category split, peak hours) for the dashboard/analytics page.
@@ -118,7 +138,7 @@ All shapes are Zod schemas with inferred types. Key entities:
 
 ## API — `services/api` (NestJS + Prisma)
 - `prisma/schema.prisma` — root `Tenant` (theme / printer / kitchenPrinter /
-  loyalty as JSON; statutory bill fields `gstNumber`/`fssaiNumber`/`address`/
+  loyalty / quickActions as JSON; statutory bill fields `gstNumber`/`fssaiNumber`/`address`/
   `phone`; UPI `upiId`/`upiMobile`) + identity (`User`,
   `Membership`, `Role`; platform staff are `User.isSuperAdmin`). **RBAC:** `Role`
   is now a **per-tenant table** (`{ name, permissions String[], protected }`), NOT
@@ -191,10 +211,13 @@ All shapes are Zod schemas with inferred types. Key entities:
   `GET /orders/stream` **SSE live event bus** (see below), `GET /orders/:id`,
   `POST /orders`, `/:id/rounds`, `/:id/items` add, `PATCH /:id/items/:itemId` qty/status,
   `/:id/bill`, `/:id/cancel`, `/:id/payment` capture),
-  `service-requests/` (`POST /service-requests` public guest create — dedupes:
-  returns the existing row instead of a duplicate if that table already has a
-  `pending` request of the same type; `GET /service-requests?status=` and
-  `PATCH /service-requests/:id` staff-only, `@RequirePermission("tables.manage")`;
+  `service-requests/` (`POST /service-requests` public guest create — validates
+  `type` against the tenant's live `quickActions` config (`mergeQuickActions`,
+  400 if unknown/disabled — `ServiceRequest.type` is a plain `String` column,
+  not a fixed Prisma enum, since it may be a tenant-authored custom button id)
+  and dedupes: returns the existing row instead of a duplicate if that table
+  already has a `pending` request of the same type; `GET /service-requests?status=`
+  and `PATCH /service-requests/:id` staff-only, `@RequirePermission("tables.manage")`;
   `GET /service-requests/stream` SSE, same `?tenant=` fallback as the orders
   stream — see flow 8),
   `loyalty/` (`GET /loyalty/accounts?search=`, `GET /loyalty/accounts/:id` →
@@ -449,7 +472,10 @@ for a different tenant. `ApiError` for non-2xx.
   **phone** — the statutory fields printed on every bill), **`PaymentsPage`**
   (`/settings/payments`: UPI id/mobile for the bill's payment QR),
   **`PrinterPage`** (`/settings/printer`: print-agent + receipt layout — see
-  flow 9), and **`LoyaltySettingsPage`** (`/settings/loyalty`).
+  flow 9), **`LoyaltySettingsPage`** (`/settings/loyalty`), and
+  **`QuickActionsSettingsPage`** (`/settings/quick-actions`: drag-reorder +
+  toggle the guest Welcome screen's action row, add up to 4 custom buttons
+  with their own label/icon/color — see `quick-action.ts` above and flow 8).
   (`PlanBillingPage` — read-only subscription via `GET /billing/me` — exists as
   a file but is currently **unrouted**: the `/settings/billing` route was
   removed.) Beyond Settings, newer operational pages: **`QuickSalePage`** (`/quick-sale`,
@@ -707,14 +733,31 @@ order mutation broadcasts and all clients subscribe over SSE.
   the relay is the remaining step. (The stream itself is authenticated —
   staff `?token=` / guest `?deviceId=`, see the API section.)
 
-### 8. Guest service requests (water / call staff / call manager)
+### 8. Guest service requests + the per-tenant Quick Actions row
 A guest's request for staff attention is a **`ServiceRequest`**, deliberately kept
 separate from Order/Round/OrderItem/KDS (flow 4) — it's a notification, not a
-kitchen ticket. Mirrors flow 7's SSE architecture end-to-end:
-- **Create.** `WelcomeScreen.jsx`'s Quick Actions (Water / Call Staff / Manager) →
-  `SessionContext.jsx` `sendServiceRequest(type)` → `api.serviceRequests.create({
-  tableId, type })` → `POST /service-requests` (public, no device binding — not
-  sensitive per-device state). `ServiceRequestsService.create` **dedupes**: a
+kitchen ticket. The Welcome screen's **Quick Actions row is per-tenant
+configurable** (`@amber/domain`'s `quick-action.ts`, restaurant-admin's
+`QuickActionsSettingsPage` at `/settings/quick-actions`): an Admin can
+show/hide + reorder the 3 built-in requests (Water / Call Staff / Manager)
+and the navigational Full Menu entry, and add up to `MAX_CUSTOM_QUICK_ACTIONS`
+(4) fully custom buttons (own label + icon + color swatch, each picked from a
+small curated set) that behave exactly like Call Staff — a generic staff
+notification, no other action type exists. `mergeQuickActions(tenant.quickActions)`
+is the join point: an unconfigured tenant (`quickActions` empty/unset) gets
+today's exact 4-button default; built-ins always keep their default
+label/icon/sublabel/swatch (only `enabled`+order are tenant-editable for
+them) even if a saved payload tries to override it. Mirrors flow 7's SSE
+architecture end-to-end:
+- **Create.** `WelcomeScreen.jsx` renders `mergeQuickActions(tenant.quickActions)`
+  filtered to `enabled`; tapping a `kind:"service_request"` entry (built-in or
+  custom) → `SessionContext.jsx` `sendServiceRequest(id)` → `api.serviceRequests.create({
+  tableId, type: id })` → `POST /service-requests` (public, no device binding — not
+  sensitive per-device state); a `kind:"full_menu"` entry just navigates, no
+  request created. `ServiceRequestsService.create` first validates `type`
+  against the tenant's live quick-actions config (400 if it's not a
+  currently-enabled `service_request` button — blocks both garbage and a
+  disabled/deleted button being spammed directly), then **dedupes**: a
   table can only have one `pending` request of a given type at a time, so a
   guest mashing the button re-returns the same row instead of piling up
   duplicates (the client's 4s "sent" cooldown in `WelcomeScreen.jsx` is just a
@@ -736,11 +779,17 @@ kitchen ticket. Mirrors flow 7's SSE architecture end-to-end:
   A `resolved` update drops the row off the list; the UI never applies a status
   change locally — it waits for the stream to echo it back, same principle as
   the rest of the realtime surface.
-- Icons/labels are looked up **only** from `@amber/domain`'s
-  `SERVICE_REQUEST_META[type]`, shared by both apps — this is what fixed the bug
-  where every "bring it" tap (including Water) showed a hardcoded delivery-truck
+- Icons/labels for the 3 built-ins come from `@amber/domain`'s
+  `SERVICE_REQUEST_META[type]` — this is what originally fixed the bug where
+  every "bring it" tap (including Water) showed a hardcoded delivery-truck
   toast icon, a symptom of the old design routing these through the food-order
-  `bringIt` path instead of their own channel.
+  `bringIt` path instead of their own channel. A custom button's icon/label
+  aren't in that static map (it only ever covers the built-ins by design), so
+  both `Shell.tsx`'s `NotificationBell` and `TablesPage.tsx`'s per-table
+  request badges fall back to `mergeQuickActions(tenant.quickActions)` (via
+  `useTenant()`) keyed by `id` when `SERVICE_REQUEST_META` misses, with a
+  generic icon/label as the last resort (a pending request whose custom
+  button was since deleted).
 
 ### 9. Receipt & KOT printing (print-agent bridge)
 Browsers can't talk to thermal/label printers, so printing goes **browser → local

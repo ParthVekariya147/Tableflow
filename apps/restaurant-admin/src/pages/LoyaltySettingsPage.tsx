@@ -6,6 +6,7 @@ import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
 import { Toggle } from "../components/Toggle";
 import { Spinner } from "../components/Skeleton";
+import { withRetry } from "../lib/retry";
 
 const DEFAULT_PROGRAM: LoyaltyProgram = {
   enabled: false,
@@ -49,7 +50,7 @@ export function LoyaltySettingsPage() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.tenant.update({ loyalty: draft });
+      const updated = await withRetry(() => api.tenant.update({ loyalty: draft }));
       setDraft(updated.loyalty);
       setSavedTick((t) => t + 1);
     } catch (e) {

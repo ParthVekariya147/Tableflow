@@ -4,6 +4,7 @@ import helmet from "helmet";
 import compression from "compression";
 import express from "express";
 import { AppModule } from "./app.module.js";
+import { requestTimingMiddleware } from "./common/request-timing.middleware.js";
 
 /**
  * A deployment is only allowed to run with the insecure dev fallbacks (hardcoded
@@ -45,6 +46,11 @@ async function bootstrap() {
   // pooled DB connections are left dangling against pgBouncer's 15-client
   // session-mode cap, starving the next instance's warm-up.
   app.enableShutdownHooks();
+
+  // Dev-only per-request timing log (total vs. Prisma time) — registered
+  // first so it wraps TenantMiddleware + guards + the handler, not just the
+  // controller. See services/api/src/common/request-timing.middleware.ts.
+  app.use(requestTimingMiddleware);
 
   // Security headers: X-Frame-Options, X-Content-Type-Options, HSTS, etc.
   // CSP is disabled in non-production so the SSE stream works locally.

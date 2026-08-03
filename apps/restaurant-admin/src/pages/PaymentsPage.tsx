@@ -4,6 +4,7 @@ import { ApiError } from "@amber/api-client";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
 import { Spinner } from "../components/Skeleton";
+import { withRetry } from "../lib/retry";
 
 /**
  * Payments settings (`/settings/payments`).
@@ -41,10 +42,12 @@ export function PaymentsPage() {
     setSaving(true);
     setError(null);
     try {
-      await api.tenant.update({
-        upiId: upiId.trim() || undefined,
-        upiMobile: upiMobile.trim() || undefined,
-      });
+      await withRetry(() =>
+        api.tenant.update({
+          upiId: upiId.trim() || undefined,
+          upiMobile: upiMobile.trim() || undefined,
+        }),
+      );
       setSavedTick((t) => t + 1);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");

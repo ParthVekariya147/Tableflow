@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema } from "./common.js";
+import { paymentMethodSchema } from "./payment.js";
 import { authUserSchema } from "./user.js";
 
 /**
@@ -62,9 +63,21 @@ export const changePasswordRequestSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+/**
+ * Self-service preference update: remember which payment method this staff
+ * member last used at checkout (BillingPage), so it becomes their default
+ * next time instead of a hardcoded one.
+ */
+export const updateLastPaymentMethodRequestSchema = z.object({
+  method: paymentMethodSchema,
+});
+
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type TenantOption = z.infer<typeof tenantOptionSchema>;
 export type LoginResult = z.infer<typeof loginResultSchema>;
 export type SelectTenantRequest = z.infer<typeof selectTenantRequestSchema>;
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
+export type UpdateLastPaymentMethodRequest = z.infer<
+  typeof updateLastPaymentMethodRequestSchema
+>;

@@ -10,6 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { PermissionChecklist } from "../components/PermissionChecklist";
+import { withRetry } from "../lib/retry";
 import { PinnerLoader, TableSkeleton } from "../components/Skeleton";
 
 interface Draft {
@@ -62,11 +63,15 @@ export function RolesPage() {
     setError(null);
     try {
       if (draft.id) {
-        await api.roles.update(draft.id, {
-          name: draft.name.trim(),
-          permissions: draft.permissions,
-        });
+        const roleId = draft.id;
+        await withRetry(() =>
+          api.roles.update(roleId, {
+            name: draft.name.trim(),
+            permissions: draft.permissions,
+          }),
+        );
       } else {
+        // Not retried: a create is non-idempotent (see retry.ts's policy).
         await api.roles.create({
           name: draft.name.trim(),
           permissions: draft.permissions,
@@ -85,7 +90,7 @@ export function RolesPage() {
     if (!confirm(`Delete the "${role.name}" role?`)) return;
     setError(null);
     try {
-      await api.roles.remove(role.id);
+      await withRetry(() => api.roles.remove(role.id));
       load();
     } catch (e) {
       setError(messageOf(e));

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { ApiError } from "@amber/api-client";
-import type { AuthUser, Permission, TenantOption } from "@amber/domain";
+import type { AuthUser, PaymentMethod, Permission, TenantOption } from "@amber/domain";
 import { api } from "../lib/api";
 import { getStoredToken, setStoredToken } from "../lib/auth-token";
 import { setStoredTenantSlug } from "../lib/auth-tenant";
@@ -37,6 +37,12 @@ interface AuthContextValue {
   /** Locally clear `mustChangePassword` right after a successful change —
    *  avoids a redundant `GET /auth/me` round trip just to unblock the app. */
   clearMustChangePassword: () => void;
+  /**
+   * Persist the given method as this user's remembered checkout default
+   * (`PATCH /auth/me/last-payment-method`) and reflect it locally right away —
+   * avoids a redundant `GET /auth/me` just to see it on the next page.
+   */
+  setLastPaymentMethod: (method: PaymentMethod) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -154,9 +160,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((u) => (u ? { ...u, mustChangePassword: false } : u));
   }, []);
 
+  const setLastPaymentMethod = useCallback(async (method: PaymentMethod) => {
+    setUser((u) => (u ? { ...u, lastPaymentMethod: method } : u));
+    await api.auth.updateLastPaymentMethod(method);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, can, login, selectTenant, logout, clearMustChangePassword }),
-    [status, user, can, login, selectTenant, logout, clearMustChangePassword],
+    () => ({
+      status,
+      user,
+      can,
+      login,
+      selectTenant,
+      logout,
+      clearMustChangePassword,
+      setLastPaymentMethod,
+    }),
+    [status, user, can, login, selectTenant, logout, clearMustChangePassword, setLastPaymentMethod],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

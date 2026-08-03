@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema } from "./common.js";
+import { paymentMethodSchema } from "./payment.js";
 import { permissionSchema } from "./permission.js";
 import { roleSchema } from "./role.js";
 
@@ -62,6 +63,12 @@ export const authUserSchema = z.object({
   /** True for a member still on their initial default password — the client
    *  should force a change-password screen before letting them proceed. */
   mustChangePassword: z.boolean().default(false),
+  /**
+   * The method this staff member last used to complete a checkout (BillingPage),
+   * remembered per-person so the payment-method selector defaults to it instead
+   * of a hardcoded method. Unset until their first checkout.
+   */
+  lastPaymentMethod: paymentMethodSchema.optional(),
 });
 
 export type User = z.infer<typeof userSchema>;

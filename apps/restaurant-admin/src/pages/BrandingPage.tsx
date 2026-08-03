@@ -6,6 +6,7 @@ import type { ThemeColors, ThemeConfig, ThemeTypography } from "@amber/domain";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
 import { useTenantBrand } from "../context/TenantThemeGate";
+import { withRetry } from "../lib/retry";
 
 /** Brand colors the admin can tune (a subset of the full token set). */
 const COLOR_FIELDS: { key: keyof ThemeColors; label: string; fallback: string }[] = [
@@ -133,7 +134,7 @@ export function BrandingPage() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.tenant.update({ theme: draftTheme });
+      const updated = await withRetry(() => api.tenant.update({ theme: draftTheme }));
       committedRef.current = updated;
       applyTenant(updated);
       setSavedTick((t) => t + 1);

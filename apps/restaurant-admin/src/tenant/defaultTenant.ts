@@ -36,4 +36,5 @@ export const defaultTenant: Tenant = {
     minRedeemPoints: 100,
     maxRedeemPercent: 0.5,
   },
+  quickActions: [],
 };

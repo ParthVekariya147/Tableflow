@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema, slugSchema } from "./common.js";
 import { printerSettingsSchema } from "./printer.js";
 import { loyaltyProgramSchema } from "./loyalty.js";
+import { quickActionSchema } from "./quick-action.js";
 
 /**
  * The Tenant is the center of the platform: each restaurant is one row.
@@ -103,6 +104,10 @@ export const tenantSchema = z.object({
   kitchenPrinter: printerSettingsSchema.default({}),
   /** Staff/platform-only points program — see loyalty.ts. No guest-facing surface. */
   loyalty: loyaltyProgramSchema.default({}),
+  /** Ordered, toggle-able guest Welcome-screen quick-action buttons — see
+   *  quick-action.ts. Empty/unset falls back to DEFAULT_QUICK_ACTIONS via
+   *  mergeQuickActions, so unset is exactly today's 4-button default. */
+  quickActions: z.array(quickActionSchema).default([]),
   active: z.boolean().default(true),
 });
 
@@ -126,6 +131,7 @@ export const updateTenantRequestSchema = z
     printer: printerSettingsSchema,
     kitchenPrinter: printerSettingsSchema,
     loyalty: loyaltyProgramSchema,
+    quickActions: z.array(quickActionSchema),
   })
   .partial();
 

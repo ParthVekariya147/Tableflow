@@ -69,6 +69,11 @@ const RestaurantProfilePage = lazy(() =>
 const PrinterPage = lazy(() =>
   import("./pages/PrinterPage").then((m) => ({ default: m.PrinterPage })),
 );
+const QuickActionsSettingsPage = lazy(() =>
+  import("./pages/QuickActionsSettingsPage").then((m) => ({
+    default: m.QuickActionsSettingsPage,
+  })),
+);
 const KdsPage = lazy(() =>
   import("./kds/KdsPage").then((m) => ({ default: m.KdsPage })),
 );
@@ -276,6 +281,14 @@ export default function App() {
             element={
               <RequirePermission permission="settings.manage">
                 <PrinterPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/settings/quick-actions"
+            element={
+              <RequirePermission permission="settings.manage">
+                <QuickActionsSettingsPage />
               </RequirePermission>
             }
           />

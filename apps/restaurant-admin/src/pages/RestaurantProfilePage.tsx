@@ -4,6 +4,7 @@ import { useTenant } from "@amber/ui";
 import { ApiError } from "@amber/api-client";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
+import { withRetry } from "../lib/retry";
 
 const CURRENCIES = [
   { code: "INR", symbol: "₹", name: "Indian Rupee" },
@@ -80,15 +81,17 @@ export function RestaurantProfilePage() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.tenant.update({
-        name: name.trim(),
-        currency,
-        taxRate,
-        gstNumber: gstNumber.trim(),
-        fssaiNumber: fssaiNumber.trim(),
-        address: address.trim(),
-        phone: phone.trim(),
-      });
+      const updated = await withRetry(() =>
+        api.tenant.update({
+          name: name.trim(),
+          currency,
+          taxRate,
+          gstNumber: gstNumber.trim(),
+          fssaiNumber: fssaiNumber.trim(),
+          address: address.trim(),
+          phone: phone.trim(),
+        }),
+      );
       committedRef.current = updated;
       setSavedTick((t) => t + 1);
     } catch (e) {

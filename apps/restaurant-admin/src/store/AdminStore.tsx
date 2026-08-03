@@ -15,11 +15,14 @@ import {
 } from "@amber/api-client";
 import type {
   Menu as DomainMenu,
+  MenuItem as DomainMenuItem,
+  MenuCategory as DomainMenuCategory,
   FloorTable,
   Sale as DomainSale,
   Order as DomainOrder,
   Table as DomainTable,
 } from "@amber/domain";
+import { withRetry } from "../lib/retry";
 import type {
   AdminState,
   MenuItem,
@@ -171,40 +174,54 @@ function mapTable(ft: FloorTable): Table {
   };
 }
 
-/** Menu → the categories/items slice of AdminState. */
-function mapMenuSlice(menu: DomainMenu): Pick<AdminState, "categories" | "items"> {
-  const nameToId = new Map(menu.categories.map((c) => [c.name, c.id]));
+/** One domain category → the view-model shape. */
+function mapDomainCategory(c: DomainMenuCategory): AdminState["categories"][number] {
+  return { id: c.id, name: c.name };
+}
+
+/** One domain item → the view-model shape. `categories` resolves the item's
+ *  category NAME (the domain shape) to the view-model's `categoryId`. */
+function mapDomainItem(
+  i: DomainMenuItem,
+  categories: AdminState["categories"],
+): MenuItem {
   return {
-    categories: menu.categories.map((c) => ({ id: c.id, name: c.name })),
-    items: menu.items.map((i): MenuItem => ({
-      id: i.id,
-      categoryId: nameToId.get(i.category) ?? "",
-      name: i.name,
-      description: i.description,
-      priceCents: i.price,
-      available: i.available,
-      dietary: i.dietary ?? null,
-      jain: i.jain ?? false,
-      icon: i.icon ?? DEFAULT_ICON,
-      swatch: i.swatch ?? DEFAULT_SWATCH,
-      imageUrl: i.imageUrl,
-      modifierGroups: i.modifierGroups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        inputType: g.inputType,
-        required: g.required,
-        minSelect: g.minSelect,
-        maxSelect: g.maxSelect,
-        maxLength: g.maxLength,
-        placeholder: g.placeholder,
-        options: g.options.map((o) => ({
-          id: o.id,
-          name: o.name,
-          priceCents: o.priceDelta,
-          available: o.available,
-        })),
+    id: i.id,
+    categoryId: categories.find((c) => c.name === i.category)?.id ?? "",
+    name: i.name,
+    description: i.description,
+    priceCents: i.price,
+    available: i.available,
+    dietary: i.dietary ?? null,
+    jain: i.jain ?? false,
+    icon: i.icon ?? DEFAULT_ICON,
+    swatch: i.swatch ?? DEFAULT_SWATCH,
+    imageUrl: i.imageUrl,
+    modifierGroups: i.modifierGroups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      inputType: g.inputType,
+      required: g.required,
+      minSelect: g.minSelect,
+      maxSelect: g.maxSelect,
+      maxLength: g.maxLength,
+      placeholder: g.placeholder,
+      options: g.options.map((o) => ({
+        id: o.id,
+        name: o.name,
+        priceCents: o.priceDelta,
+        available: o.available,
       })),
     })),
+  };
+}
+
+/** Menu → the categories/items slice of AdminState. */
+function mapMenuSlice(menu: DomainMenu): Pick<AdminState, "categories" | "items"> {
+  const categories = menu.categories.map(mapDomainCategory);
+  return {
+    categories,
+    items: menu.items.map((i) => mapDomainItem(i, categories)),
   };
 }
 
@@ -292,7 +309,11 @@ export interface PendingItem {
 
 interface AdminContextValue {
   state: AdminState;
-  dispatch: (action: Action) => Promise<void>;
+  /** Resolves `true` if the mutation succeeded, `false` if it failed (after
+   *  retries) — callers that need to know (e.g. "only close this modal on a
+   *  successful save") can check it; existing fire-and-forget callers can
+   *  keep ignoring it. */
+  dispatch: (action: Action) => Promise<boolean>;
   /** Format integer cents in the tenant's currency (symbol/grouping derived). */
   money: (cents: number) => string;
   /** The tenant's bare currency symbol (e.g. "$", "₹") for input prefixes. */
@@ -322,12 +343,14 @@ interface AdminContextValue {
 const AdminContext = createContext<AdminContextValue | null>(null);
 
 /**
- * A permission-gated list endpoint returns [] instead of throwing when the
- * signed-in user lacks the permission (403). This keeps the store's initial
- * load resilient for lower-privilege roles — e.g. a Kitchen user (kds.use only)
- * can't read the floor/sales, but load must still finish and set `loaded` so
- * the order stream (which the KDS board depends on) subscribes. Any other error
- * still propagates so real failures surface.
+ * A permission-gated list endpoint returns [] instead of throwing on a 403.
+ * The call sites now check `can(...)` first and skip the request entirely for
+ * a role that's known to lack the permission (e.g. Kitchen: kds.use only) —
+ * this is the remaining defense-in-depth layer for the gap between "the
+ * client's cached permission set" and "what the server actually enforces"
+ * (e.g. a role edited mid-session). Either way, load must still finish and
+ * set `loaded` for a lower-privilege role. Any other error still propagates
+ * so real failures surface.
  */
 function emptyOn403<T>(p: Promise<T[]>): Promise<T[]> {
   return p.catch((e) => {
@@ -350,6 +373,8 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       }),
     [],
   );
+
+  const { status, user, can } = useAuth();
 
   const [state, setState] = useState<AdminState>(EMPTY_STATE);
   const [loaded, setLoaded] = useState(false);
@@ -385,6 +410,22 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, tables: updater(s.tables) }));
   }, []);
 
+  // Apply a menu/category mutation's own response directly to state — the
+  // push-driven replacement for the old "always refetch the whole menu after
+  // every edit" pattern. Bumps menuSeqRef so an in-flight refreshMenu() from
+  // an error self-heal can't clobber a newer direct apply.
+  const applyMenu = useCallback(
+    (
+      updater: (
+        s: Pick<AdminState, "categories" | "items">,
+      ) => Pick<AdminState, "categories" | "items">,
+    ) => {
+      menuSeqRef.current++;
+      setState((s) => ({ ...s, ...updater({ categories: s.categories, items: s.items }) }));
+    },
+    [],
+  );
+
   // Full floor refetch — now only the initial load, the low-frequency fallback
   // poll, page-level `refreshFloor()` calls, and rare escape hatches (an event
   // for an unknown table, a failed mutation) hit this; live updates apply the
@@ -392,9 +433,13 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const refreshFloor = useCallback(async () => {
     const floorSeq = ++floorSeqRef.current;
     const salesSeq = ++salesSeqRef.current;
+    // Skip calls the signed-in role can't reach (e.g. Kitchen: kds.use only) —
+    // emptyOn403 already tolerated the resulting 403, but firing it at all was
+    // pointless network noise (and a console error) for a role that will never
+    // have the permission.
     const [floor, sales] = await Promise.all([
-      emptyOn403(api.tables.list()),
-      emptyOn403(api.orders.sales()),
+      can("tables.manage") ? emptyOn403(api.tables.list()) : Promise.resolve([]),
+      can("orders.history") ? emptyOn403(api.orders.sales()) : Promise.resolve([]),
     ]);
     // Apply each slice independently — either may have been superseded.
     setState((s) => ({
@@ -402,7 +447,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       ...(floorSeq === floorSeqRef.current ? { tables: floor.map(mapTable) } : {}),
       ...(salesSeq === salesSeqRef.current ? { sales: mapSales(sales) } : {}),
     }));
-  }, [api]);
+  }, [api, can]);
 
   // Sales only change when an order closes (payment capture), so a `closed`
   // stream event / local payment is the only live trigger for this — debounced
@@ -412,6 +457,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     undefined,
   );
   const refreshSalesSoon = useCallback(() => {
+    if (!can("orders.history")) return;
     if (salesTimerRef.current) return;
     salesTimerRef.current = setTimeout(() => {
       salesTimerRef.current = undefined;
@@ -423,7 +469,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {}); // fallback poll self-heals
     }, 200);
-  }, [api]);
+  }, [api, can]);
   useEffect(() => () => clearTimeout(salesTimerRef.current), []);
 
   // Menu-only refetch — what a menu/category mutation needs (server-assigned
@@ -496,7 +542,6 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // Load only once signed in, and (re)load when the active tenant changes — so a
   // logout clears the floor and a login to a different restaurant refetches it.
   // Before auth there's no tenant to scope to, so we don't hit the API at all.
-  const { status, user } = useAuth();
   useEffect(() => {
     if (status !== "authed") {
       setState(EMPTY_STATE);
@@ -521,7 +566,16 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   // consumers (KDS) subscribe via `subscribeOrderEvents` above rather than
   // opening a second EventSource.
   useEffect(() => {
-    if (!loaded) return;
+    // The stream requires `tables.manage` server-side (it exposes the whole
+    // floor) — a role without it (e.g. Kitchen: kds.use only) always got a 403
+    // on connect, and EventSource auto-reconnects on error, so it looped
+    // failed attempts forever. Skipping the call outright doesn't change what
+    // such a role could already do (it never received a live event either
+    // way — `subscribeOrderEvents` below has nothing to seed a late listener
+    // with), it just stops the reconnect-storm and console spam. KDS for a
+    // permission-less role still runs off the relay (`kdsClient`), degraded
+    // but functional per useKds.ts's fallback design.
+    if (!loaded || !can("tables.manage")) return;
     const unsub = api.orders.stream((event) => {
       // Keep the live-orders mirror in sync so a late `subscribeOrderEvents`
       // caller can be seeded correctly (see liveOrdersRef above).
@@ -571,7 +625,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       if (event.type === "closed") refreshSalesSoon();
     });
     return unsub;
-  }, [loaded, api, applyTables, refreshFloor, refreshSalesSoon]);
+  }, [loaded, api, can, applyTables, refreshFloor, refreshSalesSoon]);
 
   // Background sync — low-frequency self-heal fallback behind the SSE stream
   // above (covers a dropped stream, e.g. a backgrounded tab). Only resyncs
@@ -618,36 +672,59 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   const apply = useCallback(
     async (action: Action): Promise<void> => {
       switch (action.type) {
+        // Menu/category actions apply their own response directly to state,
+        // same as tables/orders below — no post-save `menu.get()` refetch.
+        // Idempotent calls (update/delete) go through `withRetry` so a
+        // transient LAN blip doesn't surface as a lost edit; `addItem` is a
+        // non-idempotent create, so it is NOT auto-retried (see retry.ts) —
+        // a network drop there surfaces as a real failure instead of risking
+        // a duplicate item.
         case "TOGGLE_AVAILABILITY": {
           const it = stateRef.current.items.find((i) => i.id === action.itemId);
-          await api.menu.updateItem(action.itemId, {
-            available: !(it?.available ?? true),
-          });
+          const updated = await withRetry(() =>
+            api.menu.updateItem(action.itemId, {
+              available: !(it?.available ?? true),
+            }),
+          );
+          applyMenu((s) => ({
+            ...s,
+            items: s.items.map((x) =>
+              x.id === action.itemId ? mapDomainItem(updated, s.categories) : x,
+            ),
+          }));
           return;
         }
         case "UPDATE_ITEM": {
           const p = action.patch;
-          await api.menu.updateItem(action.itemId, {
-            name: p.name,
-            description: p.description,
-            price: p.priceCents,
-            categoryId: p.categoryId,
-            icon: p.icon,
-            swatch: p.swatch,
-            available: p.available,
-            dietary: p.dietary,
-            jain: p.jain,
-            imageUrl: p.imageUrl,
-            // undefined = leave untouched; an array (incl. []) = replace.
-            modifierGroups: p.modifierGroups
-              ? toModifierGroupsInput(p.modifierGroups)
-              : undefined,
-          });
+          const updated = await withRetry(() =>
+            api.menu.updateItem(action.itemId, {
+              name: p.name,
+              description: p.description,
+              price: p.priceCents,
+              categoryId: p.categoryId,
+              icon: p.icon,
+              swatch: p.swatch,
+              available: p.available,
+              dietary: p.dietary,
+              jain: p.jain,
+              imageUrl: p.imageUrl,
+              // undefined = leave untouched; an array (incl. []) = replace.
+              modifierGroups: p.modifierGroups
+                ? toModifierGroupsInput(p.modifierGroups)
+                : undefined,
+            }),
+          );
+          applyMenu((s) => ({
+            ...s,
+            items: s.items.map((x) =>
+              x.id === action.itemId ? mapDomainItem(updated, s.categories) : x,
+            ),
+          }));
           return;
         }
         case "ADD_ITEM": {
           const i = action.item;
-          await api.menu.addItem({
+          const created = await api.menu.addItem({
             categoryId: i.categoryId,
             name: i.name,
             price: i.priceCents,
@@ -662,19 +739,45 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
               ? toModifierGroupsInput(i.modifierGroups)
               : undefined,
           });
+          applyMenu((s) => ({
+            ...s,
+            items: [...s.items, mapDomainItem(created, s.categories)],
+          }));
           return;
         }
         case "DELETE_ITEM":
-          await api.menu.deleteItem(action.itemId);
+          await withRetry(() => api.menu.deleteItem(action.itemId));
+          applyMenu((s) => ({
+            ...s,
+            items: s.items.filter((x) => x.id !== action.itemId),
+          }));
           return;
-        case "ADD_CATEGORY":
-          await api.menu.addCategory({ name: action.name });
+        case "ADD_CATEGORY": {
+          const created = await api.menu.addCategory({ name: action.name });
+          applyMenu((s) => ({
+            ...s,
+            categories: [...s.categories, mapDomainCategory(created)],
+          }));
           return;
-        case "UPDATE_CATEGORY":
-          await api.menu.updateCategory(action.categoryId, { name: action.name });
+        }
+        case "UPDATE_CATEGORY": {
+          const updated = await withRetry(() =>
+            api.menu.updateCategory(action.categoryId, { name: action.name }),
+          );
+          applyMenu((s) => ({
+            ...s,
+            categories: s.categories.map((x) =>
+              x.id === action.categoryId ? mapDomainCategory(updated) : x,
+            ),
+          }));
           return;
+        }
         case "DELETE_CATEGORY":
-          await api.menu.deleteCategory(action.categoryId);
+          await withRetry(() => api.menu.deleteCategory(action.categoryId));
+          applyMenu((s) => ({
+            ...s,
+            categories: s.categories.filter((x) => x.id !== action.categoryId),
+          }));
           return;
         // Every mutation below applies the API's returned object to state
         // directly (plus the SSE echo re-applying the same data, idempotent) —
@@ -706,18 +809,20 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           return;
         }
         case "UPDATE_TABLE": {
-          const t = await api.tables.update(action.tableId, {
-            label: action.patch.label,
-            seats: action.patch.seats,
-            room: action.patch.room,
-          });
+          const t = await withRetry(() =>
+            api.tables.update(action.tableId, {
+              label: action.patch.label,
+              seats: action.patch.seats,
+              room: action.patch.room,
+            }),
+          );
           applyTables((tables) =>
             tables.map((x) => (x.id === t.id ? mergeDomainTable(x, t) : x)),
           );
           return;
         }
         case "DELETE_TABLE":
-          await api.tables.remove(action.tableId);
+          await withRetry(() => api.tables.remove(action.tableId));
           applyTables((tables) => tables.filter((x) => x.id !== action.tableId));
           return;
         case "ADD_ORDER_ITEMS": {
@@ -761,7 +866,9 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           // from this client's cached snapshot — the server applies it as an
           // atomic DB increment, so two rapid taps (or two staff devices on
           // the same table) both land instead of the second silently
-          // clobbering the first's write.
+          // clobbering the first's write. NOT wrapped in withRetry: a delta
+          // is non-idempotent — retrying after a lost response (but a
+          // server-side success) would double-apply the delta.
           if (orderId) {
             const order = await api.orders.updateItem(orderId, action.itemId, {
               qtyDelta: action.delta,
@@ -773,9 +880,11 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "CANCEL_ITEM": {
           const orderId = orderIdFor(action.tableId);
           if (orderId) {
-            const order = await api.orders.updateItem(orderId, action.itemId, {
-              status: "cancelled",
-            });
+            const order = await withRetry(() =>
+              api.orders.updateItem(orderId, action.itemId, {
+                status: "cancelled",
+              }),
+            );
             applyTables((tables) => applyOrderToTables(tables, order));
             // Signal the KDS to pull this dish's card off the board (any column).
             // The ticket id is `roundId::orderItemId` (shared id space). The order
@@ -788,7 +897,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "CANCEL_ORDER": {
           const orderId = orderIdFor(action.tableId);
           if (orderId) {
-            const order = await api.orders.cancel(orderId);
+            const order = await withRetry(() => api.orders.cancel(orderId));
             applyTables((tables) => applyOrderToTables(tables, order));
             // Drop the whole order from the KDS immediately (don't wait for the
             // stream round-trip). Idempotent with the closed-event handler.
@@ -801,11 +910,14 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
           if (orderId) {
             // Server recomputes subtotal/tax from the order; amountCents is advisory.
             // tenderedCents (cash only) is persisted so a later receipt reprint
-            // can still show change due.
-            await api.orders.capturePayment(orderId, {
-              method: action.method,
-              tendered: action.tenderedCents,
-            });
+            // can still show change due. Safe to retry: capturePayment 400s on
+            // an already-paid order instead of double-charging.
+            await withRetry(() =>
+              api.orders.capturePayment(orderId, {
+                method: action.method,
+                tendered: action.tenderedCents,
+              }),
+            );
             // capturePayment returns the Payment, not the Order — free the
             // settled table directly and pull the new sale into the feed (the
             // stream's `closed` echo coalesces into the same debounced fetch).
@@ -822,14 +934,15 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [api, orderIdFor, applyTables, refreshSalesSoon],
+    [api, orderIdFor, applyTables, applyMenu, refreshSalesSoon],
   );
 
-  // Menu/category actions are the only ones that still refetch after the
-  // mutation (one `menu.get()` — server-assigned ids + category mapping come
-  // back in one shot). Table/session/payment actions already applied the
-  // mutation's returned object to state inside apply(), so they finish the
-  // moment the mutation itself resolves — no post-dispatch wait at all.
+  // Used only to route the on-error self-heal refetch below to the right
+  // slice. Every action (menu and floor alike) now applies its own mutation's
+  // response directly to state inside apply() — menu edits used to force a
+  // full `menu.get()` refetch after every save regardless of outcome; they
+  // finish the moment their own mutation resolves now, same as table/order
+  // actions always have.
   const MENU_ACTION_TYPES = useMemo(
     () =>
       new Set<Action["type"]>([
@@ -845,7 +958,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
   );
 
   const dispatch = useCallback(
-    async (action: Action): Promise<void> => {
+    async (action: Action): Promise<boolean> => {
       // Optimistic "crafting" placeholder so the new item appears immediately.
       let tempId: string | undefined;
       if (action.type === "ADD_ITEM") {
@@ -861,24 +974,23 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       }
       setMutateCount((c) => c + 1);
       setError(null);
+      let ok = true;
       try {
         await apply(action);
       } catch (e) {
+        ok = false;
         setError(e instanceof Error ? e.message : String(e));
-        // A failed floor action can mean this client's snapshot was stale
-        // (e.g. a 409 from a table settled elsewhere) — one refetch resyncs.
-        if (!MENU_ACTION_TYPES.has(action.type))
-          void refreshFloor().catch(() => {});
+        // A failed action can mean this client's snapshot was stale (e.g. a
+        // 409 from a table settled, or an item deleted, elsewhere) — one
+        // refetch of the relevant slice resyncs.
+        if (MENU_ACTION_TYPES.has(action.type)) void refreshMenu().catch(() => {});
+        else void refreshFloor().catch(() => {});
       } finally {
-        if (MENU_ACTION_TYPES.has(action.type)) {
-          // Await it so the ADD_ITEM "crafting" placeholder is only removed
-          // once the real item is in state (same UX as before).
-          await refreshMenu().catch(() => {});
-        }
         setMutateCount((c) => Math.max(0, c - 1));
         if (tempId)
           setPendingItems((p) => p.filter((x) => x.tempId !== tempId));
       }
+      return ok;
     },
     [apply, refreshMenu, refreshFloor, MENU_ACTION_TYPES],
   );

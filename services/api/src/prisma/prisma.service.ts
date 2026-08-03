@@ -20,6 +20,18 @@ export class PrismaService
     const logQueries = process.env.NODE_ENV === "development";
     super(logQueries ? { log: [{ emit: "event", level: "query" }] } : undefined);
     if (logQueries) {
+      // A $extends-based per-request Prisma-time attribution was tried here
+      // (2026-07-21) to fix the AsyncLocalStorage/$on('query') gap noted
+      // below, and it worked for plain queries — but grafting the extended
+      // client's model delegates onto `this` broke `include`d Order/Round
+      // graph reads (relationLoadStrategy:"join" AND plain `include` both
+      // 500'd; `/menu`, which has no Order-graph relations, was unaffected).
+      // Root cause not fully isolated (likely Prisma's nested-include
+      // resolution keying some internal state to the exact client object a
+      // delegate was obtained through, which grafting bypasses) — reverted
+      // immediately rather than ship instrumentation that breaks the
+      // requests it's measuring. Real per-request Prisma-time attribution
+      // remains an open problem; see PERF_OPTIMIZATION_PROTOCOL.md.
       (this.$on as (event: "query", cb: (e: Prisma.QueryEvent) => void) => void)(
         "query",
         (e) => {

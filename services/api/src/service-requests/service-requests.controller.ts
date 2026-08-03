@@ -63,7 +63,11 @@ export class ServiceRequestsController {
     @CurrentTenant() tenant: Tenant,
     @Body() body: unknown,
   ): Promise<ServiceRequest> {
-    return this.requests.create(tenant.id, createServiceRequestSchema.parse(body));
+    return this.requests.create(
+      tenant.id,
+      tenant.quickActions,
+      createServiceRequestSchema.parse(body),
+    );
   }
 
   /** Staff-only: open requests for the notification bell. */

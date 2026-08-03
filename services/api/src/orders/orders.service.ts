@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   Injectable,
   NotFoundException,
@@ -125,18 +126,28 @@ export class OrdersService {
     deviceId?: string,
     loyaltyProgram?: LoyaltyProgram,
   ): Promise<Order> {
-    const table = await this.prisma.table.findFirst({
-      where: { id: dto.tableId, tenantId },
-    });
+    // The table lookup and the occupancy check are independent reads (Table
+    // vs. Order, neither's query depends on the other's result — the
+    // occupancy filter only needs dto.tableId, which the caller already
+    // has), so run them concurrently instead of paying two sequential round
+    // trips — perf pass 7. The loyalty upsert stays sequential AFTER both are
+    // validated: it's a write, and parallelizing it with the occupancy check
+    // would let a loyalty account get created for a phone number even on a
+    // request that ultimately 409s (table already occupied) — a data-level
+    // side effect the current code never has, so it's kept gated exactly as
+    // before rather than folded into the parallel batch.
+    const [table, live] = await Promise.all([
+      this.prisma.table.findFirst({ where: { id: dto.tableId, tenantId } }),
+      this.prisma.order.findFirst({
+        where: { tenantId, tableId: dto.tableId, status: { in: ["open", "billed"] } },
+        select: { id: true },
+      }),
+    ]);
     if (!table) throw new NotFoundException(`Table not found: ${dto.tableId}`);
 
     // Occupancy guard (trust boundary): a table may hold only ONE live session.
     // Refuse if one is already open/billed so a second guest (or a stale client)
     // can't spawn a duplicate session on the same table.
-    const live = await this.prisma.order.findFirst({
-      where: { tenantId, tableId: dto.tableId, status: { in: ["open", "billed"] } },
-      select: { id: true },
-    });
     if (live)
       throw new ConflictException(
         `Table ${table.label} already has an active session.`,
@@ -155,6 +166,10 @@ export class OrdersService {
       loyaltyAccountId = account.id;
     }
 
+    // No `include` — a freshly created order can never have any rounds yet,
+    // so the ROUND_INCLUDE reload was always fetching a graph guaranteed to
+    // be empty. Skipping it drops the implicit BEGIN/SELECT/COMMIT Prisma
+    // wraps around a written-with-include create, leaving a single INSERT.
     const row = await this.prisma.order.create({
       data: {
         tenantId,
@@ -165,9 +180,8 @@ export class OrdersService {
         deviceId,
         loyaltyAccountId,
       },
-      include: ROUND_INCLUDE,
     });
-    const order = toDomainOrder(row);
+    const order = toDomainOrder({ ...row, rounds: [] });
     this.events.emit(tenantId, { type: "created", orderId: order.id, order });
     return order;
   }
@@ -181,50 +195,56 @@ export class OrdersService {
     deviceId?: string,
     trusted = false,
   ): Promise<Order> {
-    // ONE transaction for the whole flow — device assert, validation, inserts
-    // and the final full reload — instead of four, each paying its own
-    // BEGIN + DEALLOCATE ALL + COMMIT against the pooler (pass 2 of the
-    // latency work: measured ~22 pooled round trips → ~13 for this endpoint).
-    const order = await this.prisma.$transaction(async (tx) => {
-      await this.assertOrder(tenantId, orderId, deviceId, trusted, tx);
-
-      // Fetch every distinct menu item referenced by this round in one query
-      // (was one round trip per line item).
-      const menuItemIds = [...new Set(dto.items.map((i) => i.menuItemId))];
-      const menuItems = await tx.menuItem.findMany({
+    // The device guard and the menu-item lookup are independent reads (no
+    // shared data), so run them on separate pooled connections concurrently
+    // instead of paying two sequential round trips (mirrors addItem's
+    // Promise.all pattern) — pass 6 of the latency work.
+    const menuItemIds = [...new Set(dto.items.map((i) => i.menuItemId))];
+    const [, menuItems] = await Promise.all([
+      this.assertOrder(tenantId, orderId, deviceId, trusted),
+      this.prisma.menuItem.findMany({
         where: { id: { in: menuItemIds }, tenantId },
         include: { modifierGroups: { include: { options: true } } },
-      });
-      const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
+      }),
+    ]);
+    const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
 
-      const lines = dto.items.map((i) => ({
-        // Honour a client-supplied id (shared id space with the KDS ticket); else
-        // Prisma mints a cuid.
-        ...(i.id ? { id: i.id } : {}),
+    // Nested `create` writes one INSERT per item + per modifier (Prisma can't
+    // batch a record that itself has further nested relations). IDs are
+    // client-generated anyway (cuid/randomUUID, never a DB default), so mint
+    // them here and use `createMany` instead: 2 INSERTs total for the whole
+    // round no matter how many items/modifiers it carries, instead of one per
+    // row (pass 6 — was ~13 round trips for a multi-item, modifier-heavy round).
+    const roundId = dto.id ?? randomUUID();
+    const itemRows: Prisma.OrderItemCreateManyInput[] = [];
+    const modifierRows: Prisma.OrderItemModifierCreateManyInput[] = [];
+    for (const i of dto.items) {
+      // Honour a client-supplied id (shared id space with the KDS ticket); else mint one.
+      const itemId = i.id ?? randomUUID();
+      itemRows.push({
+        id: itemId,
         tenantId,
+        roundId,
         menuItemId: i.menuItemId,
         name: i.name,
         unitPrice: i.unitPrice,
         qty: i.qty,
         notes: i.notes,
-        modifiers: {
-          create: this.resolveItemModifiers(
-            tenantId,
-            menuItemById.get(i.menuItemId) ?? null,
-            i.modifiers ?? [],
-          ),
-        },
-      }));
-
-      await tx.round.create({
-        data: {
-          ...(dto.id ? { id: dto.id } : {}),
-          tenantId,
-          orderId,
-          type: dto.type,
-          items: { create: lines },
-        },
       });
+      for (const m of this.resolveItemModifiers(
+        tenantId,
+        menuItemById.get(i.menuItemId) ?? null,
+        i.modifiers ?? [],
+      )) {
+        modifierRows.push({ ...m, id: randomUUID(), orderItemId: itemId });
+      }
+    }
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      await tx.round.create({ data: { id: roundId, tenantId, orderId, type: dto.type } });
+      if (itemRows.length) await tx.orderItem.createMany({ data: itemRows });
+      if (modifierRows.length)
+        await tx.orderItemModifier.createMany({ data: modifierRows });
 
       // Final reload INSIDE the transaction doubles as the emitted payload —
       // kills the refreshAndEmit double-load (perf doc P3 #13).

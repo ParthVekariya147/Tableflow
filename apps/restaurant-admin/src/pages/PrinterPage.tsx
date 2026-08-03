@@ -24,6 +24,7 @@ import {
 import { ApiError } from "@amber/api-client";
 import { api } from "../lib/api";
 import { checkAgentHealth, printTestReceipt } from "../lib/printAgent";
+import { withRetry } from "../lib/retry";
 import { Icon } from "../components/Icon";
 import { Toggle } from "../components/Toggle";
 
@@ -236,7 +237,7 @@ export function PrinterPage() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.tenant.update({ printer: form });
+      const updated = await withRetry(() => api.tenant.update({ printer: form }));
       const seeded: typeof EMPTY = {
         ...EMPTY,
         ...updated.printer,

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTenant } from "@amber/ui";
-import { SERVICE_REQUEST_META, type ServiceRequest } from "@amber/domain";
+import { SERVICE_REQUEST_META, mergeQuickActions, type ServiceRequest } from "@amber/domain";
 import { Icon } from "./Icon";
 import { useAuth } from "../context/AuthContext";
 import { useAdmin } from "../store/AdminStore";
@@ -9,6 +9,37 @@ import { useServiceRequests } from "../notifications/useServiceRequests";
 import { NAV_ITEMS } from "../lib/nav";
 
 const NAV_PREF_KEY = "amber-admin-nav";
+
+/**
+ * Surfaces AdminStore's `error` (set on any failed dispatch — menu, floor,
+ * order, payment) as a dismissible toast. Previously this state existed but
+ * no component read it, so a failed mutation had zero visible feedback
+ * beyond whatever the acting page happened to render inline.
+ */
+function ErrorToast() {
+  const { error } = useAdmin();
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setDismissedError(error), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
+
+  if (!error || error === dismissedError) return null;
+  return (
+    <div className="fixed bottom-lg left-1/2 z-[80] flex -translate-x-1/2 items-center gap-md rounded-full bg-error-container px-lg py-sm text-on-error-container shadow-2xl">
+      <Icon name="error" size={18} />
+      <span className="font-body-md text-body-md">{error}</span>
+      <button
+        onClick={() => setDismissedError(error)}
+        className="font-label-md text-label-md underline hover:no-underline"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
 
 function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }) {
   const navigate = useNavigate();
@@ -131,10 +162,20 @@ function timeAgo(iso: string, now: number): string {
 
 /** Bell + dropdown for live guest service requests (water / call staff /
  *  call manager) — a notification channel fully separate from Order/KDS. */
+const FALLBACK_META = { icon: "notifications_active", label: "Request" };
+
 function NotificationBell() {
   const { can } = useAuth();
   const { requests, pendingCount, acknowledge, resolve, muted, toggleMuted } =
     useServiceRequests();
+  // Tenant's live quick-actions config — needed to label/icon a *custom*
+  // button's request (SERVICE_REQUEST_META only ever covers the 3 built-ins
+  // by design; custom buttons' label/icon live on the tenant instead).
+  const tenant = useTenant();
+  const quickActionsById = useMemo(
+    () => Object.fromEntries(mergeQuickActions(tenant.quickActions).map((a) => [a.id, a])),
+    [tenant.quickActions],
+  );
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const rootRef = useRef<HTMLDivElement>(null);
@@ -208,7 +249,10 @@ function NotificationBell() {
           ) : (
             <ul className="max-h-80 overflow-y-auto">
               {requests.map((r) => {
-                const meta = SERVICE_REQUEST_META[r.type];
+                const meta =
+                  SERVICE_REQUEST_META[r.type as keyof typeof SERVICE_REQUEST_META] ??
+                  quickActionsById[r.type] ??
+                  FALLBACK_META;
                 return (
                   <li
                     key={r.id}
@@ -358,6 +402,7 @@ export function Shell() {
           <Outlet />
         </div>
       </main>
+      <ErrorToast />
     </div>
   );
 }

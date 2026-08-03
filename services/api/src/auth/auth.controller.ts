@@ -1,8 +1,13 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import type { AuthUser, LoginResponse, LoginResult } from "@amber/domain";
 import { AuthService } from "./auth.service.js";
-import { ChangePasswordDto, LoginDto, SelectTenantDto } from "./auth.dto.js";
+import {
+  ChangePasswordDto,
+  LoginDto,
+  SelectTenantDto,
+  UpdateLastPaymentMethodDto,
+} from "./auth.dto.js";
 import { JwtAuthGuard } from "./jwt-auth.guard.js";
 import { SupabaseAuthGuard } from "./auth.guard.js";
 import { CurrentUser } from "./current-user.decorator.js";
@@ -49,6 +54,23 @@ export class AuthController {
   ): Promise<{ ok: true }> {
     const { currentPassword, newPassword } = ChangePasswordDto.parse(body);
     await this.auth.changePassword(user.tenantId, user.id, currentPassword, newPassword);
+    return { ok: true };
+  }
+
+  /**
+   * Remember which payment method this staff member last used at checkout
+   * (BillingPage), so it defaults to it next time instead of a hardcoded
+   * method. A personal preference — any authenticated staff member may set
+   * their own, no permission gate beyond being signed in.
+   */
+  @Patch("me/last-payment-method")
+  @UseGuards(JwtAuthGuard)
+  async updateLastPaymentMethod(
+    @CurrentUser() user: AuthUser,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    const { method } = UpdateLastPaymentMethodDto.parse(body);
+    await this.auth.updateLastPaymentMethod(user.tenantId, user.id, method);
     return { ok: true };
   }
 

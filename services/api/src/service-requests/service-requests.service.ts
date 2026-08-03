@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import type { ServiceRequest, ServiceRequestStatus } from "@amber/domain";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { mergeQuickActions, type QuickAction, type ServiceRequest, type ServiceRequestStatus } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { ServiceRequestsEvents } from "./service-requests.events.js";
 import { toDomainServiceRequest } from "./service-requests.mapper.js";
@@ -19,16 +19,29 @@ export class ServiceRequestsService {
   ) {}
 
   /**
-   * Create a request, scoped to the tenant's table. Dedupes: a table can only
-   * have one PENDING request of a given type at a time — a guest mashing the
-   * button re-returns the existing row instead of piling up duplicates. This
-   * is the authoritative guard (the customer's 4s "sent" cooldown is only a
-   * UX debounce on top of it).
+   * Create a request, scoped to the tenant's table. `quickActions` is the
+   * tenant's raw saved config (passed down from the controller's already-
+   * resolved `@CurrentTenant()`, no extra DB fetch) — merged against
+   * DEFAULT_QUICK_ACTIONS and checked so `dto.type` must name a currently
+   * enabled service_request-kind button; otherwise this would trust an
+   * arbitrary string straight into the DB (a disabled/deleted/made-up id).
+   * Dedupes: a table can only have one PENDING request of a given type at a
+   * time — a guest mashing the button re-returns the existing row instead of
+   * piling up duplicates. This is the authoritative guard (the customer's 4s
+   * "sent" cooldown is only a UX debounce on top of it).
    */
   async create(
     tenantId: string,
+    quickActions: QuickAction[],
     dto: CreateServiceRequestDto,
   ): Promise<ServiceRequest> {
+    const allowed = mergeQuickActions(quickActions).find(
+      (a) => a.id === dto.type && a.kind === "service_request" && a.enabled,
+    );
+    if (!allowed) {
+      throw new BadRequestException(`Unknown or disabled quick action: ${dto.type}`);
+    }
+
     const table = await this.prisma.table.findFirst({
       where: { id: dto.tableId, tenantId },
       select: { id: true },

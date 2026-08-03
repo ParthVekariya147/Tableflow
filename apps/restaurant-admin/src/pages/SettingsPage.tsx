@@ -60,6 +60,13 @@ const CARDS: Card[] = [
     desc: "Connect a thermal receipt printer via a local print agent.",
     ready: true,
   },
+  {
+    to: "/settings/quick-actions",
+    icon: "bolt",
+    title: "Quick Actions",
+    desc: "Customize the guest Welcome screen's action buttons.",
+    ready: true,
+  },
 ];
 
 /**

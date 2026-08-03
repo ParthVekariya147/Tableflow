@@ -8,12 +8,14 @@ import bcrypt from "bcryptjs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   effectivePermissions,
+  paymentMethodSchema,
   permissionSchema,
   PERMISSIONS,
   type AuthUser,
   type LoginResponse,
   type LoginResult,
   type Permission,
+  type PaymentMethod,
 } from "@amber/domain";
 import { PrismaService } from "../prisma/prisma.service.js";
 import { TtlCache } from "../common/ttl-cache.js";
@@ -433,9 +435,34 @@ export class AuthService {
       roleProtected: membership.role.protected,
       permissions,
       mustChangePassword: user.mustChangePassword,
+      lastPaymentMethod: parsePaymentMethod(user.lastPaymentMethod),
     };
     return authUser;
   }
+
+  /**
+   * Remember which payment method this staff member last used at checkout
+   * (BillingPage), so it becomes their default next time instead of a
+   * hardcoded one. Invalidates their cached AuthUser so the change is visible
+   * on the very next `/auth/me` / guarded request.
+   */
+  async updateLastPaymentMethod(
+    tenantId: string,
+    userId: string,
+    method: PaymentMethod,
+  ): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { lastPaymentMethod: method },
+    });
+    this.invalidateAuthUser(tenantId, userId);
+  }
+}
+
+/** DB stores a plain string — validate it's still a known payment method. */
+function parsePaymentMethod(value: string | null): PaymentMethod | undefined {
+  const parsed = paymentMethodSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /** Keep only valid permission keys (DB stores plain strings). */

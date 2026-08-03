@@ -245,3 +245,14 @@ via the JWT RBAC rewrite.
       mode; real service will produce these too, not just test harnesses).
       Add a staff "force-close stale session" affordance on the admin floor
       view and/or auto-expire `open` orders with zero items after N hours.
+- [ ] **Occupancy check-then-insert race on `POST /orders`.** Named during the
+      2026-07-21 latency pass (`orders.service.ts` `createForTable`): the
+      occupancy read (`Order.findFirst` for an open/billed row on the table)
+      and the `Order.create` insert are not atomic — two guests scanning the
+      same table's QR within the same window can both pass the occupancy
+      check and both insert, landing two live orders on one table. Pre-dates
+      the perf pass (unchanged by it, not introduced). Candidate fix: a
+      partial unique index — `CREATE UNIQUE INDEX ... ON "Order"("tableId")
+      WHERE status IN ('open','billed')` — so the second insert fails at the
+      DB layer instead of racing past a plain SELECT, then map that constraint
+      violation to the existing `ConflictException` in `createForTable`.

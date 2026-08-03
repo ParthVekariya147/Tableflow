@@ -12,6 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 import { Modal } from "../components/Modal";
 import { Toggle } from "../components/Toggle";
+import { withRetry } from "../lib/retry";
 import { PermissionChecklist } from "../components/PermissionChecklist";
 import { PinnerLoader, TableSkeleton } from "../components/Skeleton";
 
@@ -99,18 +100,25 @@ export function TeamPage() {
     try {
       if (draft.kind === "add") {
         if (!draft.name.trim() || !draft.email.trim() || !draft.roleId) return;
+        // Not retried: a create is non-idempotent, and a retry after a lost
+        // response (but a server-side success) would risk inviting the
+        // member twice.
         await api.members.add({
           name: draft.name.trim(),
           email: draft.email.trim(),
           roleId: draft.roleId,
         });
       } else {
-        await api.members.update(draft.member.id, {
-          roleId: draft.roleId,
-          // Empty override = inherit the role; otherwise the custom set wins.
-          permissions: draft.customize ? draft.permissions : [],
-          active: draft.active,
-        });
+        const memberId = draft.member.id;
+        const { roleId, customize, permissions, active } = draft;
+        await withRetry(() =>
+          api.members.update(memberId, {
+            roleId,
+            // Empty override = inherit the role; otherwise the custom set wins.
+            permissions: customize ? permissions : [],
+            active,
+          }),
+        );
       }
       setDraft(null);
       load();
@@ -125,7 +133,7 @@ export function TeamPage() {
     if (!confirm(`Remove ${m.user?.name ?? "this member"} from the team?`)) return;
     setError(null);
     try {
-      await api.members.remove(m.id);
+      await withRetry(() => api.members.remove(m.id));
       load();
     } catch (e) {
       setError(messageOf(e));

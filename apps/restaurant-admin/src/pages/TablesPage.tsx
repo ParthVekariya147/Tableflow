@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { QRCodeCanvas } from "qrcode.react";
-import { SERVICE_REQUEST_META, type ServiceRequest } from "@amber/domain";
+import { useTenant } from "@amber/ui";
+import { SERVICE_REQUEST_META, mergeQuickActions, type ServiceRequest } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { useAdmin } from "../store/AdminStore";
 import { useServiceRequests } from "../notifications/useServiceRequests";
@@ -19,6 +20,8 @@ const STATUS_META: Record<
 };
 
 type Filter = "all" | "free" | "occupied";
+
+const FALLBACK_REQUEST_META = { icon: "notifications_active", label: "Request" };
 
 export function TablesPage() {
   const { state } = useAdmin();
@@ -262,6 +265,13 @@ function TableCard({
   const { acknowledge } = useServiceRequests();
   const meta = STATUS_META[table.status];
   const hasOpenRequest = requests.length > 0;
+  // Tenant's live quick-actions config — request badges need it to label/icon
+  // a *custom* button's request (SERVICE_REQUEST_META only covers built-ins).
+  const tenant = useTenant();
+  const quickActionsById = useMemo(
+    () => Object.fromEntries(mergeQuickActions(tenant.quickActions).map((a) => [a.id, a])),
+    [tenant.quickActions],
+  );
 
   function primaryAction() {
     if (table.status === "free") {
@@ -298,7 +308,10 @@ function TableCard({
       {hasOpenRequest && (
         <div className="mb-lg flex flex-wrap gap-xs">
           {requests.map((r) => {
-            const reqMeta = SERVICE_REQUEST_META[r.type];
+            const reqMeta =
+              SERVICE_REQUEST_META[r.type as keyof typeof SERVICE_REQUEST_META] ??
+              quickActionsById[r.type] ??
+              FALLBACK_REQUEST_META;
             return (
               <button
                 key={r.id}

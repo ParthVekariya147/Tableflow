@@ -6,6 +6,7 @@ import type { LoyaltyAccount } from "@amber/domain";
 import { ApiError } from "@amber/api-client";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import { useAdmin, billTotals, itemUnitPrice } from "../store/AdminStore";
 import type { PaymentMethod } from "../data/types";
 
@@ -27,6 +28,7 @@ export function BillingPage() {
   const navigate = useNavigate();
   const { state, dispatch, refreshFloor, money, currencySymbol } = useAdmin();
   const tenant = useTenant();
+  const { user, setLastPaymentMethod } = useAuth();
 
   // Only tables/sales can differ on open (this table reused/paid/changed from
   // another device) — the light refresh skips re-fetching menu/tenant.
@@ -40,7 +42,10 @@ export function BillingPage() {
     [table, state.taxRate],
   );
 
-  const [method, setMethod] = useState<PaymentMethod>("upi");
+  // Defaults to whatever this staff member last completed a checkout with
+  // (remembered server-side per-user); falls back to "cash" the very first
+  // time, before any preference has been recorded.
+  const [method, setMethod] = useState<PaymentMethod>(user?.lastPaymentMethod ?? "cash");
   const [paying, setPaying] = useState(false);
   // Once complete() has captured payment, the store's own refetch clears
   // table.session before complete()'s explicit navigate() to the receipt
@@ -159,6 +164,9 @@ export function BillingPage() {
       amountCents: bill.total,
       tenderedCents: method === "cash" ? tenderedCents : undefined,
     });
+    // Remember this as the default for next time. Fire-and-forget — a failed
+    // preference save shouldn't hold up navigating to the receipt/print page.
+    setLastPaymentMethod(method).catch(() => {});
     const orderId = activeTable.session?.orderId;
     navigate(
       `/tables/${activeTable.id}/complete${orderId ? `?order=${encodeURIComponent(orderId)}` : ""}`,
