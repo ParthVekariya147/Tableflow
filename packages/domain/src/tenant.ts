@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, slugSchema } from "./common.js";
 import { printerSettingsSchema } from "./printer.js";
+import { paymentMethodConfigSchema } from "./payment.js";
 import { loyaltyProgramSchema } from "./loyalty.js";
 import { quickActionSchema } from "./quick-action.js";
 
@@ -108,6 +109,10 @@ export const tenantSchema = z.object({
    *  quick-action.ts. Empty/unset falls back to DEFAULT_QUICK_ACTIONS via
    *  mergeQuickActions, so unset is exactly today's 4-button default. */
   quickActions: z.array(quickActionSchema).default([]),
+  /** Which tenders this restaurant accepts at checkout (Settings → Payments).
+   *  Empty/unset falls back to every method enabled via `mergePaymentMethods`,
+   *  so an unconfigured tenant behaves exactly as before this existed. */
+  paymentMethods: z.array(paymentMethodConfigSchema).default([]),
   active: z.boolean().default(true),
 });
 
@@ -132,6 +137,7 @@ export const updateTenantRequestSchema = z
     kitchenPrinter: printerSettingsSchema,
     loyalty: loyaltyProgramSchema,
     quickActions: z.array(quickActionSchema),
+    paymentMethods: z.array(paymentMethodConfigSchema),
   })
   .partial();
 

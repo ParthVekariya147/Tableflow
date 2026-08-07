@@ -1,4 +1,7 @@
 import { Link } from "react-router-dom";
+import { useTenant } from "@amber/ui";
+import type { TenantModule } from "@amber/domain";
+import { TENANT_MODULE_META, isModuleEnabled } from "@amber/domain";
 import { useAuth } from "../context/AuthContext";
 import { Icon } from "../components/Icon";
 
@@ -8,6 +11,13 @@ interface Card {
   title: string;
   desc: string;
   ready?: boolean;
+  /**
+   * Set when this card is the home of a tenant module's master switch. Such a
+   * card is ALWAYS listed — even with the module off, because it is the only
+   * way back on — but is dimmed and chipped "Off" so the state is legible from
+   * the landing grid. Every other surface of that module is gone entirely.
+   */
+  module?: TenantModule;
 }
 
 const CARDS: Card[] = [
@@ -52,6 +62,7 @@ const CARDS: Card[] = [
     title: "Loyalty",
     desc: "Reward returning guests with points on every visit.",
     ready: true,
+    module: "loyalty",
   },
   {
     to: "/settings/printer",
@@ -59,6 +70,7 @@ const CARDS: Card[] = [
     title: "Printer",
     desc: "Connect a thermal receipt printer via a local print agent.",
     ready: true,
+    module: "printing",
   },
   {
     to: "/settings/quick-actions",
@@ -73,9 +85,14 @@ const CARDS: Card[] = [
  * Settings landing — a grid of cards (Microsoft-style) routing to focused pages.
  * Gated by `settings.manage` (Admin only). Team & Roles are live; the rest are
  * placeholders for follow-up slices — see SETTINGS.md.
+ *
+ * Cards carrying a `module` (Printer, Loyalty) are the one place a switched-off
+ * module still appears — see the `Card.module` note above and the module
+ * registry in `@amber/domain`.
  */
 export function SettingsPage() {
   const { user } = useAuth();
+  const tenant = useTenant();
   return (
     <div className="space-y-lg">
       <header>
@@ -88,20 +105,32 @@ export function SettingsPage() {
       <div className="grid grid-cols-1 gap-md sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((card, i) => {
           const disabled = !card.ready;
+          const off = !!card.module && !isModuleEnabled(tenant, card.module);
           const inner = (
             <div
               className={`flex h-full flex-col gap-sm rounded-card border border-outline-variant bg-surface-container-lowest p-lg transition-colors ${
                 disabled ? "opacity-60" : "hover:border-primary hover:bg-surface-container-low"
-              }`}
+              } ${off ? "opacity-70" : ""}`}
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-card bg-primary-container/20 text-primary">
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-card ${
+                  off
+                    ? "bg-surface-variant text-on-surface-variant"
+                    : "bg-primary-container/20 text-primary"
+                }`}
+              >
                 <Icon name={card.icon} />
               </div>
-              <h2 className="font-label-md text-[15px] font-bold text-on-surface">
+              <h2 className="flex items-center gap-xs font-label-md text-[15px] font-bold text-on-surface">
                 {card.title}
+                {off && (
+                  <span className="rounded-full bg-surface-variant px-sm py-[1px] font-label-md text-[10px] uppercase tracking-wider text-on-surface-variant">
+                    Off
+                  </span>
+                )}
               </h2>
               <p className="font-body-md text-body-md text-on-surface-variant">
-                {card.desc}
+                {off ? TENANT_MODULE_META[card.module!].offDescription : card.desc}
               </p>
             </div>
           );

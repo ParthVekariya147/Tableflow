@@ -18,10 +18,10 @@ function Shell({ children }) {
 export function BootSplash({ label = "Setting your table…" }) {
   return (
     <Shell>
-      <span className="material-symbols-outlined text-[40px] text-primary animate-spin">
+      <span className="material-symbols-outlined text-[2.5rem] text-primary animate-spin">
         progress_activity
       </span>
-      <p className="text-on-surface-variant text-[15px]">{label}</p>
+      <p className="text-on-surface-variant text-[0.9375rem]">{label}</p>
     </Shell>
   );
 }
@@ -30,13 +30,13 @@ export function BootSplash({ label = "Setting your table…" }) {
 export function InvalidQr({ reason }) {
   return (
     <Shell>
-      <span className="material-symbols-outlined text-[48px] text-error">
+      <span className="material-symbols-outlined text-[3rem] text-error">
         qr_code_scanner
       </span>
-      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+      <h1 className="text-[1.375rem] font-bold text-on-surface font-serif">
         This code didn’t work
       </h1>
-      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+      <p className="text-on-surface-variant text-[0.9375rem] leading-relaxed">
         {reason ?? "We couldn’t find that table. Ask a staff member for help."}
       </p>
     </Shell>
@@ -53,19 +53,19 @@ export function InvalidQr({ reason }) {
 export function ResumeError({ onRetry }) {
   return (
     <Shell>
-      <span className="material-symbols-outlined text-[48px] text-error">
+      <span className="material-symbols-outlined text-[3rem] text-error">
         wifi_off
       </span>
-      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+      <h1 className="text-[1.375rem] font-bold text-on-surface font-serif">
         Couldn’t reconnect
       </h1>
-      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+      <p className="text-on-surface-variant text-[0.9375rem] leading-relaxed">
         We couldn’t check on your order — please check your connection and
         try again.
       </p>
       <button
         onClick={onRetry}
-        className="mt-2 bg-primary text-on-primary font-semibold py-3 px-8 rounded-full text-[15px]"
+        className="mt-2 bg-primary text-on-primary font-semibold py-3 px-8 rounded-full text-[0.9375rem]"
       >
         Try again
       </button>
@@ -81,13 +81,13 @@ export function ResumeError({ onRetry }) {
 export function SessionClosed() {
   return (
     <Shell>
-      <span className="material-symbols-outlined text-[48px] text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
+      <span className="material-symbols-outlined text-[3rem] text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>
         local_cafe
       </span>
-      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+      <h1 className="text-[1.375rem] font-bold text-on-surface font-serif">
         Thanks for dining with us
       </h1>
-      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+      <p className="text-on-surface-variant text-[0.9375rem] leading-relaxed">
         Your previous order has been settled. To start a new order, please scan
         the QR code on your table again.
       </p>
@@ -131,20 +131,20 @@ export function TableInUse({ table, api, onReclaimed }) {
 
   return (
     <Shell>
-      <span className="material-symbols-outlined text-[48px] text-tertiary">
+      <span className="material-symbols-outlined text-[3rem] text-tertiary">
         groups
       </span>
-      <h1 className="text-[22px] font-bold text-on-surface font-serif">
+      <h1 className="text-[1.375rem] font-bold text-on-surface font-serif">
         Table {table?.label ?? ""} is in use
       </h1>
-      <p className="text-on-surface-variant text-[15px] leading-relaxed">
+      <p className="text-on-surface-variant text-[0.9375rem] leading-relaxed">
         There’s already an open order on this table.
       </p>
 
       {api && onReclaimed && !showForm && (
         <button
           onClick={() => setShowForm(true)}
-          className="mt-2 text-primary font-semibold text-[14px] underline underline-offset-2"
+          className="mt-2 text-primary font-semibold text-[0.875rem] underline underline-offset-2"
         >
           Already at this table? Re-join with your phone
         </button>
@@ -153,11 +153,11 @@ export function TableInUse({ table, api, onReclaimed }) {
       {showForm && (
         <form onSubmit={handleReclaim} className="w-full max-w-xs flex flex-col gap-3 mt-2">
           <label className="flex flex-col gap-1 text-left">
-            <span className="text-[13px] font-semibold text-on-surface-variant">
+            <span className="text-[0.8125rem] font-semibold text-on-surface-variant">
               Your phone number
             </span>
             <div className="relative flex items-center">
-              <span className="absolute left-4 text-[14px] font-medium text-on-surface-variant select-none pointer-events-none">
+              <span className="absolute left-4 text-[0.875rem] font-medium text-on-surface-variant select-none pointer-events-none">
                 +91
               </span>
               <input
@@ -168,22 +168,22 @@ export function TableInUse({ table, api, onReclaimed }) {
                 inputMode="numeric"
                 maxLength={13}
                 autoFocus
-                className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest pl-14 pr-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest pl-14 pr-4 py-3 text-[0.9375rem] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               />
             </div>
           </label>
           {error && (
-            <p className="text-[13px] text-error text-center" role="alert">
+            <p className="text-[0.8125rem] text-error text-center" role="alert">
               {error}
             </p>
           )}
           <button
             type="submit"
             disabled={loading || !phone.trim()}
-            className="w-full bg-primary text-on-primary font-semibold py-3 rounded-full text-[15px] disabled:opacity-60 flex items-center justify-center gap-2"
+            className="w-full bg-primary text-on-primary font-semibold py-3 rounded-full text-[0.9375rem] disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {loading && (
-              <span className="material-symbols-outlined text-[16px] animate-spin">
+              <span className="material-symbols-outlined text-[1rem] animate-spin">
                 progress_activity
               </span>
             )}
@@ -192,7 +192,7 @@ export function TableInUse({ table, api, onReclaimed }) {
           <button
             type="button"
             onClick={() => { setShowForm(false); setError(null); }}
-            className="text-[13px] text-on-surface-variant text-center"
+            className="text-[0.8125rem] text-on-surface-variant text-center"
           >
             Cancel
           </button>
@@ -200,7 +200,7 @@ export function TableInUse({ table, api, onReclaimed }) {
       )}
 
       {!showForm && (
-        <p className="text-on-surface-variant/70 text-[13px]">
+        <p className="text-on-surface-variant/70 text-[0.8125rem]">
           Not your order? Ask a staff member for help.
         </p>
       )}

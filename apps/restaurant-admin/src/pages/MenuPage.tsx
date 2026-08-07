@@ -34,6 +34,7 @@ function loadViewPrefs(): { view: ViewMode; density: Density } {
 export function MenuPage() {
   const { state, pendingItems } = useAdmin();
   const [activeCat, setActiveCat] = useState(ALL_CAT);
+  const [query, setQuery] = useState("");
   const [{ view, density }, setViewPrefs] = useState(loadViewPrefs);
   // panel: undefined = closed, null = add new, MenuItem = edit
   const [panel, setPanel] = useState<MenuItem | null | undefined>(undefined);
@@ -59,10 +60,22 @@ export function MenuPage() {
 
   const isAll = activeCat === ALL_CAT;
   const category = isAll ? undefined : state.categories.find((c) => c.id === activeCat);
-  const itemsInCat = isAll ? state.items : state.items.filter((i) => i.categoryId === activeCat);
-  const pendingInCat = isAll
-    ? pendingItems
-    : pendingItems.filter((p) => p.categoryId === activeCat);
+  const q = query.trim().toLowerCase();
+  /** Name or description match — same case-insensitive contains as the table
+   *  session's "Search menu…" picker, so both surfaces behave alike. */
+  const matches = (i: MenuItem) =>
+    !q ||
+    i.name.toLowerCase().includes(q) ||
+    (i.description ?? "").toLowerCase().includes(q);
+
+  const inCat = isAll ? state.items : state.items.filter((i) => i.categoryId === activeCat);
+  const itemsInCat = inCat.filter(matches);
+  // How many of the *other* categories would match — powers the "search all
+  // categories" escape hatch when the current tab comes up empty.
+  const matchesEverywhere = q ? state.items.filter(matches).length : 0;
+  const pendingInCat = (isAll ? pendingItems : pendingItems.filter((p) => p.categoryId === activeCat))
+    // A still-saving item only shows while it matches what's being searched.
+    .filter((p) => !q || p.name.toLowerCase().includes(q));
 
   function countFor(catId: string) {
     return state.items.filter((i) => i.categoryId === catId).length;
@@ -157,10 +170,37 @@ export function MenuPage() {
               )}
             </div>
             <p className="mt-1 font-body-md text-body-md text-on-surface-variant">
-              Manage items, pricing, and availability.
+              {q
+                ? `${itemsInCat.length} of ${inCat.length} item${inCat.length === 1 ? "" : "s"} match “${query.trim()}”`
+                : "Manage items, pricing, and availability."}
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-sm">
+            <div className="relative min-w-[10rem] flex-1 sm:max-w-xs">
+              <Icon
+                name="search"
+                size={18}
+                className="pointer-events-none absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+                placeholder="Search items…"
+                aria-label="Search menu items"
+                className="w-full rounded-full border border-outline-variant bg-surface py-sm pl-9 pr-9 font-body-md text-on-surface outline-none transition-shadow focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  title="Clear search"
+                  className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-background"
+                >
+                  <Icon name="close" size={16} />
+                </button>
+              )}
+            </div>
             {/* Layout switcher: grid ↔ rows */}
             <Segmented
               value={view}
@@ -193,10 +233,25 @@ export function MenuPage() {
 
         {itemsInCat.length === 0 && pendingInCat.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-sm py-xxl text-on-surface-variant">
-            <Icon name="restaurant_menu" size={48} />
+            <Icon name={q ? "search_off" : "restaurant_menu"} size={48} />
             <p className="font-body-md text-body-md">
-              {isAll ? "No items on the menu yet." : "No items in this category yet."}
+              {q
+                ? `Nothing matches “${query.trim()}”${isAll ? "" : " in this category"}.`
+                : isAll
+                  ? "No items on the menu yet."
+                  : "No items in this category yet."}
             </p>
+            {/* Searched inside one category and missed — the item probably lives
+                in another one, so offer the wider search rather than a dead end. */}
+            {q && !isAll && matchesEverywhere > 0 && (
+              <button
+                onClick={() => setActiveCat(ALL_CAT)}
+                className="flex items-center gap-xs rounded-full border border-primary px-md py-xs font-label-md text-label-md text-primary transition-colors hover:bg-primary-container/10"
+              >
+                <Icon name="search" size={16} />
+                Search all categories ({matchesEverywhere})
+              </button>
+            )}
           </div>
         ) : view === "list" ? (
           <div className="divide-y divide-outline-variant overflow-hidden rounded-card border border-outline-variant bg-surface-container-lowest shadow-card">
@@ -534,7 +589,7 @@ function ItemCard({
         <button
           onClick={onEdit}
           title="Edit item"
-          className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-lowest/90 text-on-surface-variant opacity-0 backdrop-blur-sm transition-opacity hover:text-primary group-hover:opacity-100"
+          className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-surface-container-lowest/90 text-on-surface-variant backdrop-blur-sm transition-opacity hover:text-primary lg:opacity-0 lg:group-hover:opacity-100"
         >
           <Icon name="edit" size={18} />
         </button>

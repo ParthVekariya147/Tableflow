@@ -37,4 +37,7 @@ export const defaultTenant: Tenant = {
     maxRedeemPercent: 0.5,
   },
   quickActions: [],
+  // Empty = every tender accepted (mergePaymentMethods' default). The real
+  // per-restaurant config arrives with the tenant once someone signs in.
+  paymentMethods: [],
 };

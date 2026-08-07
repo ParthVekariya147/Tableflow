@@ -1,10 +1,30 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApiError } from "@amber/api-client";
+import {
+  PAYMENT_METHOD_LABELS,
+  mergePaymentMethods,
+  type PaymentMethod,
+  type PaymentMethodConfig,
+} from "@amber/domain";
 import { api } from "../lib/api";
 import { Icon } from "../components/Icon";
 import { Spinner } from "../components/Skeleton";
+import { Toggle } from "../components/Toggle";
 import { withRetry } from "../lib/retry";
+import { useTenantBrand } from "../context/TenantThemeGate";
+
+/** Staff-facing copy per tender. Card/UPI are *recorded*, not collected by the
+ *  app — the guest has already paid on the bank's card machine or by scanning
+ *  the UPI QR, which is how these work in every counter-POS deployment. */
+const METHOD_INFO: Record<
+  PaymentMethod,
+  { icon: string; desc: string }
+> = {
+  cash: { icon: "payments", desc: "Staff collect cash and confirm at checkout." },
+  card: { icon: "credit_card", desc: "Guest taps on your own card machine; staff record it." },
+  upi: { icon: "qr_code_2", desc: "Guest scans the bill's UPI QR; staff confirm receipt." },
+};
 
 /**
  * Payments settings (`/settings/payments`).
@@ -13,9 +33,13 @@ import { withRetry } from "../lib/retry";
  */
 export function PaymentsPage() {
   const navigate = useNavigate();
+  const { applyTenant } = useTenantBrand();
 
   const [upiId, setUpiId] = useState("");
   const [upiMobile, setUpiMobile] = useState("");
+  const [methods, setMethods] = useState<PaymentMethodConfig[]>(() =>
+    mergePaymentMethods(undefined),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +54,7 @@ export function PaymentsPage() {
         if (!active) return;
         setUpiId(t.upiId ?? "");
         setUpiMobile(t.upiMobile ?? "");
+        setMethods(mergePaymentMethods(t.paymentMethods));
       })
       .catch(() => {})
       .finally(() => active && setLoading(false));
@@ -38,16 +63,31 @@ export function PaymentsPage() {
 
   const dirty = upiId.trim() !== "" || upiMobile.trim() !== "" || savedTick > 0;
 
+  /** Enabled count drives the "can't switch the last one off" guard — a POS
+   *  with zero tenders can't close a bill. Mirrored server-side by
+   *  `mergePaymentMethods`, which forces cash back on if it ever happens. */
+  const enabledCount = methods.filter((m) => m.enabled).length;
+
+  function toggleMethod(method: PaymentMethod, next: boolean) {
+    if (!next && enabledCount <= 1) return;
+    setMethods((prev) =>
+      prev.map((m) => (m.method === method ? { ...m, enabled: next } : m)),
+    );
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      await withRetry(() =>
+      const updated = await withRetry(() =>
         api.tenant.update({
           upiId: upiId.trim() || undefined,
           upiMobile: upiMobile.trim() || undefined,
+          paymentMethods: methods,
         }),
       );
+      // Push app-wide so the checkout screens drop/restore the tender at once.
+      applyTenant(updated);
       setSavedTick((t) => t + 1);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");
@@ -150,64 +190,82 @@ export function PaymentsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-sm pt-xs">
-                  <button
-                    onClick={save}
-                    disabled={saving}
-                    className="flex items-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md text-on-primary transition-colors hover:bg-primary-container disabled:opacity-60"
-                  >
-                    {saving && <Icon name="progress_activity" size={16} className="ag-spin" />}
-                    {saving ? "Saving…" : "Save UPI Settings"}
-                  </button>
-                  {!saving && savedTick > 0 && (
-                    <span className="flex items-center gap-xs font-label-md text-label-md text-on-surface-variant">
-                      <Icon name="check_circle" size={16} className="text-[#2e7d32]" /> Saved
-                    </span>
-                  )}
-                </div>
               </div>
             </section>
 
-            {/* Payment methods overview */}
+            {/* Accepted methods — the master switch list. Turning one off hides
+                it from every checkout (dine-in billing, Quick Sale, and the
+                guest's own bill screen). Past sales keep their method: a
+                disabled tender still prints, reports and reconciles as before. */}
             <section className="rounded-card border border-outline-variant bg-surface-container-lowest p-lg">
-              <h3 className="mb-md font-title-lg text-title-lg text-on-surface">Accepted Methods</h3>
-              <div className="grid grid-cols-1 gap-md sm:grid-cols-3">
-                {[
-                  { icon: "payments", label: "Cash", desc: "Staff confirms receipt", active: true },
-                  { icon: "credit_card", label: "Card", desc: "Guest pays at counter", active: true },
-                  {
-                    icon: "qr_code_2",
-                    label: "UPI",
-                    desc: upiId.trim() ? `→ ${upiId.trim()}` : "Configure UPI ID above",
-                    active: !!upiId.trim(),
-                  },
-                ].map((m) => (
-                  <div
-                    key={m.label}
-                    className={`flex items-start gap-md rounded-card border p-md transition-colors ${
-                      m.active
-                        ? "border-primary/30 bg-primary-container/10"
-                        : "border-outline-variant bg-surface-container opacity-60"
-                    }`}
-                  >
-                    <div
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
-                        m.active ? "bg-primary/10 text-primary" : "bg-surface-variant text-on-surface-variant"
+              <h3 className="font-title-lg text-title-lg text-on-surface">Accepted Methods</h3>
+              <p className="mb-md mt-xs font-body-md text-body-md text-on-surface-variant">
+                Choose what staff can charge with. Switching one off removes it
+                from every checkout screen — it never changes sales you've
+                already taken.
+              </p>
+              <ul className="space-y-sm">
+                {methods.map((m) => {
+                  const info = METHOD_INFO[m.method];
+                  const last = m.enabled && enabledCount <= 1;
+                  const needsUpi = m.method === "upi" && m.enabled && !upiId.trim();
+                  return (
+                    <li
+                      key={m.method}
+                      className={`flex items-center gap-md rounded-card border p-md transition-colors ${
+                        m.enabled
+                          ? "border-primary/30 bg-primary-container/10"
+                          : "border-outline-variant bg-surface-container opacity-70"
                       }`}
                     >
-                      <Icon name={m.icon} size={20} />
-                    </div>
-                    <div>
-                      <p className="font-label-md text-label-md font-semibold text-on-surface">{m.label}</p>
-                      <p className="font-body-md text-[12px] text-on-surface-variant">{m.desc}</p>
-                    </div>
-                    {m.active && (
-                      <Icon name="check_circle" size={16} className="ml-auto shrink-0 text-primary" fill />
-                    )}
-                  </div>
-                ))}
-              </div>
+                      <div
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                          m.enabled
+                            ? "bg-primary/10 text-primary"
+                            : "bg-surface-variant text-on-surface-variant"
+                        }`}
+                      >
+                        <Icon name={info.icon} size={20} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-label-md text-label-md font-semibold text-on-surface">
+                          {PAYMENT_METHOD_LABELS[m.method]}
+                        </p>
+                        <p className="font-body-md text-[12px] text-on-surface-variant">
+                          {needsUpi ? "Add your UPI ID above to show the QR." : info.desc}
+                        </p>
+                        {last && (
+                          <p className="mt-base font-body-md text-[11px] text-on-surface-variant">
+                            Your only method — at least one must stay on.
+                          </p>
+                        )}
+                      </div>
+                      <Toggle
+                        checked={m.enabled}
+                        onChange={(next) => toggleMethod(m.method, next)}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
+
+            {/* One save for the whole page (UPI details + accepted methods). */}
+            <div className="flex items-center gap-sm">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="flex items-center gap-xs rounded-full bg-primary px-lg py-sm font-label-md text-label-md text-on-primary transition-colors hover:bg-primary-container disabled:opacity-60"
+              >
+                {saving && <Icon name="progress_activity" size={16} className="ag-spin" />}
+                {saving ? "Saving…" : "Save Payment Settings"}
+              </button>
+              {!saving && savedTick > 0 && (
+                <span className="flex items-center gap-xs font-label-md text-label-md text-on-surface-variant">
+                  <Icon name="check_circle" size={16} className="text-[#2e7d32]" /> Saved
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Preview panel */}

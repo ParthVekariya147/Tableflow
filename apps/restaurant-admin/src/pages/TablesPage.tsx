@@ -48,7 +48,7 @@ export function TablesPage() {
             Real-time table status and session management.
           </p>
         </div>
-        <div className="flex items-center gap-sm self-start">
+        <div className="flex flex-wrap items-center gap-sm self-start">
           <div className="flex items-center gap-sm rounded-full border border-outline-variant bg-surface-container-high p-1">
             {(["all", "free", "occupied"] as Filter[]).map((f) => (
               <button

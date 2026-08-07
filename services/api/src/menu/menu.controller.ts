@@ -24,6 +24,7 @@ import {
 import {
   createCategorySchema,
   createItemSchema,
+  importImageSchema,
   updateCategorySchema,
   updateItemSchema,
 } from "./menu.dto.js";
@@ -60,6 +61,27 @@ export class MenuController {
     if (!file.mimetype || !isAllowedImageMime(file.mimetype))
       throw new BadRequestException("Only PNG, JPEG, WEBP, GIF, or AVIF images are allowed.");
     const url = await this.storage.uploadImage(tenant.id, file);
+    return { url };
+  }
+
+  /**
+   * Staff-only: import a photo from a pasted link into our own storage.
+   *
+   * The admin used to save a pasted URL verbatim, which makes the menu depend
+   * on a stranger's server — those links expire, get hotlink-blocked, or
+   * rate-limit when a full menu loads at once. Importing turns "paste a link"
+   * into the same outcome as "upload a file".
+   */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("menu.manage")
+  @Post("import-image")
+  async importImage(
+    @CurrentTenant() tenant: Tenant,
+    @Body() body: unknown,
+  ): Promise<{ url: string }> {
+    const parsed = importImageSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException("A valid image link is required.");
+    const url = await this.storage.importImageFromUrl(tenant.id, parsed.data.url);
     return { url };
   }
 

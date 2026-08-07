@@ -9,6 +9,7 @@ import {
   renderTsplTest,
   shouldUseTspl,
 } from "../printer/renderTspl.js";
+import { queryPrinterInfo } from "../printer/queryPrinter.js";
 
 const printBodySchema = z.object({
   connection: printerSettingsSchema,
@@ -38,6 +39,29 @@ printRouter.post(
     await handlePrint(res, parsed.data.connection, (printer) =>
       renderReceipt(printer, parsed.data.receipt),
     );
+  },
+);
+
+/** Ask the OS driver what paper size / dpi the installed printer is set to —
+ *  Settings → Printer's "Detect from printer". USB/Bluetooth (OS queue) only. */
+printRouter.post(
+  "/printer/info",
+  requireAgentSecret,
+  async (req: Request, res: Response) => {
+    const parsed = testBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: "Invalid request body" });
+      return;
+    }
+    try {
+      const info = await queryPrinterInfo(parsed.data.connection);
+      res.json({ success: true, info });
+    } catch (e) {
+      res.status(400).json({
+        success: false,
+        error: e instanceof Error ? e.message : "Couldn't query the printer.",
+      });
+    }
   },
 );
 

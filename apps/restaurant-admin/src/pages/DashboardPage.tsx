@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { AnalyticsSummary } from "@amber/domain";
+import { PAYMENT_METHOD_LABELS, type AnalyticsSummary } from "@amber/domain";
 import { Icon } from "../components/Icon";
 import { Sk } from "../components/Skeleton";
 import { useAdmin } from "../store/AdminStore";
@@ -56,7 +56,7 @@ export function DashboardPage() {
       icon: "check_circle",
       tone: "bg-[#e8f5e9] text-[#2e7d32]",
       title: `${s.tableLabel} check closed`,
-      sub: `${money(s.totalCents)} • ${s.method === "card" ? "Card" : "Cash"}`,
+      sub: `${money(s.totalCents)} • ${PAYMENT_METHOD_LABELS[s.method] ?? s.method}`,
     })),
   ]
     .sort((a, b) => b.at - a.at)
@@ -64,7 +64,7 @@ export function DashboardPage() {
 
   return (
     <div className="grid grid-cols-12 gap-lg">
-      <div className="col-span-12 mb-sm flex items-end justify-between">
+      <div className="col-span-12 mb-sm flex flex-wrap items-end justify-between gap-sm">
         <div>
           <h2 className="font-headline-lg text-headline-lg text-on-background">Overview</h2>
           <p className="mt-base font-body-md text-body-md text-on-surface-variant">
@@ -99,7 +99,7 @@ export function DashboardPage() {
           <div className="flex items-baseline gap-sm">
             <h3 className="font-display-lg text-display-lg text-on-surface">
               {activeTables.length}
-              <span className="text-[32px] text-on-surface-variant">/{state.tables.length}</span>
+              <span className="text-[2rem] text-on-surface-variant">/{state.tables.length}</span>
             </h3>
             <span className="rounded-full bg-secondary-container px-sm py-xs font-label-md text-label-md text-on-secondary-container">
               {capacity}% Capacity

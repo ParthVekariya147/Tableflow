@@ -65,17 +65,17 @@ export default function SplashScreen() {
           {logoUrl ? (
             <img src={logoUrl} alt={tenant.name} className="w-full h-full object-cover" />
           ) : (
-            <span className="material-symbols-outlined text-[36px] text-on-primary-container">
+            <span className="material-symbols-outlined text-[2.25rem] text-on-primary-container">
               restaurant
             </span>
           )}
         </div>
 
         <div className="text-center">
-          <h1 className="text-[30px] font-bold text-on-surface font-serif leading-tight">
+          <h1 className="text-[1.875rem] font-bold text-on-surface font-serif leading-tight">
             {tenant?.name ?? "Welcome"}
           </h1>
-          <p className="text-on-surface-variant text-[15px] mt-1">
+          <p className="text-on-surface-variant text-[0.9375rem] mt-1">
             Scan successful — let’s get you seated.
           </p>
         </div>
@@ -83,7 +83,7 @@ export default function SplashScreen() {
         {/* Table badge */}
         <div className="flex items-center gap-2 bg-primary-container text-on-primary-container font-semibold px-5 py-2.5 rounded-full shadow-md">
           <span
-            className="material-symbols-outlined text-[18px]"
+            className="material-symbols-outlined text-[1.125rem]"
             style={{ fontVariationSettings: "'FILL' 1" }}
           >
             table_restaurant
@@ -94,22 +94,22 @@ export default function SplashScreen() {
         {/* Reserve form */}
         <div className="w-full flex flex-col gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-[13px] font-semibold text-on-surface-variant">Your name</span>
+            <span className="text-[0.8125rem] font-semibold text-on-surface-variant">Your name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Rahul Sharma"
               autoComplete="name"
-              className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest px-4 py-3 text-[0.9375rem] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[13px] font-semibold text-on-surface-variant">
+            <span className="text-[0.8125rem] font-semibold text-on-surface-variant">
               Phone number
-              <span className="ml-1.5 text-[11px] font-normal text-on-surface-variant/60">Indian mobile</span>
+              <span className="ml-1.5 text-[0.6875rem] font-normal text-on-surface-variant/60">Indian mobile</span>
             </span>
             <div className="relative flex items-center">
-              <span className="absolute left-4 text-[15px] font-medium text-on-surface-variant select-none pointer-events-none">
+              <span className="absolute left-4 text-[0.9375rem] font-medium text-on-surface-variant select-none pointer-events-none">
                 +91
               </span>
               <input
@@ -120,7 +120,7 @@ export default function SplashScreen() {
                 autoComplete="tel"
                 inputMode="numeric"
                 maxLength={13}
-                className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest pl-14 pr-4 py-3 text-[15px] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                className="w-full rounded-2xl border border-outline-variant bg-surface-container-lowest pl-14 pr-4 py-3 text-[0.9375rem] text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               />
             </div>
           </label>
@@ -138,7 +138,7 @@ export default function SplashScreen() {
           />
 
           {error && (
-            <p className="text-[13px] text-error text-center" role="alert">
+            <p className="text-[0.8125rem] text-error text-center" role="alert">
               {error}
             </p>
           )}
@@ -147,11 +147,11 @@ export default function SplashScreen() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full bg-primary text-on-primary font-semibold py-4 rounded-full shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2 text-[16px] disabled:opacity-70"
+          className="w-full bg-primary text-on-primary font-semibold py-4 rounded-full shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2 text-[1rem] disabled:opacity-70"
         >
           {submitting ? (
             <>
-              <span className="material-symbols-outlined text-[18px] animate-spin">
+              <span className="material-symbols-outlined text-[1.125rem] animate-spin">
                 progress_activity
               </span>
               Reserving…
@@ -159,13 +159,13 @@ export default function SplashScreen() {
           ) : (
             <>
               Reserve this table
-              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+              <span className="material-symbols-outlined text-[1.125rem]">arrow_forward</span>
             </>
           )}
         </button>
       </form>
 
-      <footer className="relative z-10 text-center text-[12px] text-on-surface-variant/60">
+      <footer className="relative z-10 text-center text-[0.75rem] text-on-surface-variant/60">
         Powered by {tenant?.name ?? "Amber & Grain"}
       </footer>
     </div>

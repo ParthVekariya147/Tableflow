@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, Navigate } from "react-router-dom";
 import { useTenant } from "@amber/ui";
-import { maxRedeemablePoints } from "@amber/domain";
+import {
+  enabledPaymentMethods,
+  isModuleEnabled,
+  isPaymentMethodEnabled,
+  isPrintingEnabled,
+  maxRedeemablePoints,
+} from "@amber/domain";
 import type { LoyaltyAccount } from "@amber/domain";
 import { ApiError } from "@amber/api-client";
 import { Icon } from "../components/Icon";
 import { api } from "../lib/api";
+import { buildReceipt } from "../lib/receipt";
+import { printReceipt, type PrintResult } from "../lib/printAgent";
 import { useAuth } from "../context/AuthContext";
 import { useAdmin, billTotals, itemUnitPrice } from "../store/AdminStore";
 import type { PaymentMethod } from "../data/types";
@@ -13,10 +21,11 @@ import type { PaymentMethod } from "../data/types";
 // ── Payment method config ─────────────────────────────────────────────────────
 // All three are staff-recorded, not staff-collected: the guest has already
 // paid (cash handed over, card tapped on the counter's own POS, UPI scanned
-// on the counter's own QR/device) before this screen opens. This panel's job
-// is only to pick which method it was and confirm — never to re-collect it
-// (no QR/deep-link here; that belongs on a guest-facing surface, not a
-// reception-only staff screen).
+// from their own phone or the printed bill) before this screen opens. This
+// panel's job is only to pick which method it was and confirm — never to
+// re-collect it, so there is still no QR on this staff-only panel. The
+// scan-to-pay QR belongs on guest-facing surfaces: the customer app's
+// BillScreen and the "Print Bill" paper below (see printBill).
 const METHOD_META: Record<PaymentMethod, { icon: string; label: string; desc: string }> = {
   cash: { icon: "payments", label: "Cash", desc: "Collect cash at the table" },
   card: { icon: "credit_card", label: "Card", desc: "Guest pays at POS / counter" },
@@ -26,7 +35,14 @@ const METHOD_META: Record<PaymentMethod, { icon: string; label: string; desc: st
 export function BillingPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { state, dispatch, refreshFloor, money, currencySymbol } = useAdmin();
+  const {
+    state,
+    dispatch,
+    refreshFloor,
+    money,
+    currencySymbol,
+    error: storeError,
+  } = useAdmin();
   const tenant = useTenant();
   const { user, setLastPaymentMethod } = useAuth();
 
@@ -45,8 +61,20 @@ export function BillingPage() {
   // Defaults to whatever this staff member last completed a checkout with
   // (remembered server-side per-user); falls back to "cash" the very first
   // time, before any preference has been recorded.
-  const [method, setMethod] = useState<PaymentMethod>(user?.lastPaymentMethod ?? "cash");
+  const [pickedMethod, setMethod] = useState<PaymentMethod>(
+    user?.lastPaymentMethod ?? "cash",
+  );
+  // Tenders this restaurant accepts (Settings → Payments). Derived, not stored:
+  // if the remembered method was since switched off, the selection falls back
+  // to the first available one rather than leaving a dead panel selected.
+  const availableMethods = enabledPaymentMethods(tenant.paymentMethods);
+  const method: PaymentMethod = availableMethods.includes(pickedMethod)
+    ? pickedMethod
+    : availableMethods[0] ?? "cash";
   const [paying, setPaying] = useState(false);
+  /** Set only after a failed settlement attempt — keeps staff on this screen
+   *  with an explanation instead of silently showing a success page. */
+  const [payError, setPayError] = useState<string | null>(null);
   // Once complete() has captured payment, the store's own refetch clears
   // table.session before complete()'s explicit navigate() to the receipt
   // page can run — without this flag, the render guard below wins that race
@@ -56,7 +84,24 @@ export function BillingPage() {
     totals ? (totals.total / 100).toFixed(2) : "0.00",
   );
 
+  // ── Pre-payment bill print ─────────────────────────────────────────────
+  // Printing the bill BEFORE settling is the ONLY path that carries the
+  // scan-to-pay UPI QR: both renderers drop that QR once a Payment row exists
+  // (re-asking for money on a paid receipt invites a double payment), so the
+  // post-payment receipt can never show it. This is the guest's copy — review
+  // the lines, scan, pay — after which staff confirm below.
+  const [printingBill, setPrintingBill] = useState(false);
+  const [billPrintResult, setBillPrintResult] = useState<PrintResult | null>(null);
+  const canPrintBill = isPrintingEnabled(tenant.printer);
+  const upiOnBill =
+    !!tenant.upiId && isPaymentMethodEnabled(tenant.paymentMethods, "upi");
+
   // ── Loyalty (staff-only; no guest-facing surface) ──────────────────────
+  // Module-gated: with loyalty switched off, checkout never fetches an account
+  // and never renders the redeem panel. An ALREADY-APPLIED discount still shows
+  // in the totals below — hiding a line that is subtracted from the amount due
+  // would make the printed bill fail to add up.
+  const loyaltyOn = isModuleEnabled(tenant, "loyalty");
   const orderId = table?.session?.orderId;
   const [loyaltyAccountId, setLoyaltyAccountId] = useState<string | undefined>();
   const [pointsRedeemed, setPointsRedeemed] = useState(0);
@@ -67,7 +112,7 @@ export function BillingPage() {
   const [redeemError, setRedeemError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!orderId || !tenant.loyalty.enabled) return;
+    if (!orderId || !loyaltyOn) return;
     let active = true;
     api.orders
       .get(orderId)
@@ -87,7 +132,7 @@ export function BillingPage() {
     return () => {
       active = false;
     };
-  }, [orderId, tenant.loyalty.enabled]);
+  }, [orderId, loyaltyOn]);
 
   if (!table) {
     return <Navigate to="/tables" replace />;
@@ -153,21 +198,88 @@ export function BillingPage() {
     });
   }
 
+  /**
+   * Prints the unsettled bill for the guest. Rebuilt from the API (not the
+   * store's view model) so the paper carries the same statutory header, guest
+   * details and line detail as the final receipt — and re-reads the tenant so
+   * a UPI id or layout change made minutes ago is on this print.
+   *
+   * Never touches payment state: nothing is captured, the table stays open.
+   */
+  async function printBill() {
+    if (printingBill) return;
+    const oid = activeTable.session?.orderId;
+    if (!oid) return;
+    setPrintingBill(true);
+    setBillPrintResult(null);
+    try {
+      const [freshTenant, order] = await Promise.all([
+        api.tenant.current(),
+        api.orders.get(oid),
+      ]);
+      const receipt = buildReceipt({
+        orderId: oid,
+        tableId: activeTable.id,
+        tableLabel: activeTable.label,
+        tenant: freshTenant,
+        order,
+        // No Payment row — this is what makes the paper print "TOTAL DUE" and
+        // the UPI QR rather than claiming the bill was paid.
+        payment: null,
+        // The post-redemption amounts staff are looking at, so the QR asks for
+        // exactly the number on screen.
+        bill,
+      });
+      setBillPrintResult(await printReceipt(freshTenant.printer, receipt));
+    } catch {
+      setBillPrintResult({
+        ok: false,
+        reason: "config",
+        message: "Couldn't load the bill for printing. The table is untouched.",
+      });
+    } finally {
+      setPrintingBill(false);
+    }
+  }
+
   async function complete() {
+    // Duplicate-submit guard: `paying` is set synchronously before the first
+    // await, so a double-tap (or an Enter key repeat) can't fire a second
+    // capture while one is in flight.
     if (paying) return;
     setPaying(true);
-    paidRef.current = true;
-    await dispatch({
+    setPayError(null);
+    // Capture the order id BEFORE settling — a successful payment clears
+    // `table.session`, so reading it afterwards would yield undefined and drop
+    // the ?order= param the receipt page needs to rebuild the receipt.
+    const orderId = activeTable.session?.orderId;
+
+    const ok = await dispatch({
       type: "COMPLETE_PAYMENT",
       tableId: activeTable.id,
       method,
       amountCents: bill.total,
       tenderedCents: method === "cash" ? tenderedCents : undefined,
     });
+
+    // The session is NEVER marked complete locally on anything but a
+    // server-confirmed settlement. On failure staff stay right here, with the
+    // bill intact and the button re-armed, so they can retry without a reload.
+    if (!ok) {
+      setPayError(
+        storeError ??
+          "The payment could not be completed. Nothing was charged — please try again.",
+      );
+      setPaying(false);
+      return;
+    }
+
+    // Only now is the checkout terminal: block the render guard's redirect and
+    // move to the receipt screen.
+    paidRef.current = true;
     // Remember this as the default for next time. Fire-and-forget — a failed
     // preference save shouldn't hold up navigating to the receipt/print page.
     setLastPaymentMethod(method).catch(() => {});
-    const orderId = activeTable.session?.orderId;
     navigate(
       `/tables/${activeTable.id}/complete${orderId ? `?order=${encodeURIComponent(orderId)}` : ""}`,
       { state: { method, totalCents: bill.total, tableLabel: activeTable.label } },
@@ -253,7 +365,7 @@ export function BillingPage() {
           </div>
 
           {/* Loyalty — staff-only, applied on the guest's behalf (no guest UI). */}
-          {tenant.loyalty.enabled && loyaltyAccountId && (
+          {loyaltyOn && loyaltyAccountId && (
             <div className="border-t border-outline-variant px-lg py-md">
               <p className="mb-sm font-label-md text-[11px] uppercase tracking-wider text-on-surface-variant">
                 Loyalty
@@ -321,9 +433,18 @@ export function BillingPage() {
             <p className="mb-sm font-label-md text-[11px] uppercase tracking-wider text-on-surface-variant">
               Payment Method
             </p>
-            <div className="grid grid-cols-3 gap-sm">
-              {(Object.entries(METHOD_META) as [PaymentMethod, typeof METHOD_META[PaymentMethod]][]).map(
-                ([m, meta]) => {
+            <div
+              className={`grid gap-sm ${
+                availableMethods.length === 1
+                  ? "grid-cols-1"
+                  : availableMethods.length === 2
+                  ? "grid-cols-2"
+                  : "grid-cols-3"
+              }`}
+            >
+              {availableMethods.map(
+                (m) => {
+                  const meta = METHOD_META[m];
                   const active = method === m;
                   return (
                     <button
@@ -433,6 +554,54 @@ export function BillingPage() {
 
           {/* Confirm button */}
           <div className="border-t border-outline-variant px-lg py-md">
+            {payError && (
+              <div
+                role="alert"
+                className="mb-sm flex items-start gap-xs rounded-lg bg-error-container px-md py-sm font-body-md text-body-md text-on-error-container"
+              >
+                <Icon name="error" size={18} fill className="mt-[1px] shrink-0" />
+                <span>
+                  {payError}{" "}
+                  <span className="font-semibold">The table is still open.</span>
+                </span>
+              </div>
+            )}
+            {canPrintBill && (
+              <>
+                {billPrintResult && !billPrintResult.ok && (
+                  <div
+                    role="alert"
+                    className="mb-sm flex items-start gap-xs rounded-lg bg-error-container px-md py-sm font-body-md text-body-md text-on-error-container"
+                  >
+                    <Icon name="print_disabled" size={18} fill className="mt-[1px] shrink-0" />
+                    <span>{billPrintResult.message}</span>
+                  </div>
+                )}
+                {billPrintResult?.ok && (
+                  <p className="mb-sm flex items-center gap-xs font-body-md text-body-md text-on-surface-variant">
+                    <Icon name="check_circle" size={16} fill className="shrink-0 text-[#2e7d32]" />
+                    Bill printed
+                    {upiOnBill && " — the guest can scan the UPI QR to pay"}
+                  </p>
+                )}
+                <button
+                  onClick={printBill}
+                  disabled={printingBill || paying}
+                  className="mb-sm flex w-full items-center justify-center gap-sm rounded-full border border-primary bg-transparent py-sm font-label-md text-label-md text-primary transition-colors hover:bg-primary/5 disabled:opacity-50"
+                >
+                  <Icon
+                    name={printingBill ? "progress_activity" : upiOnBill ? "qr_code_2" : "print"}
+                    size={18}
+                    className={printingBill ? "ag-spin" : ""}
+                  />
+                  {printingBill
+                    ? "Printing…"
+                    : upiOnBill
+                    ? "Print Bill with UPI QR"
+                    : "Print Bill"}
+                </button>
+              </>
+            )}
             <button
               onClick={complete}
               disabled={paying}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { AuthUser, TenantOption } from "@amber/domain";
 import { Icon } from "../components/Icon";
+import { InstallAppButton } from "../components/InstallAppButton";
 import { useAuth } from "../context/AuthContext";
 import { homeRouteFor } from "../lib/nav";
 
@@ -201,6 +202,9 @@ export function LoginPage() {
         </form>
         )}
 
+        {/* Hidden unless the browser can actually install (secure context) or
+            we're on iOS, where it explains the manual Share flow instead. */}
+        <InstallAppButton />
       </div>
     </div>
   );

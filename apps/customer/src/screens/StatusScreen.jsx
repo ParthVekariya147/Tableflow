@@ -20,10 +20,10 @@ function StatusPill({ status, stage }) {
       isActive ? cfg.color : isDone ? "bg-surface-container text-on-surface-variant/60" : "border border-outline-variant/30 text-outline/40"
     }`}>
       {isActive && cfg.pulse && <div className="pulse-ring" />}
-      <span className="material-symbols-outlined text-[18px] relative z-10" style={{ fontVariationSettings: "'FILL' 1" }}>
+      <span className="material-symbols-outlined text-[1.125rem] relative z-10" style={{ fontVariationSettings: "'FILL' 1" }}>
         {cfg.icon}
       </span>
-      <span className="text-[10px] font-bold relative z-10">{cfg.label}</span>
+      <span className="text-[0.625rem] font-bold relative z-10">{cfg.label}</span>
     </div>
   );
 }
@@ -43,16 +43,16 @@ function RoundCard({ round }) {
       {/* Round header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-surface-container">
         <div className="flex items-center gap-2">
-          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold ${allServed ? "bg-green-100 text-green-700" : "bg-primary-container text-on-primary-container"}`}>
+          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-bold ${allServed ? "bg-green-100 text-green-700" : "bg-primary-container text-on-primary-container"}`}>
             {allServed
-              ? <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-              : <span className="material-symbols-outlined text-[14px]">receipt</span>
+              ? <span className="material-symbols-outlined text-[0.875rem]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+              : <span className="material-symbols-outlined text-[0.875rem]">receipt</span>
             }
           </div>
-          <span className="text-[13px] font-semibold text-on-surface-variant uppercase tracking-wide">{label} · {time}</span>
+          <span className="text-[0.8125rem] font-semibold text-on-surface-variant uppercase tracking-wide">{label} · {time}</span>
         </div>
         {allServed && (
-          <span className="text-[11px] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">All served ✓</span>
+          <span className="text-[0.6875rem] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">All served ✓</span>
         )}
       </div>
 
@@ -62,22 +62,22 @@ function RoundCard({ round }) {
           const cancelled = item.status === "cancelled";
           return (
             <div key={item.lineKey ?? item.id} className={`p-4 ${cancelled ? "opacity-70" : ""}`}>
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <h4 className={`font-bold text-[15px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{item.name}</h4>
+              <div className="flex justify-between items-start gap-3 mb-3">
+                <div className="min-w-0 flex-1">
+                  <h4 className={`font-bold text-[0.9375rem] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{item.name}</h4>
                   {item.modifiers?.length > 0 && (
-                    <p className={`text-[11px] text-on-surface-variant ${cancelled ? "line-through" : ""}`}>
+                    <p className={`text-[0.6875rem] text-on-surface-variant ${cancelled ? "line-through" : ""}`}>
                       {item.modifiers.map((m) => (m.textValue ? `“${m.textValue}”` : m.name)).join(", ")}
                     </p>
                   )}
-                  <p className="text-[12px] text-on-surface-variant">Qty {item.qty}</p>
+                  <p className="text-[0.75rem] text-on-surface-variant">Qty {item.qty}</p>
                 </div>
-                <span className={`font-bold text-[14px] ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{money(item.price * item.qty)}</span>
+                <span className={`font-bold text-[0.875rem] flex-shrink-0 tabular-nums ${cancelled ? "text-on-surface-variant line-through" : "text-on-surface"}`}>{money(item.price * item.qty)}</span>
               </div>
               {cancelled ? (
                 <div className="flex items-center justify-center gap-1.5 rounded-xl bg-red-50 py-2.5 text-red-700">
-                  <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
-                  <span className="text-[11px] font-bold uppercase tracking-wide">Cancelled by restaurant</span>
+                  <span className="material-symbols-outlined text-[1rem]" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
+                  <span className="text-[0.6875rem] font-bold uppercase tracking-wide">Cancelled by restaurant</span>
                 </div>
               ) : (
                 <div className="flex gap-2">
@@ -110,29 +110,29 @@ export default function StatusScreen() {
 
       <main className="px-5 py-4 max-w-lg mx-auto">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-[22px] font-bold text-on-surface font-serif">Order Status</h2>
+          <h2 className="text-[1.375rem] font-bold text-on-surface font-serif">Order Status</h2>
           <div className="flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded-full">
             <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-            <span className="text-[11px] font-semibold text-on-surface-variant">Live</span>
+            <span className="text-[0.6875rem] font-semibold text-on-surface-variant">Live</span>
           </div>
         </div>
 
         {rounds.length > 0 && (
           <div className="mb-5 flex items-center justify-between bg-surface-container-lowest rounded-2xl px-4 py-3 shadow-[0px_2px_12px_rgba(26,26,26,0.04)]">
-            <span className="text-[13px] text-on-surface-variant flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-[18px] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>room_service</span>
+            <span className="text-[0.8125rem] text-on-surface-variant flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-[1.125rem] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>room_service</span>
               Served so far
             </span>
-            <span className="text-[16px] font-bold text-on-surface">{money(servedTotal)}</span>
+            <span className="text-[1rem] font-bold text-on-surface">{money(servedTotal)}</span>
           </div>
         )}
 
         {rounds.length === 0 ? (
           <div className="flex flex-col items-center justify-center pt-16 text-center gap-4">
             <div className="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center">
-              <span className="material-symbols-outlined text-[32px] text-on-surface-variant">auto_timer</span>
+              <span className="material-symbols-outlined text-[2rem] text-on-surface-variant">auto_timer</span>
             </div>
-            <p className="text-on-surface-variant text-[15px]">No orders yet.<br />Start by ordering something from the menu.</p>
+            <p className="text-on-surface-variant text-[0.9375rem]">No orders yet.<br />Start by ordering something from the menu.</p>
           </div>
         ) : (
           <div className="flex flex-col gap-4">

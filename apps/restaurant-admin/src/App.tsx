@@ -263,7 +263,7 @@ export default function App() {
           <Route
             path="/loyalty"
             element={
-              <RequirePermission permission="loyalty.manage">
+              <RequirePermission permission="loyalty.manage" module="loyalty">
                 <LoyaltyPage />
               </RequirePermission>
             }

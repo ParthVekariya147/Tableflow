@@ -22,19 +22,22 @@ export default {
   ],
   theme: {
     extend: {
+      // Spacing/type are in REM (not px) on purpose: index.css scales the root
+      // font-size down on small screens, so every font, padding and button
+      // shrinks proportionally on mobile without per-page overrides.
       spacing: {
-        base: "4px",
-        xs: "8px",
-        sm: "12px",
-        md: "16px",
-        lg: "24px",
-        xl: "32px",
-        xxl: "48px",
-        gutter: "24px",
+        base: "0.25rem",
+        xs: "0.5rem",
+        sm: "0.75rem",
+        md: "1rem",
+        lg: "1.5rem",
+        xl: "2rem",
+        xxl: "3rem",
+        gutter: "1.5rem",
         "container-max": "1440px",
       },
       borderRadius: {
-        card: "16px",
+        card: "1rem",
         "2xl": "1rem",
       },
       boxShadow: {
@@ -52,15 +55,15 @@ export default {
         "data-mono": ["var(--ag-font-sans)", "Plus Jakarta Sans", "sans-serif"],
       },
       fontSize: {
-        "display-lg": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
-        "headline-lg": ["32px", { lineHeight: "40px", fontWeight: "600" }],
-        "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
-        "title-lg": ["20px", { lineHeight: "28px", fontWeight: "600" }],
-        "title-md": ["16px", { lineHeight: "22px", fontWeight: "600" }],
-        "body-lg": ["16px", { lineHeight: "24px", fontWeight: "400" }],
-        "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }],
-        "label-md": ["12px", { lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "600" }],
-        "data-mono": ["14px", { lineHeight: "20px", fontWeight: "500" }],
+        "display-lg": ["3rem", { lineHeight: "3.5rem", letterSpacing: "-0.02em", fontWeight: "700" }],
+        "headline-lg": ["2rem", { lineHeight: "2.5rem", fontWeight: "600" }],
+        "headline-md": ["1.5rem", { lineHeight: "2rem", fontWeight: "600" }],
+        "title-lg": ["1.25rem", { lineHeight: "1.75rem", fontWeight: "600" }],
+        "title-md": ["1rem", { lineHeight: "1.375rem", fontWeight: "600" }],
+        "body-lg": ["1rem", { lineHeight: "1.5rem", fontWeight: "400" }],
+        "body-md": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "400" }],
+        "label-md": ["0.75rem", { lineHeight: "1rem", letterSpacing: "0.05em", fontWeight: "600" }],
+        "data-mono": ["0.875rem", { lineHeight: "1.25rem", fontWeight: "500" }],
       },
     },
   },

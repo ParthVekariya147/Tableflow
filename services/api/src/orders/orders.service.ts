@@ -21,6 +21,7 @@ import {
   pointsForSpend,
   redemptionValueMinor,
   maxRedeemablePoints,
+  isLoyaltyEnabled,
 } from "@amber/domain";
 import { Prisma, type Payment as PrismaPayment } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -34,6 +35,7 @@ import type {
   AddItemDto,
   UpdateItemDto,
   CapturePaymentDto,
+  QuickSaleDto,
   ReclaimSessionDto,
   RedeemLoyaltyPointsDto,
 } from "./orders.dto.js";
@@ -157,7 +159,7 @@ export class OrdersService {
     // enabled and a phone was captured, find-or-create the tenant+phone
     // account so points accrue across visits. Never blocks session creation.
     let loyaltyAccountId: string | undefined;
-    if (loyaltyProgram?.enabled && dto.customerPhone) {
+    if (isLoyaltyEnabled(loyaltyProgram) && dto.customerPhone) {
       const account = await this.prisma.loyaltyAccount.upsert({
         where: { tenantId_phone: { tenantId, phone: dto.customerPhone } },
         update: dto.customerName ? { name: dto.customerName } : {},
@@ -399,6 +401,17 @@ export class OrdersService {
       );
     if (!order.loyaltyAccountId)
       throw new BadRequestException("This order has no linked loyalty account.");
+
+    // The module switch is a server-side guard on the money path, not just a
+    // UI preference: a stale Billing tab open from before an admin switched
+    // loyalty off must not be able to discount a live bill. Clearing an
+    // already-applied redemption (points === 0) stays allowed either way —
+    // it only ever puts money BACK on the bill, and blocking it would strand
+    // a discount that can no longer be removed.
+    if (dto.points !== 0 && !isLoyaltyEnabled(program))
+      throw new BadRequestException(
+        "The loyalty program is turned off for this restaurant.",
+      );
 
     if (dto.points === 0) {
       await this.prisma.order.update({
@@ -702,7 +715,7 @@ export class OrdersService {
     const tip = dto.tip;
     const total = discountedSubtotal + tax + tip;
     const pointsEarned =
-      loyaltyProgram?.enabled && order.loyaltyAccountId
+      isLoyaltyEnabled(loyaltyProgram) && order.loyaltyAccountId
         ? pointsForSpend(discountedSubtotal, loyaltyProgram)
         : 0;
 
@@ -748,7 +761,7 @@ export class OrdersService {
         // touching the same account), then the ledger rows in parallel. Was
         // up to 5 sequential round-trips (read, write, insert, write, insert);
         // now 3.
-        if (order.loyaltyAccountId && loyaltyProgram?.enabled && (redeemPoints > 0 || pointsEarned > 0)) {
+        if (order.loyaltyAccountId && isLoyaltyEnabled(loyaltyProgram) && (redeemPoints > 0 || pointsEarned > 0)) {
           const account = await tx.loyaltyAccount.findUniqueOrThrow({
             where: { id: order.loyaltyAccountId },
           });
@@ -825,6 +838,186 @@ export class OrdersService {
     };
     this.events.emit(tenantId, { type: "closed", orderId, order: closed });
     return toDomainPayment(payment);
+  }
+
+  /**
+   * Atomic counter checkout (Quick Sale, staff-only). One transaction writes
+   * the order (born `paid` — it is never live), its single round of items and
+   * the captured payment. That shape is what lets many devices ring up counter
+   * sales at once against the one shared virtual counter table: because no
+   * quick-sale order ever exists in `open`/`billed`, the single-occupancy
+   * guard has nothing to collide with, no partially-saved session can leak to
+   * another device's Quick Sale screen, and a client that dies mid-request
+   * leaves either a complete sale or nothing (its local draft covers retry).
+   * Items and modifiers are re-priced from the DB, not the client numbers.
+   */
+  async quickSale(
+    tenantId: string,
+    taxRate: number,
+    dto: QuickSaleDto,
+  ): Promise<{ order: Order; payment: Payment }> {
+    // Idempotency fast path: if this cart's key already produced a sale, return
+    // THAT sale rather than charging again. This is what makes a retry after a
+    // lost response safe — the till cannot tell "never charged" from "charged,
+    // reply lost", so it must be safe to just ask again.
+    if (dto.clientRequestId) {
+      const replay = await this.findByClientRequestId(
+        tenantId,
+        dto.clientRequestId,
+      );
+      if (replay) return replay;
+    }
+
+    // Same find-or-create as TablesService.getOrCreateCounter, inlined to keep
+    // the sale free of a cross-module dependency (only the id is needed).
+    const [counter, menuItems] = await Promise.all([
+      this.prisma.table.findFirst({
+        where: { tenantId, isCounter: true },
+        select: { id: true },
+      }),
+      this.prisma.menuItem.findMany({
+        where: { id: { in: [...new Set(dto.items.map((i) => i.menuItemId))] }, tenantId },
+        include: { modifierGroups: { include: { options: true } } },
+      }),
+    ]);
+    const menuItemById = new Map(menuItems.map((m) => [m.id, m]));
+
+    const orderId = randomUUID();
+    const roundId = randomUUID();
+    const itemRows: Prisma.OrderItemCreateManyInput[] = [];
+    const modifierRows: Prisma.OrderItemModifierCreateManyInput[] = [];
+    let subtotal = 0;
+    for (const i of dto.items) {
+      const menuItem = menuItemById.get(i.menuItemId) ?? null;
+      // Price from the DB when the item still exists; the client snapshot is
+      // only the fallback for an item deleted since it was added to the cart.
+      const unitPrice = menuItem?.price ?? i.unitPrice;
+      const itemId = randomUUID();
+      let modifierDelta = 0;
+      for (const m of this.resolveItemModifiers(tenantId, menuItem, i.modifiers ?? [])) {
+        modifierRows.push({ ...m, id: randomUUID(), orderItemId: itemId });
+        modifierDelta += m.priceDelta;
+      }
+      itemRows.push({
+        id: itemId,
+        tenantId,
+        roundId,
+        menuItemId: menuItem ? i.menuItemId : null,
+        name: menuItem?.name ?? i.name,
+        unitPrice,
+        qty: i.qty,
+        notes: i.notes,
+      });
+      subtotal += (unitPrice + modifierDelta) * i.qty;
+    }
+
+    const tax = Math.round(subtotal * taxRate);
+    const tip = dto.payment.tip;
+    const total = subtotal + tax + tip;
+    const now = new Date();
+
+    let created: { order: Order; payment: PrismaPayment };
+    try {
+      created = await this.prisma.$transaction(async (tx) => {
+      let tableId = counter?.id;
+      if (!tableId) {
+        const created = await tx.table.create({
+          data: {
+            tenantId,
+            label: "Counter Sale",
+            qrToken: randomUUID(),
+            isCounter: true,
+          },
+          select: { id: true },
+        });
+        tableId = created.id;
+      }
+      await tx.order.create({
+        data: {
+          id: orderId,
+          tenantId,
+          tableId,
+          status: "paid",
+          closedAt: now,
+          clientRequestId: dto.clientRequestId,
+        },
+      });
+      await tx.round.create({
+        data: { id: roundId, tenantId, orderId, type: "bundled" },
+      });
+      if (itemRows.length) await tx.orderItem.createMany({ data: itemRows });
+      if (modifierRows.length)
+        await tx.orderItemModifier.createMany({ data: modifierRows });
+      const p = await tx.payment.create({
+        data: {
+          tenantId,
+          orderId,
+          method: dto.payment.method,
+          subtotal,
+          tax,
+          tip,
+          total,
+          tendered: dto.payment.tendered,
+        },
+      });
+      // Reload inside the transaction — doubles as the emit payload.
+      const row = await tx.order.findFirst({
+        where: { id: orderId, tenantId },
+        include: ROUND_INCLUDE,
+      });
+      if (!row) throw new NotFoundException(`Order not found: ${orderId}`);
+      return { order: toDomainOrder(row), payment: p };
+      });
+    } catch (err) {
+      // Two retries of the same cart racing each other (double-tap, or a retry
+      // landing while the first request is still committing) both pass the
+      // fast-path check above; the unique index on clientRequestId is the real
+      // tiebreaker. The loser resolves to the winner's sale instead of erroring
+      // — still exactly one charge.
+      if (
+        dto.clientRequestId &&
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        const replay = await this.findByClientRequestId(
+          tenantId,
+          dto.clientRequestId,
+        );
+        if (replay) return replay;
+      }
+      throw err;
+    }
+
+    // `closed` (not `created`) — the sale enters the world already settled, so
+    // subscribers only ever need the "session done, refresh sales" reaction.
+    this.events.emit(tenantId, { type: "closed", orderId, order: created.order });
+    return {
+      order: created.order,
+      payment: toDomainPayment(created.payment),
+    };
+  }
+
+  /**
+   * Resolve a previously-recorded Quick Sale from its idempotency key. Returns
+   * null when the key has never been used, so the caller creates the sale.
+   * Only ever returns a sale that actually has a Payment row — an order without
+   * one was never a completed charge and must not be replayed as if it were.
+   */
+  private async findByClientRequestId(
+    tenantId: string,
+    clientRequestId: string,
+  ): Promise<{ order: Order; payment: Payment } | null> {
+    const row = await this.prisma.order.findFirst({
+      relationLoadStrategy: "join",
+      where: { tenantId, clientRequestId },
+      include: ROUND_INCLUDE,
+    });
+    if (!row) return null;
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId: row.id, tenantId },
+    });
+    if (!payment) return null;
+    return { order: toDomainOrder(row), payment: toDomainPayment(payment) };
   }
 
   /**

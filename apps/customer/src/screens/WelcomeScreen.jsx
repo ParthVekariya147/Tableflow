@@ -24,37 +24,41 @@ const SWATCH_CLASSES = {
 function ItemCard({ item, onBringIt, onAdd, added, money }) {
   return (
     <div
-      className={`min-w-[155px] max-w-[155px] flex-shrink-0 rounded-3xl bg-surface-container-lowest shadow-[0px_2px_16px_rgba(26,26,26,0.07)] overflow-hidden transition-all active:scale-[0.97] ${
+      className={`w-[11.25rem] flex-shrink-0 rounded-3xl bg-surface-container-lowest shadow-[0px_2px_16px_rgba(26,26,26,0.07)] overflow-hidden transition-all active:scale-[0.97] ${
         added ? "ring-2 ring-primary" : ""
       }`}
     >
-      <div className="relative h-[100px] overflow-hidden">
+      <div className="relative h-[6.25rem] overflow-hidden">
         <FoodImage item={item} className="w-full h-full object-cover" />
         {item.badge && (
-          <span className="absolute top-2 left-2 bg-secondary-container/90 text-on-secondary-container text-[10px] px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">
+          <span className="absolute top-2 left-2 bg-secondary-container/90 text-on-secondary-container text-[0.625rem] px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm">
             {item.badge}
           </span>
         )}
       </div>
       <div className="p-3 flex flex-col gap-2">
         <div>
-          <p className="text-[13px] font-semibold text-on-surface line-clamp-1 leading-tight">
+          <p className="text-[0.8125rem] font-semibold text-on-surface line-clamp-1 leading-tight">
             {item.name}
           </p>
-          <p className="text-[13px] font-bold text-primary mt-0.5">
+          <p className="text-[0.8125rem] font-bold text-primary mt-0.5">
             {item.price === 0 ? "Free" : money(item.price)}
           </p>
         </div>
+        {/* `tap-target` holds these at a finger-sized 44px regardless of how
+            far the root font-size scales down — they were 61x34px before,
+            well under the WCAG 2.5.5 / HIG minimum. `whitespace-nowrap` keeps
+            "Bring it" on one line in the narrow carousel card. */}
         <div className="flex gap-1.5">
           <button
             onClick={() => onBringIt(item)}
-            className="flex-1 bg-primary text-on-primary text-[11px] font-bold py-2 rounded-full active:scale-95 transition-transform"
+            className="tap-target flex-1 min-w-0 whitespace-nowrap px-1 bg-primary text-on-primary text-[0.6875rem] font-bold rounded-full active:scale-95 transition-transform"
           >
             Bring it
           </button>
           <button
             onClick={() => onAdd(item)}
-            className={`flex-1 text-[11px] font-bold py-2 rounded-full border active:scale-95 transition-transform ${
+            className={`tap-target flex-1 min-w-0 whitespace-nowrap px-1 text-[0.6875rem] font-bold rounded-full border active:scale-95 transition-transform ${
               added
                 ? "bg-primary-container border-primary text-on-primary-container"
                 : "border-outline-variant text-on-surface-variant"
@@ -76,31 +80,33 @@ function QuickCard({ action, onTap, sent }) {
   return (
     <button
       onClick={() => onTap(action)}
-      className={`flex-1 min-w-0 flex flex-col items-center gap-2 py-4 px-2 rounded-3xl border transition-all active:scale-[0.96] ${
+      className={`min-w-0 flex flex-col items-center gap-2 py-4 px-1.5 rounded-3xl border transition-all active:scale-[0.96] ${
         sent
           ? "bg-primary-container border-primary"
           : "bg-surface-container-lowest border-outline-variant shadow-[0px_2px_12px_rgba(26,26,26,0.05)]"
       }`}
     >
       <div
-        className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br ${SWATCH_CLASSES[action.swatch] ?? SWATCH_CLASSES.neutral}`}
+        className={`w-12 h-12 flex-shrink-0 rounded-2xl flex items-center justify-center bg-gradient-to-br ${SWATCH_CLASSES[action.swatch] ?? SWATCH_CLASSES.neutral}`}
       >
         <span
-          className={`material-symbols-outlined text-[24px] drop-shadow-sm ${neutral ? "text-stone-500" : "text-white"}`}
+          className={`material-symbols-outlined text-[1.5rem] drop-shadow-sm ${neutral ? "text-stone-500" : "text-white"}`}
           style={{ fontVariationSettings: "'FILL' 1" }}
         >
           {sent ? "check_circle" : action.icon}
         </span>
       </div>
-      <div className="text-center">
+      {/* Tenant-authored labels are free text, so they must be allowed to
+          wrap rather than widen the card. */}
+      <div className="text-center min-w-0 w-full">
         <p
-          className={`text-[12px] font-bold leading-tight ${
+          className={`text-[0.75rem] font-bold leading-tight ${
             sent ? "text-primary" : "text-on-surface"
           }`}
         >
           {action.label}
         </p>
-        <p className="text-[10px] text-on-surface-variant leading-tight mt-0.5">
+        <p className="text-[0.625rem] text-on-surface-variant leading-tight mt-0.5 line-clamp-2">
           {sent ? "Sent ✓" : action.sublabel}
         </p>
       </div>
@@ -182,18 +188,18 @@ export default function WelcomeScreen() {
       <header className="px-5 pt-10 pb-5 text-center">
         <div className="inline-flex items-center gap-1.5 bg-primary-container/40 text-on-primary-container px-4 py-1.5 rounded-full mb-3">
           <span
-            className="material-symbols-outlined text-[14px]"
+            className="material-symbols-outlined text-[0.875rem]"
             style={{ fontVariationSettings: "'FILL' 1" }}
           >
             table_restaurant
           </span>
-          <span className="font-semibold text-[13px]">Table {tableNumber}</span>
+          <span className="font-semibold text-[0.8125rem]">Table {tableNumber}</span>
         </div>
-        <h1 className="text-[28px] font-bold text-on-surface font-serif leading-tight">
+        <h1 className="text-[1.75rem] font-bold text-on-surface font-serif leading-tight">
           Welcome to{" "}
           <span className="text-primary">{tenant?.name ?? "our restaurant"}</span>
         </h1>
-        <p className="text-on-surface-variant text-[14px] mt-1">
+        <p className="text-on-surface-variant text-[0.875rem] mt-1">
           What can we get started for you?
         </p>
       </header>
@@ -202,10 +208,14 @@ export default function WelcomeScreen() {
 
         {/* ── Quick Actions ──────────────────────────────────────────────── */}
         <section>
-          <p className="text-[11px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+          <p className="text-[0.6875rem] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
             Quick actions
           </p>
-          <div className="flex gap-3">
+          {/* A grid, not a single flex row: a tenant can enable up to 8
+              actions (4 built-in + MAX_CUSTOM_QUICK_ACTIONS), which as
+              flex-1 siblings squeezed each card to ~19px on a small phone.
+              Four per row wraps instead, and keeps every card the same size. */}
+          <div className="grid grid-cols-4 gap-2 sm:gap-3">
             {quickActions.map((action) => (
               <QuickCard
                 key={action.id}
@@ -221,7 +231,7 @@ export default function WelcomeScreen() {
         {sections.map((section) =>
           section.items.length === 0 ? null : (
             <section key={section.title}>
-              <h2 className="text-[15px] font-semibold text-on-surface mb-3 flex items-center gap-2">
+              <h2 className="text-[0.9375rem] font-semibold text-on-surface mb-3 flex items-center gap-2">
                 <span>{section.emoji}</span>
                 {section.title}
               </h2>
@@ -243,21 +253,21 @@ export default function WelcomeScreen() {
 
         {/* ── My Order banner ─────────────────────────────────────────────── */}
         {myOrderCount > 0 && (
-          <div className="bg-primary-container/30 border border-primary/20 rounded-2xl p-4 flex justify-between items-center fade-in">
-            <div>
-              <p className="text-[13px] font-semibold text-on-primary-container">
+          <div className="bg-primary-container/30 border border-primary/20 rounded-2xl p-4 flex justify-between items-center gap-3 fade-in">
+            <div className="min-w-0 flex-1">
+              <p className="text-[0.8125rem] font-semibold text-on-primary-container truncate">
                 My Order · {myOrderCount} item{myOrderCount !== 1 ? "s" : ""}
               </p>
-              <p className="text-[11px] text-on-surface-variant">
+              <p className="text-[0.6875rem] text-on-surface-variant truncate">
                 Added · send when ready
               </p>
             </div>
             <button
               onClick={() => navigate("/order")}
-              className="bg-primary text-on-primary text-[12px] font-bold px-4 py-2 rounded-full active:scale-95 transition-transform flex items-center gap-1"
+              className="tap-target-sm flex-shrink-0 bg-primary text-on-primary text-[0.75rem] font-bold px-4 py-2 rounded-full active:scale-95 transition-transform flex items-center gap-1 whitespace-nowrap"
             >
               View
-              <span className="material-symbols-outlined text-[14px]">
+              <span className="material-symbols-outlined text-[0.875rem]">
                 arrow_forward
               </span>
             </button>
@@ -268,10 +278,10 @@ export default function WelcomeScreen() {
         <div className="text-center pb-4">
           <button
             onClick={() => navigate("/menu")}
-            className="text-primary/60 font-semibold inline-flex items-center gap-1.5 hover:text-primary transition-colors text-[14px]"
+            className="tap-target text-primary/60 font-semibold inline-flex items-center justify-center gap-1.5 px-4 hover:text-primary transition-colors text-[0.875rem]"
           >
             Skip, take me to the full menu
-            <span className="material-symbols-outlined text-[16px]">
+            <span className="material-symbols-outlined text-[1rem]">
               arrow_forward
             </span>
           </button>

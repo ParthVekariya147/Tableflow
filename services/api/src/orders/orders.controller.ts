@@ -55,6 +55,7 @@ import {
   addItemSchema,
   updateItemSchema,
   capturePaymentSchema,
+  quickSaleSchema,
   reclaimSessionSchema,
   redeemLoyaltyPointsSchema,
 } from "./orders.dto.js";
@@ -274,6 +275,23 @@ export class OrdersController {
       tenant.id,
       reclaimSessionSchema.parse(body),
       deviceId,
+    );
+  }
+
+  /** Staff-only: atomic Quick Sale (counter) checkout — order + items + payment
+   *  recorded in one call, so the client's device-local cart either becomes a
+   *  complete sale or stays local for retry. Declared before ":id" routes. */
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermission("tables.manage")
+  @Post("quick-sale")
+  quickSale(
+    @CurrentTenant() tenant: Tenant,
+    @Body() body: unknown,
+  ): Promise<{ order: Order; payment: Payment }> {
+    return this.orders.quickSale(
+      tenant.id,
+      tenant.taxRate,
+      quickSaleSchema.parse(body),
     );
   }
 

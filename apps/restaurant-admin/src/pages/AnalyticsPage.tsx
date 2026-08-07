@@ -119,13 +119,13 @@ export function AnalyticsPage() {
             Real-time financial and operational metrics.
           </p>
         </div>
-        <div className="flex items-center gap-md self-start">
+        <div className="flex flex-wrap items-center gap-sm self-start md:gap-md">
           <div className="flex rounded-full border border-outline-variant bg-surface-container-highest p-base shadow-sm">
             {RANGES.map((r) => (
               <button
                 key={r.key}
                 onClick={() => setRange(r.key)}
-                className={`flex items-center gap-xs rounded-full px-lg py-xs font-label-md text-label-md uppercase tracking-wide transition-colors ${
+                className={`flex items-center gap-xs rounded-full px-sm py-xs font-label-md text-label-md uppercase tracking-wide transition-colors md:px-lg ${
                   range === r.key ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-primary"
                 }`}
               >

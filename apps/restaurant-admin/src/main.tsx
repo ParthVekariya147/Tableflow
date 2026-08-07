@@ -12,6 +12,11 @@ import { AdminStoreProvider } from "./store/AdminStore";
 import { AuthProvider } from "./context/AuthContext";
 import { TenantThemeGate } from "./context/TenantThemeGate";
 import { ServiceRequestsProvider } from "./notifications/useServiceRequests";
+import { registerServiceWorker } from "./lib/pwa";
+
+// Makes the panel installable + gives it an offline app shell (production
+// builds only — see lib/pwa.ts).
+registerServiceWorker();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

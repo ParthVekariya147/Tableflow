@@ -28,15 +28,15 @@ export default function SessionEndScreen() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center gap-5 fade-in">
         <div className="w-20 h-20 rounded-full bg-surface-container flex items-center justify-center">
-          <span className="material-symbols-outlined text-[40px] text-on-surface-variant" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
+          <span className="material-symbols-outlined text-[2.5rem] text-on-surface-variant" style={{ fontVariationSettings: "'FILL' 1" }}>cancel</span>
         </div>
-        <h2 className="text-[26px] font-bold text-on-surface font-serif">Order cancelled</h2>
-        <p className="text-on-surface-variant text-[15px] max-w-xs">
+        <h2 className="text-[1.625rem] font-bold text-on-surface font-serif">Order cancelled</h2>
+        <p className="text-on-surface-variant text-[0.9375rem] max-w-xs">
           This order was cancelled by the restaurant, so no payment is due. If
           that’s unexpected, please ask a staff member — or scan the QR code
           again to start a new order.
         </p>
-        <p className="text-[12px] text-on-surface-variant/70">Table {tableNumber}</p>
+        <p className="text-[0.75rem] text-on-surface-variant/70">Table {tableNumber}</p>
       </div>
     );
   }
@@ -48,27 +48,27 @@ export default function SessionEndScreen() {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center gap-5 fade-in">
         <div className={`w-20 h-20 rounded-full flex items-center justify-center ${isUpi ? "bg-green-100" : "bg-primary-container"}`}>
           <span
-            className={`material-symbols-outlined text-[40px] ${isUpi ? "text-green-700" : "text-on-primary-container"}`}
+            className={`material-symbols-outlined text-[2.5rem] ${isUpi ? "text-green-700" : "text-on-primary-container"}`}
             style={{ fontVariationSettings: "'FILL' 1" }}
           >
             {isUpi ? "qr_code_2" : "payments"}
           </span>
         </div>
-        <h2 className="text-[26px] font-bold text-on-surface font-serif">
+        <h2 className="text-[1.625rem] font-bold text-on-surface font-serif">
           {isUpi ? "UPI Payment Sent!" : "Please pay at the counter"}
         </h2>
         <div className="bg-surface-container-lowest rounded-2xl p-5 w-full max-w-sm shadow-sm">
-          <p className="text-[12px] text-on-surface-variant mb-1">
+          <p className="text-[0.75rem] text-on-surface-variant mb-1">
             {isUpi ? "Amount sent" : "Amount due"}
           </p>
-          <p className="text-[32px] font-bold text-primary">{money(grandTotal)}</p>
-          <p className="text-[12px] text-on-surface-variant mt-1">Table {tableNumber}</p>
+          <p className="text-[2rem] font-bold text-primary">{money(grandTotal)}</p>
+          <p className="text-[0.75rem] text-on-surface-variant mt-1">Table {tableNumber}</p>
         </div>
-        <div className="flex items-center gap-2 text-on-surface-variant text-[14px]">
-          <span className="material-symbols-outlined text-[18px] animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
+        <div className="flex items-center gap-2 text-on-surface-variant text-[0.875rem]">
+          <span className="material-symbols-outlined text-[1.125rem] animate-spin" style={{ animationDuration: "2s" }}>progress_activity</span>
           {isUpi ? "Staff are verifying your UPI receipt…" : "Waiting for staff to confirm your payment…"}
         </div>
-        <p className="text-[12px] text-on-surface-variant/70 max-w-xs">
+        <p className="text-[0.75rem] text-on-surface-variant/70 max-w-xs">
           {isUpi
             ? "Your session stays open until our team confirms receipt. This screen updates automatically."
             : "Your session stays open until our team collects the cash. This screen updates automatically."}
@@ -81,17 +81,17 @@ export default function SessionEndScreen() {
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center gap-5 fade-in">
       <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-        <span className="material-symbols-outlined text-[40px] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+        <span className="material-symbols-outlined text-[2.5rem] text-green-700" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
       </div>
-      <h2 className="text-[28px] font-bold text-on-surface font-serif">Thanks for visiting!</h2>
-      <p className="text-on-surface-variant text-[15px]">
+      <h2 className="text-[1.75rem] font-bold text-on-surface font-serif">Thanks for visiting!</h2>
+      <p className="text-on-surface-variant text-[0.9375rem]">
         {paidMethod === "cash" ? "Paid at the counter — thank you!" : paidMethod === "upi" ? "UPI payment confirmed — thank you!" : "Payment confirmed online."}<br />
         Hope to see you again soon ☕
       </p>
       <div className="bg-surface-container-lowest rounded-2xl p-5 w-full max-w-sm shadow-sm">
-        <p className="text-[12px] text-on-surface-variant mb-1">Total paid</p>
-        <p className="text-[32px] font-bold text-primary">{money(grandTotal)}</p>
-        <p className="text-[12px] text-on-surface-variant mt-1">Table {tableNumber} · Session started {startTime}</p>
+        <p className="text-[0.75rem] text-on-surface-variant mb-1">Total paid</p>
+        <p className="text-[2rem] font-bold text-primary">{money(grandTotal)}</p>
+        <p className="text-[0.75rem] text-on-surface-variant mt-1">Table {tableNumber} · Session started {startTime}</p>
       </div>
       {reviewLink ? (
         <a
@@ -104,14 +104,14 @@ export default function SessionEndScreen() {
             {[1, 2, 3, 4, 5].map((s) => (
               <span
                 key={s}
-                className="material-symbols-outlined text-[30px] text-secondary-fixed-dim transition-transform group-active:scale-110"
+                className="material-symbols-outlined text-[1.875rem] text-secondary-fixed-dim transition-transform group-active:scale-110"
                 style={{ fontVariationSettings: "'FILL' 1" }}
               >
                 star
               </span>
             ))}
           </div>
-          <span className="text-[13px] font-semibold text-primary underline underline-offset-2">
+          <span className="text-[0.8125rem] font-semibold text-primary underline underline-offset-2">
             Rate your experience →
           </span>
         </a>
@@ -121,14 +121,14 @@ export default function SessionEndScreen() {
             {[1, 2, 3, 4, 5].map((s) => (
               <span
                 key={s}
-                className="material-symbols-outlined text-[30px] text-secondary-fixed-dim"
+                className="material-symbols-outlined text-[1.875rem] text-secondary-fixed-dim"
                 style={{ fontVariationSettings: "'FILL' 1" }}
               >
                 star
               </span>
             ))}
           </div>
-          <p className="text-[13px] text-on-surface-variant">Rate your experience</p>
+          <p className="text-[0.8125rem] text-on-surface-variant">Rate your experience</p>
         </div>
       )}
     </div>

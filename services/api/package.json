@@ -13,6 +13,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts",
+    "menu:extend": "tsx prisma/add-menu-items.ts",
+    "images:rehost": "tsx prisma/rehost-images.ts",
+    "images:fill": "tsx prisma/fill-missing-images.ts",
     "prisma:seed:super-admin": "tsx prisma/seed-super-admin.ts"
   },
   "prisma": {
@@ -30,6 +33,7 @@
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "exceljs": "^4.4.0",
+    "express": "^4.21.2",
     "helmet": "^8.2.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

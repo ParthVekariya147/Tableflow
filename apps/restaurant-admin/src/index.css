@@ -3,6 +3,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fluid type scale: the whole design system (fonts, paddings, buttons) is
+   rem-based, so scaling the root font-size scales the entire UI with the
+   screen. ~13.2px on a 360px phone, ramping to the full 16px at ≥1050px. */
+html {
+  font-size: clamp(13px, 11.8px + 0.4vw, 16px);
+}
+
 body {
   font-family: var(--ag-font-sans);
 }

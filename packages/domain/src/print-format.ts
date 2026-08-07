@@ -1,4 +1,9 @@
-import { paperWidthToMm, type PrinterSettings } from "./printer.js";
+import {
+  paperWidthToMm,
+  printerDotsPerMm,
+  printerMarginsMm,
+  type PrinterSettings,
+} from "./printer.js";
 
 /**
  * Text-layout for printed receipts/KOTs, shared by the print agent's two
@@ -139,25 +144,27 @@ export function shouldUseTspl(settings: PrinterSettings): boolean {
   return /\btsc\b|da310/i.test(target);
 }
 
-/** 203 dpi — the near-universal thermal print head density. */
-const DOTS_PER_MM = 8;
-/** TSPL layout: side margin in dots, and TSC bitmap font "3" char width. */
-const TSPL_MARGIN_DOTS = 24;
-const TSPL_FONT_DOTS = 16;
+/** TSC bitmap font "3" char width in dots (dpi-independent — it's a bitmap,
+ *  so at 300 dpi the same 16-dot glyph simply prints physically smaller). */
+export const TSPL_FONT_DOTS = 16;
 /** Standard ESC/POS column counts for the common rolls; any other width is
  *  derived from 12-dot Font A characters at 203 dpi with ~4mm side margins. */
 const ESCPOS_COLUMNS: Record<number, number> = { 58: 32, 76: 42, 80: 48 };
 
 /**
  * Characters per printed line for this connection — the width every layout
- * helper above should be given. Depends on both the roll width and the
- * command language (TSC font 3 chars are wider than ESC/POS Font A).
+ * helper above should be given. Depends on the roll width, the command
+ * language (TSC font 3 chars are wider than ESC/POS Font A) and — for TSPL —
+ * the print head's real dpi + the configured side margins: dot math done at
+ * the wrong density prints a full-width layout in a fraction of the paper.
  */
 export function printerColumns(settings: PrinterSettings): number {
   const mm = paperWidthToMm(settings.paperWidth);
   if (shouldUseTspl(settings)) {
-    const usableDots = mm * DOTS_PER_MM - 2 * TSPL_MARGIN_DOTS;
+    const dotsPerMm = printerDotsPerMm(settings);
+    const margins = printerMarginsMm(settings);
+    const usableDots = (mm - margins.left - margins.right) * dotsPerMm;
     return Math.max(16, Math.floor(usableDots / TSPL_FONT_DOTS));
   }
-  return ESCPOS_COLUMNS[mm] ?? Math.max(24, Math.floor(((mm - 8) * DOTS_PER_MM) / 12));
+  return ESCPOS_COLUMNS[mm] ?? Math.max(24, Math.floor(((mm - 8) * 8) / 12));
 }

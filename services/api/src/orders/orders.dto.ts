@@ -100,6 +100,29 @@ export const capturePaymentSchema = z.object({
 export type CapturePaymentDto = z.infer<typeof capturePaymentSchema>;
 
 /**
+ * POST /orders/quick-sale — atomic counter checkout (staff-only). The whole
+ * sale (order + one round of items + captured payment) lands in ONE call so a
+ * device-local Quick Sale cart never has to persist a half-finished session:
+ * either everything is recorded or nothing is. Items reuse the round-item
+ * shape; payment reuses the capture shape. The server resolves the tenant's
+ * virtual counter table itself and re-prices items/modifiers from the DB.
+ */
+export const quickSaleSchema = z.object({
+  items: addRoundSchema.shape.items,
+  payment: capturePaymentSchema,
+  /**
+   * Client-generated idempotency key for this cart. Charging is a
+   * non-idempotent create, so a lost response leaves the till unable to tell
+   * "never charged" from "charged, reply lost" — retrying then bills the guest
+   * twice. With a key, a replay returns the ORIGINAL sale instead of creating
+   * a second one (enforced by a unique index on Order.clientRequestId).
+   * Optional so older clients keep working exactly as before.
+   */
+  clientRequestId: z.string().min(8).max(64).optional(),
+});
+export type QuickSaleDto = z.infer<typeof quickSaleSchema>;
+
+/**
  * POST /orders/reclaim — re-bind an existing open session to a new device when
  * the customer lost their browser state (cleared storage / new device) but the
  * table still has their live order. Phone number is the ownership proof; the

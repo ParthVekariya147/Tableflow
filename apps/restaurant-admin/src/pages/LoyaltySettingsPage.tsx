@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError } from "@amber/api-client";
 import type { LoyaltyProgram } from "@amber/domain";
 import { api } from "../lib/api";
+import { useTenantBrand } from "../context/TenantThemeGate";
 import { Icon } from "../components/Icon";
 import { Toggle } from "../components/Toggle";
 import { Spinner } from "../components/Skeleton";
@@ -25,6 +26,10 @@ const DEFAULT_PROGRAM: LoyaltyProgram = {
  */
 export function LoyaltySettingsPage() {
   const navigate = useNavigate();
+  // Same channel BrandingPage/PrinterPage use: pushing the saved tenant makes
+  // the master switch take effect everywhere at once (the sidebar's Loyalty
+  // entry appears/disappears, checkout drops the redeem panel) with no reload.
+  const { applyTenant } = useTenantBrand();
 
   const [draft, setDraft] = useState<LoyaltyProgram>(DEFAULT_PROGRAM);
   const [loading, setLoading] = useState(true);
@@ -52,6 +57,7 @@ export function LoyaltySettingsPage() {
     try {
       const updated = await withRetry(() => api.tenant.update({ loyalty: draft }));
       setDraft(updated.loyalty);
+      applyTenant(updated);
       setSavedTick((t) => t + 1);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong");

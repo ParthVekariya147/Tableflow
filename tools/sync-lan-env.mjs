@@ -61,16 +61,23 @@ function applyEnvValues(content, values) {
 }
 
 function syncApp(appDir, values) {
-  const envPath = join(root, appDir, ".env");
-  const localPath = join(root, appDir, ".env.local");
-  const target = existsSync(localPath) ? localPath : envPath;
-  const current = existsSync(target) ? readFileSync(target, "utf8") : "";
-  const updated = applyEnvValues(current, values);
-  if (updated !== current) {
-    writeFileSync(target, updated);
-    return true;
+  // Update EVERY env file that exists — Vite loads both .env and .env.local
+  // (.env.local wins), so a stale IP left in either one can leak through.
+  const paths = [join(root, appDir, ".env"), join(root, appDir, ".env.local")];
+  const existing = paths.filter((p) => existsSync(p));
+  // Nothing there yet: create .env with all the values.
+  if (existing.length === 0) existing.push(paths[0]);
+
+  let changed = false;
+  for (const target of existing) {
+    const current = existsSync(target) ? readFileSync(target, "utf8") : "";
+    const updated = applyEnvValues(current, values);
+    if (updated !== current) {
+      writeFileSync(target, updated);
+      changed = true;
+    }
   }
-  return false;
+  return changed;
 }
 
 export function syncLanEnv() {

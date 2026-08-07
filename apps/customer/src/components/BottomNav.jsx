@@ -19,7 +19,9 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl bg-surface/90 backdrop-blur-xl shadow-[0px_-4px_20px_rgba(26,26,26,0.06)] md:max-w-md md:left-1/2 md:-translate-x-1/2">
-      <div className="flex justify-around items-center px-4 py-3">
+      {/* pb-safe clears the home indicator on notched phones, where a flat
+          py-3 left the tabs sitting under the system gesture bar. */}
+      <div className="flex justify-around items-center px-2 pt-3 pb-3 pb-safe">
         {tabs.map((tab) => {
           const isActive = location.pathname === tab.path;
           const showBadge = tab.id === "order" && myOrderCount > 0;
@@ -27,24 +29,26 @@ export default function BottomNav() {
             <button
               key={tab.id}
               onClick={() => navigate(tab.path)}
-              className={`flex flex-col items-center justify-center gap-0.5 relative transition-all duration-200 min-w-[56px] ${
+              /* min-w/tap-target stay in px, not rem: a fingertip is the same
+                 size on a small phone, so this floor must not scale down. */
+              className={`flex flex-col items-center justify-center gap-0.5 relative transition-all duration-200 flex-1 min-w-0 px-1 tap-target ${
                 isActive ? "text-primary" : "text-on-surface-variant"
               }`}
             >
               <div className="relative">
                 <span
-                  className="material-symbols-outlined text-[24px] leading-none"
+                  className="material-symbols-outlined text-[1.5rem] leading-none"
                   style={{ fontVariationSettings: isActive ? "'FILL' 1" : "'FILL' 0" }}
                 >
                   {tab.icon}
                 </span>
                 {showBadge && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-on-primary rounded-full text-[10px] font-bold flex items-center justify-center">
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-on-primary rounded-full text-[0.625rem] font-bold flex items-center justify-center">
                     {myOrderCount}
                   </span>
                 )}
               </div>
-              <span className={`text-[11px] leading-none font-medium ${isActive ? "font-semibold" : ""}`}>
+              <span className={`text-[0.6875rem] leading-none font-medium truncate max-w-full ${isActive ? "font-semibold" : ""}`}>
                 {tab.label}
               </span>
             </button>

@@ -78,6 +78,8 @@ export class TenantService {
     if (input.loyalty !== undefined) data.loyalty = input.loyalty as Prisma.InputJsonValue;
     if (input.quickActions !== undefined)
       data.quickActions = input.quickActions as Prisma.InputJsonValue;
+    if (input.paymentMethods !== undefined)
+      data.paymentMethods = input.paymentMethods as Prisma.InputJsonValue;
     const row = await this.prisma.tenant.update({ where: { id: tenantId }, data });
     this.invalidateCache(row.slug);
     return toDomainTenant(row);

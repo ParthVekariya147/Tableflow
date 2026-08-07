@@ -33,6 +33,8 @@ import {
   subscriptionWithPlanSchema,
   loyaltyAccountSchema,
   loyaltyTransactionSchema,
+  connectedAgentSchema,
+  printJobResultSchema,
   type LoginResponse,
   type LoginResult,
   type AuthUser,
@@ -64,6 +66,12 @@ import {
   type UpdateSubscriptionStatusInput,
   type LoyaltyAccount,
   type LoyaltyTransaction,
+  type ConnectedAgent,
+  type PrintJobKind,
+  type PrintJobResult,
+  type PrinterSettings,
+  type Receipt,
+  type Kot,
 } from "@amber/domain";
 import { request, requestBlob, ApiError, type ApiClientConfig } from "./http.js";
 
@@ -294,6 +302,16 @@ export interface CapturePaymentInput {
   tendered?: number;
 }
 
+/** Body for the atomic Quick Sale (counter) checkout — items + payment in one
+ *  call. The server resolves the counter table and re-prices from the DB. */
+export interface QuickSaleInput {
+  items: AddRoundInput["items"];
+  payment: CapturePaymentInput;
+  /** Idempotency key for this cart — a retry after a lost response returns the
+   *  ORIGINAL sale instead of charging the customer a second time. */
+  clientRequestId?: string;
+}
+
 /**
  * A live order event from `GET /orders/stream` (SSE). `snapshot` arrives once
  * per (re)connect with the whole live floor; the rest carry a single mutated
@@ -516,6 +534,17 @@ export function createApiClient(config: ApiClientConfig) {
           schema: z.object({ url: z.string() }),
         });
       },
+      /**
+       * Import a photo from a pasted link into our own storage; returns the
+       * public URL. Prefer this over storing the pasted URL directly — a
+       * hotlink is a dependency on someone else's server and rots.
+       */
+      importImage: (url: string): Promise<{ url: string }> =>
+        request(config, "/menu/import-image", {
+          method: "POST",
+          body: { url },
+          schema: z.object({ url: z.string() }),
+        }),
       /** Add a menu item. */
       addItem: (input: CreateItemInput): Promise<MenuItem> =>
         request(config, "/menu/items", {
@@ -673,6 +702,19 @@ export function createApiClient(config: ApiClientConfig) {
         // EventSource auto-reconnects on error; the server re-sends a snapshot.
         return () => source.close();
       },
+      /**
+       * Atomic Quick Sale (counter) checkout: records order + items + payment
+       * in ONE staff-only call — the whole sale lands or nothing does, so a
+       * device-local cart is safe to keep purely client-side until it succeeds.
+       */
+      quickSale: (
+        input: QuickSaleInput,
+      ): Promise<{ order: Order; payment: Payment }> =>
+        request(config, "/orders/quick-sale", {
+          method: "POST",
+          body: input,
+          schema: z.object({ order: orderSchema, payment: paymentSchema }),
+        }),
       /** Open a new dine-in session for a table, optionally with guest contact. */
       createForTable: (
         tableId: string,
@@ -756,6 +798,38 @@ export function createApiClient(config: ApiClientConfig) {
           method: "POST",
           body: { points },
           schema: orderSchema,
+        }),
+    },
+
+    /**
+     * Print relay — submit jobs over ordinary HTTPS instead of reaching a LAN
+     * agent directly. This is the path that works from a phone, an installed
+     * PWA and iOS Safari, where an https page cannot call http://<lan-ip>.
+     */
+    print: {
+      /** Which agents are dialled in for this restaurant right now. */
+      agents: (): Promise<ConnectedAgent[]> =>
+        request(config, "/print/agents", {
+          schema: z.array(connectedAgentSchema),
+        }),
+      /** Cheap check used to decide whether relay printing is available. */
+      status: (): Promise<{ online: boolean; agents: number }> =>
+        request(config, "/print/status", {
+          schema: z.object({ online: z.boolean(), agents: z.number() }),
+        }),
+      /** Submit a job and wait for the printer's real answer. */
+      job: (input: {
+        kind: PrintJobKind;
+        connection: PrinterSettings;
+        receipt?: Receipt;
+        kot?: Kot;
+        printerId?: string;
+        agentId?: string;
+      }): Promise<PrintJobResult> =>
+        request(config, "/print/jobs", {
+          method: "POST",
+          body: input,
+          schema: printJobResultSchema,
         }),
     },
 

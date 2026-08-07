@@ -9,9 +9,13 @@ import {
   itemTableHeader,
   itemTableRows,
   labelValueRow,
+  isPaymentMethodEnabled,
+  isPrintingEnabled,
   mergeReceiptSections,
   paperWidthToMm,
   printerColumns,
+  printerDpi,
+  printerMarginsMm,
   shouldUseTspl,
   taxRows,
   wrapText,
@@ -23,7 +27,14 @@ import {
 } from "@amber/domain";
 import { ApiError } from "@amber/api-client";
 import { api } from "../lib/api";
-import { checkAgentHealth, printTestReceipt } from "../lib/printAgent";
+import { useTenantBrand } from "../context/TenantThemeGate";
+import {
+  checkAgentHealth,
+  detectPrinterInfo,
+  printTestReceipt,
+} from "../lib/printAgent";
+import { api as apiClient } from "../lib/api";
+import type { ConnectedAgent } from "@amber/domain";
 import { withRetry } from "../lib/retry";
 import { Icon } from "../components/Icon";
 import { Toggle } from "../components/Toggle";
@@ -104,6 +115,7 @@ const EMPTY: Required<
   >
 > &
   PrinterSettings = {
+  enabled: true,
   agentUrl: "http://localhost:9200",
   agentSecret: "",
   connectionType: "network",
@@ -127,6 +139,9 @@ interface ReceiptContext {
   fssaiNumber?: string;
   logoUrl?: string;
   upiId?: string;
+  /** Whether UPI is still an accepted tender (Settings → Payments). A tenant
+   *  who switched UPI off keeps their VPA on file but gets no scan-to-pay QR. */
+  upiEnabled: boolean;
   reviewLink?: string;
   taxRate: number;
 }
@@ -152,6 +167,7 @@ const SAMPLE_ITEMS = [
  */
 export function PrinterPage() {
   const navigate = useNavigate();
+  const { applyTenant } = useTenantBrand();
   const committedRef = useRef<PrinterSettings>(EMPTY);
 
   const [form, setForm] = useState<typeof EMPTY>(EMPTY);
@@ -171,6 +187,14 @@ export function PrinterPage() {
   );
   const [testingPrint, setTestingPrint] = useState(false);
   const [printStatus, setPrintStatus] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+  /** Agents dialled in over the relay — the path phones and installed PWAs
+   *  use, where a direct LAN call is impossible. */
+  const [relayAgents, setRelayAgents] = useState<ConnectedAgent[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectStatus, setDetectStatus] = useState<{
     ok: boolean;
     message: string;
   } | null>(null);
@@ -198,6 +222,7 @@ export function PrinterPage() {
           fssaiNumber: t.fssaiNumber,
           logoUrl: t.theme.logoUrl,
           upiId: t.upiId,
+          upiEnabled: isPaymentMethodEnabled(t.paymentMethods, "upi"),
           reviewLink: t.theme.reviewLink,
           taxRate: t.taxRate,
         });
@@ -206,6 +231,23 @@ export function PrinterPage() {
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
+    };
+  }, []);
+
+  // Poll the relay roster while this page is open so plugging in a till shows
+  // up without a manual refresh.
+  useEffect(() => {
+    let active = true;
+    const load = () =>
+      apiClient.print
+        .agents()
+        .then((a) => active && setRelayAgents(a))
+        .catch(() => active && setRelayAgents([]));
+    void load();
+    const id = setInterval(load, 10_000);
+    return () => {
+      active = false;
+      clearInterval(id);
     };
   }, []);
 
@@ -232,6 +274,8 @@ export function PrinterPage() {
   }
 
   const dirty = JSON.stringify(form) !== JSON.stringify(committedRef.current);
+  /** The master switch — drives this page AND every print surface elsewhere. */
+  const printingOn = isPrintingEnabled(form);
 
   async function save() {
     setSaving(true);
@@ -246,6 +290,10 @@ export function PrinterPage() {
       committedRef.current = seeded;
       setForm(seeded);
       setSavedTick((t) => t + 1);
+      // Push the saved tenant app-wide (same channel BrandingPage uses) so
+      // flipping the master switch hides/shows the checkout's print button
+      // and the Settings card immediately, with no reload.
+      applyTenant(updated);
     } catch (e) {
       setError(messageOf(e));
     } finally {
@@ -259,6 +307,42 @@ export function PrinterPage() {
     const ok = await checkAgentHealth(form.agentUrl);
     setAgentStatus(ok ? "ok" : "fail");
     setTestingAgent(false);
+  }
+
+  /**
+   * Ask the print agent what the OS driver says is loaded (paper size + head
+   * dpi) and apply it to the form — the driver already knows the stock, so
+   * staff don't have to know their roll's millimetres. Applied but not saved:
+   * the normal Save button commits it.
+   */
+  async function detectPaper() {
+    setDetecting(true);
+    setDetectStatus(null);
+    const result = await detectPrinterInfo(form);
+    if (result.ok) {
+      const { paperWidthMm, dpi, printer } = result.info;
+      // Snap to a standard roll when the driver's stock is within 2mm of one
+      // (e.g. a "4.00 inch" stock is 101.6mm → the 101mm preset).
+      const nearest = (PAPER_WIDTH_PRESETS as readonly string[])
+        .map((w) => Number.parseInt(w, 10))
+        .find((p) => Math.abs(p - paperWidthMm) <= 2);
+      const mm = Math.min(210, Math.max(40, nearest ?? Math.round(paperWidthMm)));
+      setForm((f) => ({
+        ...f,
+        paperWidth: `${mm}mm`,
+        ...(dpi ? { dpi: (dpi >= 250 ? 300 : 203) as 203 | 300 } : {}),
+      }));
+      setCustomWidthDraft("");
+      setDetectStatus({
+        ok: true,
+        message: `${printer}: ${paperWidthMm}mm paper${
+          dpi ? ` · ${dpi} dpi` : ""
+        } — applied. Save to keep it.`,
+      });
+    } else {
+      setDetectStatus({ ok: false, message: result.message });
+    }
+    setDetecting(false);
   }
 
   async function testPrint() {
@@ -308,8 +392,36 @@ export function PrinterPage() {
           />
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-lg lg:grid-cols-[1fr_340px]">
+        <div
+          className={`grid grid-cols-1 gap-lg ${
+            printingOn ? "lg:grid-cols-[1fr_340px]" : ""
+          }`}
+        >
           <div className="space-y-lg">
+            {/* Master switch — the whole module hangs off this. Everything
+                below (and every print button elsewhere in the app) is hidden
+                while it's off, for restaurants that bill without a printer. */}
+            <section className="rounded-card border border-outline-variant bg-surface-container-lowest p-lg">
+              <div className="flex items-start justify-between gap-md">
+                <div>
+                  <h3 className="font-title-lg text-title-lg text-on-surface">
+                    Receipt Printing
+                  </h3>
+                  <p className="mt-xs font-body-md text-body-md text-on-surface-variant">
+                    {printingOn
+                      ? "On — staff can print receipts at checkout."
+                      : "Off — printing is hidden everywhere for this restaurant. Turn it on if you bill with a thermal printer."}
+                  </p>
+                </div>
+                <Toggle
+                  checked={printingOn}
+                  onChange={(next) => set("enabled", next)}
+                />
+              </div>
+            </section>
+
+            {!printingOn ? null : (
+              <>
             {/* Agent connection */}
             <Section title="Print Agent">
               <p className="mb-md font-body-md text-body-md text-on-surface-variant">
@@ -503,6 +615,92 @@ export function PrinterPage() {
                   />
                   mm
                 </label>
+                <button
+                  onClick={() => void detectPaper()}
+                  disabled={detecting}
+                  type="button"
+                  className="flex items-center gap-xs rounded-full border border-outline-variant px-md py-1 font-label-md text-label-md text-on-surface transition-colors hover:border-primary disabled:opacity-50"
+                >
+                  {detecting ? (
+                    <Icon name="progress_activity" size={16} className="ag-spin" />
+                  ) : (
+                    <Icon name="frame_inspect" size={16} />
+                  )}
+                  Detect from printer
+                </button>
+              </div>
+              {detectStatus && (
+                <p
+                  className={`mt-sm flex items-center gap-xs font-body-md text-body-md ${
+                    detectStatus.ok ? "text-[#2e7d32]" : "text-error"
+                  }`}
+                >
+                  <Icon
+                    name={detectStatus.ok ? "check_circle" : "error"}
+                    size={16}
+                    fill
+                  />
+                  {detectStatus.message}
+                </p>
+              )}
+
+              <div className="mt-md flex flex-wrap items-center gap-sm">
+                <span className="font-label-md text-label-md text-on-surface-variant">
+                  Print head
+                </span>
+                {([203, 300] as const).map((dpi) => (
+                  <button
+                    key={dpi}
+                    onClick={() => set("dpi", dpi)}
+                    className={`rounded-full border px-md py-1 font-label-md text-label-md transition-colors ${
+                      printerDpi(form) === dpi
+                        ? "border-primary bg-primary-container/15 text-primary"
+                        : "border-outline-variant text-on-surface-variant hover:border-primary/60"
+                    }`}
+                  >
+                    {dpi} dpi
+                  </button>
+                ))}
+                <span className="font-body-md text-[11px] text-on-surface-variant">
+                  TSC DA310 / DA320 are 300 dpi — the wrong value prints in only
+                  part of the paper width.
+                </span>
+              </div>
+
+              <div className="mt-md flex flex-wrap items-center gap-sm">
+                <span className="font-label-md text-label-md text-on-surface-variant">
+                  Side margins
+                </span>
+                {(
+                  [
+                    ["marginLeftMm", "Left"],
+                    ["marginRightMm", "Right"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="flex items-center gap-xs rounded-full border border-outline-variant px-md py-1 font-label-md text-label-md text-on-surface-variant"
+                  >
+                    {label}
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      step={0.5}
+                      value={form[key] ?? printerMarginsMm(form)[key === "marginLeftMm" ? "left" : "right"]}
+                      onChange={(e) => {
+                        const mm = Number(e.target.value);
+                        if (Number.isFinite(mm) && mm >= 0 && mm <= 20)
+                          set(key, mm);
+                      }}
+                      className="w-[48px] bg-transparent text-right font-data-mono text-[13px] focus:outline-none"
+                    />
+                    mm
+                  </label>
+                ))}
+                <span className="font-body-md text-[11px] text-on-surface-variant">
+                  Blank space kept at each paper edge (TSC/label printing).
+                </span>
               </div>
 
               <div className="mt-md">
@@ -531,6 +729,60 @@ export function PrinterPage() {
                   ))}
                 </div>
               </div>
+            </Section>
+
+            {/* Relay status — printing from phones/tablets */}
+            <Section title="Printing From Phones & Tablets">
+              <p className="mb-md font-body-md text-body-md text-on-surface-variant">
+                A phone or installed app can't reach a printer on your local
+                network directly. Instead the print agent connects out to
+                Amber and stays connected, so staff can print from any device,
+                anywhere — the same way the till does.
+              </p>
+              {relayAgents === null ? (
+                <p className="flex items-center gap-xs font-body-md text-body-md text-on-surface-variant">
+                  <Icon name="progress_activity" size={16} className="ag-spin" />
+                  Checking…
+                </p>
+              ) : relayAgents.length === 0 ? (
+                <div className="rounded-lg border border-outline-variant bg-surface-container-low p-md">
+                  <p className="flex items-center gap-xs font-body-md text-body-md text-on-surface">
+                    <Icon name="cloud_off" size={18} /> No print agent connected
+                  </p>
+                  <p className="mt-xs font-body-md text-[12px] text-on-surface-variant">
+                    Set a security key above, then start the agent on the till
+                    with <span className="font-data-mono">AMBER_API_URL</span>,{" "}
+                    <span className="font-data-mono">AMBER_TENANT_SLUG</span> and{" "}
+                    <span className="font-data-mono">AGENT_SECRET</span>. Printing
+                    from this computer still works without it.
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-sm">
+                  {relayAgents.map((agent) => (
+                    <li
+                      key={agent.agentId}
+                      className="rounded-lg border border-primary/30 bg-primary-container/10 p-md"
+                    >
+                      <p className="flex items-center gap-xs font-label-md text-label-md font-semibold text-on-surface">
+                        <span className="h-2 w-2 rounded-full bg-[#2e7d32]" />
+                        {agent.agentName}
+                        <span className="font-body-md text-[11px] font-normal text-on-surface-variant">
+                          v{agent.version}
+                          {agent.platform ? ` · ${agent.platform}` : ""}
+                        </span>
+                      </p>
+                      <p className="mt-xs font-body-md text-[12px] text-on-surface-variant">
+                        {agent.printers.length > 0
+                          ? `${agent.printers.length} printer${agent.printers.length === 1 ? "" : "s"}: ${agent.printers
+                              .map((p) => p.label)
+                              .join(", ")}`
+                          : "No printers reported"}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Section>
 
             {/* Receipt layout designer */}
@@ -600,6 +852,8 @@ export function PrinterPage() {
                 </p>
               )}
             </Section>
+              </>
+            )}
 
             {/* Actions */}
             <div className="flex items-center gap-sm">
@@ -626,16 +880,18 @@ export function PrinterPage() {
           </div>
 
           {/* Live preview */}
-          <aside className="lg:sticky lg:top-lg lg:self-start">
-            <ReceiptPreview
-              sections={form.sections ?? []}
-              footerMessage={
-                form.footerMessage?.trim() || DEFAULT_FOOTER_MESSAGE
-              }
-              context={context}
-              settings={form}
-            />
-          </aside>
+          {printingOn && (
+            <aside className="lg:sticky lg:top-lg lg:self-start">
+              <ReceiptPreview
+                sections={form.sections ?? []}
+                footerMessage={
+                  form.footerMessage?.trim() || DEFAULT_FOOTER_MESSAGE
+                }
+                context={context}
+                settings={form}
+              />
+            </aside>
+          )}
         </div>
       )}
     </div>
@@ -683,8 +939,12 @@ function ReceiptSectionsEditor({
   }
 
   function missingDataHint(type: ReceiptSectionType): string | null {
-    if (type === "upiQr" && !context?.upiId)
-      return "Set a UPI ID in Settings → Payments";
+    if (type === "upiQr") {
+      if (!context?.upiId) return "Set a UPI ID in Settings → Payments";
+      if (!context.upiEnabled)
+        return "UPI is switched off in Settings → Payments";
+      return "Prints on unpaid bills only — use Print Bill at checkout";
+    }
     if (type === "reviewQr" && !context?.reviewLink)
       return "Set a review link in Settings → Branding";
     if (type === "logo" && !context?.logoUrl)
@@ -805,13 +1065,16 @@ function ReceiptPreview({
   const tax = Math.round(subtotal * taxRate);
   const total = subtotal + tax;
   const tendered = total + 30;
+  // Mirrors lib/receipt.ts's gate exactly: a VPA on file is not enough, UPI
+  // must still be an accepted tender.
   const upiUrl =
     context?.upiId &&
+    context.upiEnabled &&
     buildUpiPaymentUrl({
       upiId: context.upiId,
       payeeName: context.tenantName,
       amountCents: total,
-      note: "Sample receipt",
+      note: "Sample bill",
     });
 
   return (
@@ -821,7 +1084,7 @@ function ReceiptPreview({
       </p>
       <p className="mb-md font-body-md text-[11px] text-on-surface-variant">
         {mm}mm paper · {columns} characters per line ·{" "}
-        {tspl ? "TSPL (TSC label printer)" : "ESC/POS"}
+        {tspl ? `TSPL · ${printerDpi(settings)} dpi` : "ESC/POS"}
       </p>
       <div className="overflow-x-auto">
         <div
@@ -971,11 +1234,17 @@ function ReceiptPreview({
                       {upiUrl ? (
                         <QRCodeCanvas value={upiUrl} size={64} level="M" />
                       ) : (
-                        <div className="flex h-16 w-16 items-center justify-center border border-dashed border-black/30 text-center text-[8px] text-black/40">
-                          no UPI ID
+                        <div className="flex h-16 w-16 items-center justify-center border border-dashed border-black/30 px-1 text-center text-[8px] text-black/40">
+                          {context?.upiId ? "UPI tender off" : "no UPI ID"}
                         </div>
                       )}
                       <PaperLine text="Scan to pay via UPI" center />
+                      {/* The one section whose print depends on WHEN it's
+                          printed, not just the toggle — say so, or this
+                          preview reads as a promise the paid receipt breaks. */}
+                      <span className="text-center text-[8px] italic leading-tight text-black/40">
+                        unpaid bills only
+                      </span>
                     </div>
                   );
                 case "reviewQr":

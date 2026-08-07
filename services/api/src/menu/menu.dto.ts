@@ -56,3 +56,13 @@ export type CreateItemDto = z.infer<typeof createItemSchema>;
 /** PATCH /menu/items/:id — every field optional. */
 export const updateItemSchema = createItemSchema.partial();
 export type UpdateItemDto = z.infer<typeof updateItemSchema>;
+
+/**
+ * POST /menu/import-image — pull a pasted photo link into our own storage.
+ * Only the shape is checked here; reachability, content-type, size and the
+ * SSRF host guard live in `StorageService.importImageFromUrl`.
+ */
+export const importImageSchema = z.object({
+  url: z.string().url().max(2048),
+});
+export type ImportImageDto = z.infer<typeof importImageSchema>;

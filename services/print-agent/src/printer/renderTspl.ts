@@ -7,6 +7,9 @@ import {
   mergeReceiptSections,
   paperWidthToMm,
   printerColumns,
+  printerDpi,
+  printerDotsPerMm,
+  printerMarginsMm,
   taxRows,
   wrapText,
   type Kot,
@@ -18,13 +21,38 @@ import {
 // re-exported here because the routes import it alongside the renderers.
 export { shouldUseTspl } from "@amber/domain";
 
-const DOTS_PER_MM = 8;
-const LEFT = 24;
+// Vertical rhythm stays in dots (it's relative to the bitmap font's dot
+// height); everything horizontal is computed per-settings from the head's
+// real dpi + configured margins — see tsplGeometry.
 const TOP = 24;
 const LINE = 34;
 const FONT = "3";
 /** TSC bitmap font "3" is 16 dots wide per character (for centering math). */
 const FONT_DOTS = 16;
+
+/** All dpi/margin-derived horizontal geometry for one print job. */
+function tsplGeometry(settings: PrinterSettings) {
+  const dotsPerMm = printerDotsPerMm(settings);
+  const margins = printerMarginsMm(settings);
+  const widthMm = paperWidthToMm(settings.paperWidth);
+  const left = Math.round(margins.left * dotsPerMm);
+  const widthDots = Math.round(widthMm * dotsPerMm);
+  return {
+    dotsPerMm,
+    widthMm,
+    widthDots,
+    left,
+    printableDots: Math.max(
+      FONT_DOTS,
+      widthDots - left - Math.round(margins.right * dotsPerMm),
+    ),
+    // A 300-dpi head prints the same dot-sized QR/logo physically smaller, so
+    // scale the QR cell (5→7 keeps the module ~0.6mm, comfortably scannable)
+    // and cap the logo by physical height, not dots.
+    qrCell: printerDpi(settings) === 300 ? 7 : 5,
+    logoMaxHeightDots: Math.round(30 * dotsPerMm),
+  };
+}
 
 /** A printable unit: a text line, a native TSPL QRCODE with a caption, or a
  *  1-bit logo bitmap (PNG converted for the BITMAP command). */
@@ -46,29 +74,27 @@ const centered = (t: string): TsplElement => ({
   center: true,
 });
 
-const QR_CELL = 5;
 /** Byte-mode capacity at ECC level M for QR versions 1–10; a version-v code
  *  is (17 + 4v) modules per side. Used to reserve vertical space — the
  *  printer picks the real version itself (QRCODE mode A). */
 const QR_CAPACITY_M = [14, 26, 42, 62, 84, 106, 122, 152, 180, 213];
 
-function qrSideDots(content: string): number {
+function qrSideDots(content: string, cell: number): number {
   const idx = QR_CAPACITY_M.findIndex((cap) => content.length <= cap);
   const version = idx === -1 ? QR_CAPACITY_M.length : idx + 1;
-  return (17 + 4 * version) * QR_CELL;
+  return (17 + 4 * version) * cell;
 }
-
-/** Cap the logo's height so an oversized upload can't eat half the label. */
-const LOGO_MAX_HEIGHT_DOTS = 240;
 
 /**
  * Fetch + convert the tenant's PNG logo to a 1-bit TSPL BITMAP element
  * (bit cleared = printed dot). Best-effort like the ESC/POS logo path:
  * any fetch/decode failure just drops the logo, never the receipt.
+ * `maxHeightDots` caps an oversized upload so it can't eat half the label.
  */
 async function logoBitmap(
   url: string,
   printableDots: number,
+  maxHeightDots: number,
 ): Promise<TsplElement | null> {
   try {
     const res = await fetch(url);
@@ -77,7 +103,7 @@ async function logoBitmap(
     const scale = Math.min(
       1,
       printableDots / png.width,
-      LOGO_MAX_HEIGHT_DOTS / png.height,
+      maxHeightDots / png.height,
     );
     const w = Math.max(1, Math.floor(png.width * scale));
     const h = Math.max(1, Math.floor(png.height * scale));
@@ -141,8 +167,7 @@ function buildTspl(
   elements: TsplElement[],
   options: { diagnosticBar?: boolean } = {},
 ): Buffer {
-  const widthMm = paperWidthToMm(settings.paperWidth);
-  const widthDots = widthMm * DOTS_PER_MM;
+  const geo = tsplGeometry(settings);
   const barHeight = options.diagnosticBar ? 34 : 0;
 
   let y = TOP + (options.diagnosticBar ? barHeight + 18 : 0);
@@ -150,13 +175,16 @@ function buildTspl(
   const body: Buffer[] = [];
   const cmd = (line: string) => body.push(Buffer.from(`${line}\r\n`, "ascii"));
   if (options.diagnosticBar)
-    cmd(`BAR ${LEFT},${TOP},${widthDots - 2 * LEFT},${barHeight}`);
+    cmd(`BAR ${geo.left},${TOP},${geo.printableDots},${barHeight}`);
 
   const pushText = (raw: string, center?: boolean) => {
     const value = clean(raw);
     const x = center
-      ? Math.max(LEFT, Math.round((widthDots - value.length * FONT_DOTS) / 2))
-      : LEFT;
+      ? Math.max(
+          geo.left,
+          Math.round((geo.widthDots - value.length * FONT_DOTS) / 2),
+        )
+      : geo.left;
     cmd(`TEXT ${x},${y},"${FONT}",0,1,1,"${value}"`);
     y += LINE;
   };
@@ -167,7 +195,7 @@ function buildTspl(
       continue;
     }
     if (el.kind === "bitmap") {
-      const x = Math.max(LEFT, Math.round((widthDots - el.widthDots) / 2));
+      const x = Math.max(geo.left, Math.round((geo.widthDots - el.widthDots) / 2));
       body.push(
         Buffer.from(`BITMAP ${x},${y},${el.widthBytes},${el.height},0,`, "ascii"),
         el.data,
@@ -179,17 +207,17 @@ function buildTspl(
     // Native TSPL QRCODE — mode A picks the version; we reserve space for
     // the worst case at this content length so nothing overlaps below it.
     const content = el.content.replace(/"/g, "");
-    const side = qrSideDots(content);
-    const x = Math.max(LEFT, Math.round((widthDots - side) / 2));
+    const side = qrSideDots(content, geo.qrCell);
+    const x = Math.max(geo.left, Math.round((geo.widthDots - side) / 2));
     y += 10;
-    cmd(`QRCODE ${x},${y},M,${QR_CELL},A,0,"${content}"`);
+    cmd(`QRCODE ${x},${y},M,${geo.qrCell},A,0,"${content}"`);
     y += side + 14;
     if (el.caption) pushText(el.caption, true);
   }
 
-  const heightMm = Math.max(50, Math.ceil((y + TOP) / DOTS_PER_MM));
+  const heightMm = Math.max(50, Math.ceil((y + TOP) / geo.dotsPerMm));
   const preamble = [
-    `SIZE ${widthMm} mm,${heightMm} mm`,
+    `SIZE ${geo.widthMm} mm,${heightMm} mm`,
     "GAP 3 mm,0",
     "SPEED 2",
     "DENSITY 15",
@@ -248,8 +276,7 @@ export async function renderTsplReceipt(
   receipt: Receipt,
 ): Promise<Buffer> {
   const width = maxChars(settings);
-  const printableDots =
-    paperWidthToMm(settings.paperWidth) * DOTS_PER_MM - 2 * LEFT;
+  const geo = tsplGeometry({ ...settings, commandLanguage: "tspl" });
   // Merge, don't just fall back: a saved layout from before a section type
   // existed (e.g. customerInfo) still gets the new section appended.
   const sections = mergeReceiptSections(receipt.sections);
@@ -263,7 +290,11 @@ export async function renderTsplReceipt(
     switch (section.type) {
       case "logo": {
         if (!receipt.logoUrl) break;
-        const logo = await logoBitmap(receipt.logoUrl, printableDots);
+        const logo = await logoBitmap(
+          receipt.logoUrl,
+          geo.printableDots,
+          geo.logoMaxHeightDots,
+        );
         if (logo) elements.push(logo);
         break;
       }

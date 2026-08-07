@@ -46,7 +46,7 @@ export function ItemPanel({
   defaultCategoryId: string;
   onClose: () => void;
 }) {
-  const { state, dispatch, uploadImage, currencySymbol } = useAdmin();
+  const { state, dispatch, uploadImage, importImage, currencySymbol } = useAdmin();
   const isEdit = item !== null;
 
   const [name, setName] = useState(item?.name ?? "");
@@ -57,6 +57,10 @@ export function ItemPanel({
   const [swatch, setSwatch] = useState(item?.swatch ?? SWATCHES[0]!);
   const [imageUrl, setImageUrl] = useState<string | undefined>(item?.imageUrl);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkValue, setLinkValue] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [imageFailed, setImageFailed] = useState(false);
   const [available, setAvailable] = useState(item?.available ?? true);
   const [dietary, setDietary] = useState<"veg" | "non_veg" | "">(item?.dietary ?? "");
   const [jain, setJain] = useState(item?.jain ?? false);
@@ -65,6 +69,7 @@ export function ItemPanel({
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const busy = saving || deleting || uploading;
@@ -107,6 +112,7 @@ export function ItemPanel({
     const preview = URL.createObjectURL(file);
     const prev = imageUrl;
     setImageUrl(preview);
+    setImageFailed(false);
     setUploading(true);
     try {
       const url = await uploadImage(file);
@@ -118,6 +124,61 @@ export function ItemPanel({
       setUploading(false);
       URL.revokeObjectURL(preview);
     }
+  }
+
+  /**
+   * Accept a pasted image link — by IMPORTING it into our own storage, not by
+   * saving the URL as-is.
+   *
+   * Storing the pasted URL made the menu depend on a stranger's server. Those
+   * links rot: a Facebook CDN link is signed and expires, brand sites
+   * hotlink-block, and free image hosts rate-limit or 500 when a whole menu
+   * loads at once — which is exactly how 42 seeded items ended up with photos
+   * that could never load. Importing makes "paste a link" and "upload a file"
+   * end in the same place.
+   *
+   * A failed import surfaces the server's reason rather than quietly saving
+   * the raw link: "not an image", "HTTP 404" and "private network address" are
+   * all things the person pasting can fix, and silently storing a hotlink is
+   * how this problem started.
+   */
+  async function applyImageLink() {
+    const url = linkValue.trim();
+    if (!url || importing) return;
+    let valid: boolean;
+    try {
+      const parsed = new URL(url);
+      valid = parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      valid = false;
+    }
+    if (!valid) {
+      setLinkError("Enter a full image link starting with http:// or https://");
+      return;
+    }
+    setUploadError(null);
+    setLinkError(null);
+    setImporting(true);
+    try {
+      const stored = await importImage(url);
+      setImageFailed(false);
+      setImageUrl(stored);
+      setLinkOpen(false);
+      setLinkValue("");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not import that link";
+      // A bad link (404, not an image, blocked host) is worth correcting rather
+      // than silently saving — the server's message says which.
+      setLinkError(`${msg}. Check it opens as a direct image link.`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function openLinkEditor() {
+    setLinkValue(imageUrl && /^https?:\/\//i.test(imageUrl) ? imageUrl : "");
+    setLinkError(null);
+    setLinkOpen(true);
   }
 
   async function save() {
@@ -208,8 +269,17 @@ export function ItemPanel({
             <section className="flex flex-col gap-sm">
               <label className="font-label-md text-label-md text-on-background">Photo</label>
               <div className={`relative flex h-40 w-full items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br ${swatch}`}>
-                {imageUrl ? (
-                  <img src={imageUrl} alt={name || "Menu item"} className="h-full w-full object-cover" />
+                {imageUrl && !imageFailed ? (
+                  <img
+                    src={imageUrl}
+                    alt={name || "Menu item"}
+                    className="h-full w-full object-cover"
+                    // A pasted link can 404 or be hotlink-blocked by its host.
+                    // Fall back to the icon stand-in here so staff see it fails
+                    // BEFORE saving — the guest app does the same (FoodImage).
+                    onError={() => setImageFailed(true)}
+                    onLoad={() => setImageFailed(false)}
+                  />
                 ) : (
                   <Icon name={icon} size={64} className="text-on-background/70" />
                 )}
@@ -231,8 +301,13 @@ export function ItemPanel({
                 )}
               </div>
               {uploadError && <p className="font-body-md text-body-md text-error">{uploadError}</p>}
+              {imageFailed && (
+                <p className="font-body-md text-body-md text-error">
+                  That link didn't load — the image may be private, moved, or blocked from other sites.
+                </p>
+              )}
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onPickImage} />
-              <div className="flex items-center gap-sm">
+              <div className="flex flex-wrap items-center gap-sm">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
@@ -242,7 +317,18 @@ export function ItemPanel({
                   <Icon name={uploading ? "progress_activity" : "upload"} size={18} className={uploading ? "ag-spin" : ""} />
                   {uploading ? "Uploading…" : imageUrl ? "Change Photo" : "Upload Photo"}
                 </button>
-                {!imageUrl && (
+                <button
+                  type="button"
+                  onClick={openLinkEditor}
+                  disabled={uploading}
+                  className="flex items-center gap-xs rounded-full border border-outline-variant bg-surface px-md py-xs font-label-md text-label-md text-on-surface-variant transition-colors hover:border-primary hover:text-primary disabled:opacity-50"
+                >
+                  <Icon name="link" size={18} />
+                  {imageUrl ? "Use Link" : "Paste Link"}
+                </button>
+                {/* The swatch is the visible backdrop whenever no photo renders —
+                    including a link that failed to load. */}
+                {(!imageUrl || imageFailed) && (
                   <div className="flex gap-xs">
                     {SWATCHES.map((s) => (
                       <button
@@ -255,6 +341,54 @@ export function ItemPanel({
                   </div>
                 )}
               </div>
+              {linkOpen && (
+                <div className="flex flex-col gap-xs rounded-md border border-outline-variant bg-surface-container-low p-sm">
+                  <div className="flex items-center gap-sm">
+                    <input
+                      autoFocus
+                      type="url"
+                      inputMode="url"
+                      value={linkValue}
+                      onChange={(e) => {
+                        setLinkValue(e.target.value);
+                        setLinkError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applyImageLink();
+                        }
+                        if (e.key === "Escape") setLinkOpen(false);
+                      }}
+                      placeholder="https://example.com/photo.jpg"
+                      className="min-w-0 flex-1 rounded-md border border-outline-variant bg-surface px-sm py-xs font-body-md text-on-background outline-none transition-shadow focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={applyImageLink}
+                      disabled={!linkValue.trim() || importing}
+                      className="whitespace-nowrap rounded-full bg-primary px-md py-xs font-label-md text-label-md text-on-primary transition-opacity hover:opacity-90 disabled:opacity-50"
+                    >
+                      {importing ? "Saving…" : "Use"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLinkOpen(false)}
+                      className="rounded-full px-sm py-xs font-label-md text-label-md text-on-surface-variant transition-colors hover:text-on-background"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {linkError ? (
+                    <p className="font-body-md text-body-md text-error">{linkError}</p>
+                  ) : (
+                    <p className="font-body-md text-body-md text-on-surface-variant">
+                      Paste a direct image link. The photo stays on that site — if it's ever
+                      taken down, upload instead.
+                    </p>
+                  )}
+                </div>
+              )}
             </section>
 
             <section className="flex flex-col gap-lg">

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Order, Sale } from "@amber/domain";
+import { isModuleEnabled } from "@amber/domain";
+import { useTenant } from "@amber/ui";
 import { Icon } from "../components/Icon";
 import { OrderHistorySkeleton, PinnerLoader } from "../components/Skeleton";
 import { api } from "../lib/api";
@@ -116,13 +118,13 @@ export function OrderHistoryPage() {
             Completed & paid orders — what sold, and which table ordered what.
           </p>
         </div>
-        <div className="flex items-center gap-sm self-start">
-          <div className="flex items-center gap-sm rounded-full border border-outline-variant bg-surface-container-high p-1">
+        <div className="flex flex-wrap items-center gap-sm self-start">
+          <div className="flex items-center gap-xs rounded-full border border-outline-variant bg-surface-container-high p-1 sm:gap-sm">
             {RANGES.map((r) => (
               <button
                 key={r.key}
                 onClick={() => setRange(r.key)}
-                className={`rounded-full px-md py-sm font-label-md text-label-md transition-all ${
+                className={`rounded-full px-sm py-sm font-label-md text-label-md transition-all sm:px-md ${
                   range === r.key
                     ? "bg-surface-container-lowest text-primary shadow-sm"
                     : "text-on-surface-variant hover:text-primary"
@@ -285,6 +287,11 @@ function SaleRow({ sale }: { sale: Sale }) {
 
 function OrderItems({ order }: { order: Order }) {
   const money = useMoney();
+  // With loyalty switched off, past orders stop advertising points EARNED —
+  // that's a program benefit, and the program is gone. Points REDEEMED stays
+  // visible either way: it explains why this order's total came in below the
+  // sum of its lines, and history must always add up.
+  const loyaltyOn = isModuleEnabled(useTenant(), "loyalty");
   const lines = order.rounds.flatMap((r) =>
     r.items
       .filter((i) => i.status !== "cancelled")
@@ -305,7 +312,7 @@ function OrderItems({ order }: { order: Order }) {
               <Icon name="call" size={16} /> {order.customerPhone}
             </span>
           )}
-          {!!order.pointsEarned && (
+          {loyaltyOn && !!order.pointsEarned && (
             <span className="flex items-center gap-xs text-primary">
               <Icon name="loyalty" size={16} /> +{order.pointsEarned} pts earned
             </span>

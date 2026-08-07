@@ -144,6 +144,32 @@ describe("printerColumns", () => {
     expect(escpos("80mm")).toBe(48);
     expect(escpos("101mm")).toBe(62);
   });
+
+  it("uses the head's real dpi and the configured margins on TSPL", () => {
+    // 300 dpi: ~11.8 dots/mm, so a 101mm roll fits far more 16-dot chars
+    // than the 203-dpi assumption (which printed in only ~68mm of paper).
+    expect(
+      printerColumns({ commandLanguage: "tspl", paperWidth: "101mm", dpi: 300 }),
+    ).toBe(70);
+    // Unset dpi sniffs the device name — the DA310 is a 300-dpi model.
+    expect(
+      printerColumns({
+        commandLanguage: "tspl",
+        paperWidth: "101mm",
+        usbPath: "TSC DA310",
+      }),
+    ).toBe(70);
+    // Wider side margins shrink the printable band.
+    expect(
+      printerColumns({
+        commandLanguage: "tspl",
+        paperWidth: "101mm",
+        dpi: 300,
+        marginLeftMm: 6,
+        marginRightMm: 6,
+      }),
+    ).toBe(65);
+  });
 });
 
 describe("taxRows", () => {

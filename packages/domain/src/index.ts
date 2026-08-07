@@ -24,3 +24,7 @@ export * from "./printer.js";
 export * from "./print-format.js";
 export * from "./receipt.js";
 export * from "./kot.js";
+export * from "./print-relay.js";
+// The tenant-module registry (printing / loyalty on-off) — depends on the
+// printer + loyalty schemas above, so it is exported after them.
+export * from "./module.js";

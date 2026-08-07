@@ -52,7 +52,7 @@ export function TableSessionPage() {
 
   return (
     <>
-      <div className="mb-lg flex items-end justify-between">
+      <div className="mb-lg flex flex-wrap items-end justify-between gap-sm">
         <div>
           <div className="mb-xs flex items-center gap-sm">
             <button
@@ -65,7 +65,7 @@ export function TableSessionPage() {
               {table.room}
             </span>
           </div>
-          <h2 className="flex items-center gap-md font-headline-lg text-headline-lg text-on-background">
+          <h2 className="flex flex-wrap items-center gap-sm font-headline-lg text-headline-lg text-on-background md:gap-md">
             {table.label} Session
             <span className="rounded-full bg-surface-variant px-sm py-xs font-data-mono text-data-mono text-on-surface-variant">
               Seated for {elapsed(table.session.openedAt)}
@@ -186,7 +186,7 @@ export function TableSessionPage() {
                               dispatch({ type: "CANCEL_ITEM", tableId: table.id, roundId: round.id, itemId: item.id })
                             }
                             title="Cancel item"
-                            className="ml-sm flex items-center justify-center rounded-lg p-xs text-on-surface-variant opacity-0 transition-colors hover:bg-error-container/50 hover:text-error group-hover:opacity-100"
+                            className="ml-sm flex items-center justify-center rounded-lg p-xs text-on-surface-variant transition-colors hover:bg-error-container/50 hover:text-error lg:opacity-0 lg:group-hover:opacity-100"
                           >
                             <Icon name="cancel" size={20} />
                           </button>

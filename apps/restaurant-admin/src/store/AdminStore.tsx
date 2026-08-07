@@ -23,6 +23,7 @@ import type {
   Table as DomainTable,
 } from "@amber/domain";
 import { withRetry } from "../lib/retry";
+import { settlePayment } from "../lib/payment";
 import type {
   AdminState,
   MenuItem,
@@ -325,6 +326,8 @@ interface AdminContextValue {
   refreshFloor: () => Promise<void>;
   /** Upload an item photo to storage; resolves to its public URL. */
   uploadImage: (file: File) => Promise<string>;
+  /** Import a pasted photo link into our own storage; returns the stored URL. */
+  importImage: (link: string) => Promise<string>;
   loading: boolean;
   /** True while any mutation (+ its refetch) is in flight — drives the top bar. */
   mutating: boolean;
@@ -908,16 +911,21 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
         case "COMPLETE_PAYMENT": {
           const orderId = orderIdFor(action.tableId);
           if (orderId) {
-            // Server recomputes subtotal/tax from the order; amountCents is advisory.
-            // tenderedCents (cash only) is persisted so a later receipt reprint
-            // can still show change due. Safe to retry: capturePayment 400s on
-            // an already-paid order instead of double-charging.
-            await withRetry(() =>
-              api.orders.capturePayment(orderId, {
-                method: action.method,
-                tendered: action.tenderedCents,
-              }),
-            );
+            // Server recomputes subtotal/tax from the order; amountCents is
+            // advisory. tenderedCents (cash only) is persisted so a later
+            // receipt reprint can still show change due.
+            //
+            // `settlePayment` is the trust boundary: it only resolves ok when
+            // the server has confirmed a Payment row exists — either from this
+            // capture or (for a lost-response retry) from an explicit re-check.
+            // A failure THROWS so `dispatch` returns false and the caller keeps
+            // staff on the billing screen; the table is only freed below, after
+            // confirmed settlement.
+            const result = await settlePayment(api, orderId, {
+              method: action.method,
+              tendered: action.tenderedCents,
+            });
+            if (!result.ok) throw new Error(result.message);
             // capturePayment returns the Payment, not the Order — free the
             // settled table directly and pull the new sale into the feed (the
             // stream's `closed` echo coalesces into the same debounced fetch).
@@ -1003,6 +1011,18 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
     [api],
   );
 
+  /**
+   * Pull a pasted photo link into our own storage and return that URL, so a
+   * link and an upload end up equally permanent. See `importImageFromUrl`.
+   */
+  const importImage = useCallback(
+    async (link: string): Promise<string> => {
+      const { url } = await api.menu.importImage(link);
+      return url;
+    },
+    [api],
+  );
+
   // Currency formatter + symbol, rebuilt only when the tenant's currency changes
   // (loaded once with the tenant; not re-fetched). All pages share these.
   const money = useMemo(
@@ -1021,6 +1041,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       refresh,
       refreshFloor,
       uploadImage,
+      importImage,
       money,
       currencySymbol,
       loading: !loaded,
@@ -1029,7 +1050,7 @@ export function AdminStoreProvider({ children }: { children: ReactNode }) {
       error,
       subscribeOrderEvents,
     }),
-    [state, dispatch, refresh, refreshFloor, uploadImage, money, currencySymbol, loaded, mutateCount, pendingItems, error, subscribeOrderEvents],
+    [state, dispatch, refresh, refreshFloor, uploadImage, importImage, money, currencySymbol, loaded, mutateCount, pendingItems, error, subscribeOrderEvents],
   );
 
   // Only block on the floor/menu data load once the user is signed in. Before

@@ -40,7 +40,8 @@ Package names are scoped `@amber/*`. Internal deps use `workspace:*`.
 - `pnpm install` — install workspace
 - `pnpm dev` / `pnpm build` / `pnpm lint` / `pnpm typecheck` / `pnpm test` — fan out via Turbo
 - Tests: **Vitest** unit tests live in `packages/domain/test/` (money math, loyalty
-  math, schema guards). CI (`.github/workflows/ci.yml`) runs
+  math, schema guards) and `apps/restaurant-admin/test/` (checkout settlement +
+  Quick Sale idempotency — see the payment-safety note below). CI (`.github/workflows/ci.yml`) runs
   install → `db:generate` → lint → typecheck → test → build on push/PR to main/develop.
 - `pnpm db:generate` / `pnpm db:migrate` / `pnpm db:seed` — Prisma (in `@amber/api`)
 - Per app: `pnpm --filter @amber/customer dev` (customer 5173, restaurant-admin 5174, super-admin 5175)
@@ -110,7 +111,21 @@ All shapes are Zod schemas with inferred types. Key entities:
   at `MAX_CUSTOM_QUICK_ACTIONS` (4). Used both client-side (rendering) and
   server-side (`service-requests.service.ts`, validating a create's `type`
   against the tenant's live config). See flow 8.
-- `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row).
+- `payment.ts` — `Payment` (full capture) + `Sale` (denormalized sales-feed row)
+  + the **accepted-tender config**. `paymentMethodSchema` (`cash`|`card`|`upi`)
+  is the platform's full vocabulary and **values are never removed** — every
+  historical `Payment`/`Sale` and each staff member's `lastPaymentMethod` parses
+  through it, so deleting one would break reading old sales. A restaurant that
+  stops taking cards instead **disables the tender**: `Tenant.paymentMethods`
+  (`paymentMethodConfigSchema[]`, Settings → Payments) + `mergePaymentMethods`
+  (same "append new features to a saved config" pattern as
+  `mergeReceiptSections`/`mergeQuickActions`, and it force-enables cash if a
+  config would leave zero tenders) + `enabledPaymentMethods` /
+  `isPaymentMethodEnabled` / `PAYMENT_METHOD_LABELS`. Disabling is
+  **presentational only** — it hides the tender from new checkouts
+  (BillingPage, QuickSalePage, the guest's BillScreen) and NEVER rejects a
+  capture server-side, so a stale guest phone mid-payment can still settle.
+  Empty/unset = every tender on.
 - `analytics.ts` — `AnalyticsSummary` (revenue/orders/avgTicket + deltas, revenue
   series, top items, category split, peak hours) for the dashboard/analytics page.
 - `permission.ts` — `PERMISSIONS`, the fixed 9-key permission catalog (incl.
@@ -118,6 +133,16 @@ All shapes are Zod schemas with inferred types. Key entities:
   this vocabulary is the only hardcoded part of RBAC.
 - `loyalty.ts` — `LoyaltyProgram` (tenant config) + `LoyaltyAccount`/
   `LoyaltyTransaction` + the earn/redeem math helpers.
+- `module.ts` — **the tenant-module registry** (see flow 10): `TENANT_MODULES`
+  (`printing` | `loyalty`) + `TENANT_MODULE_META` + `isModuleEnabled(tenant,
+  module)`, the ONE check every surface uses to decide whether a restaurant
+  runs an optional feature at all. ⚠️ Never read `tenant.printer?.enabled` /
+  `tenant.loyalty?.enabled` raw — the two modules **disagree** about what an
+  unset config means (printing defaults ON so pre-switch tenants keep printing;
+  loyalty defaults OFF because it's opt-in), and only the registry gets both
+  right. `isPrintingEnabled` (`printer.ts`) / `isLoyaltyEnabled` (a type guard,
+  so it narrows like the raw `?.enabled` it replaces) are the per-module
+  primitives it delegates to.
 - **Printing contract** (see flow 9): `printer.ts` — `PrinterSettings`
   (agent URL/secret, `connectionType` usb|bluetooth|network, `commandLanguage`
   `auto`|`escpos`|`tspl`, free-form `paperWidth` `"<mm>mm"` +
@@ -138,7 +163,7 @@ All shapes are Zod schemas with inferred types. Key entities:
 
 ## API — `services/api` (NestJS + Prisma)
 - `prisma/schema.prisma` — root `Tenant` (theme / printer / kitchenPrinter /
-  loyalty / quickActions as JSON; statutory bill fields `gstNumber`/`fssaiNumber`/`address`/
+  loyalty / quickActions / paymentMethods as JSON; statutory bill fields `gstNumber`/`fssaiNumber`/`address`/
   `phone`; UPI `upiId`/`upiMobile`) + identity (`User`,
   `Membership`, `Role`; platform staff are `User.isSuperAdmin`). **RBAC:** `Role`
   is now a **per-tenant table** (`{ name, permissions String[], protected }`), NOT
@@ -165,7 +190,11 @@ All shapes are Zod schemas with inferred types. Key entities:
   subscriptions, `/admin/billing` super-admin routes + `GET /billing/me`),
   **loyalty** (`loyalty/` — staff-only points accounts keyed by tenant+phone,
   earn-on-capture + redeem; math helpers in `@amber/domain`'s `loyalty.ts`),
-  Quick Sale (walk-in counter sale), and KOT/receipt printing via the
+  Quick Sale (walk-in counter sale — **atomic**: `POST /orders/quick-sale`
+  records order + one round of items + payment in ONE transaction, the order is
+  born `paid` on the virtual counter table so it is never live — that's what
+  lets many tills ring up counter sales in parallel without occupancy conflicts
+  or cross-device cart leaks), and KOT/receipt printing via the
   `services/print-agent` bridge.
 - **Tenant scoping:** `TenantMiddleware` reads `X-Tenant-Slug`, resolves the tenant,
   attaches it to the request; `@CurrentTenant()` injects it into handlers; services
@@ -282,6 +311,18 @@ All shapes are Zod schemas with inferred types. Key entities:
   (`admin@greenbowl.com`, `admin@bellapizza.com`). A **cross-tenant owner**
   (`owner@ambergroup.com`) holds Admin memberships at both Amber & Grain and Green
   Bowl, so its login triggers the tenant picker.
+- `prisma/add-menu-items.ts` (`pnpm --filter @amber/api menu:extend`, `--dry-run` /
+  `--tenant=<slug>`) is the **additive** counterpart to the seed: it only INSERTs,
+  so it is safe against a live restaurant's DB. It grows ONE tenant's menu
+  (`amber-grain` by default — menus are per-restaurant, never fan this out to
+  every tenant), creating a category only if that name is missing and an item only
+  if the tenant has no item of that name (case-insensitive); an existing row keeps
+  its own price/photo/availability/modifiers untouched, so re-running is a no-op.
+  Prices are authored in **rupees** (`rs(180)`) and it **aborts unless the tenant
+  bills in INR** (`--force-currency` overrides) so a ₹ list can't 100×-mangle a $
+  menu. Amber & Grain now carries 75 items over 11 categories (Snacks & Chaat,
+  South Indian, Rice & Biryani, Breads, Chinese, Combos & Thalis + the original 5),
+  38 of them with modifier groups covering all four `inputType`s.
 - ⚠️ `@prisma/client` types require `pnpm db:generate` (offline, schema-only) before
   the API typechecks/builds.
   **Auth/RBAC status: staff routes are now guarded.** `menu/`, `tables/`, `orders/`,
@@ -392,6 +433,21 @@ for a different tenant. `ApiError` for non-2xx.
   device gets the neutral `SessionClosed` screen (locked out of ordering until it scans a
   fresh QR). `SessionProvider` rehydrates `orderId`/`rounds`/`billRequested` from the
   resumed Order via `useBoot().resumeOrder`.
+  **Responsive/type scale (phone-first):** `src/index.css` sets
+  `html { font-size: clamp(14.2px, 6px + 2.56vw, 16px) }` — the single knob the
+  guest UI scales from (same technique as restaurant-admin, tuned for the range
+  guests actually scan from: 320px→14.2px, 360px→15.2px, 390px+→16px, clamped
+  so nothing grows past the `max-w-md` design). **All font sizes are rem**
+  (`text-[0.8125rem]`, not `text-[13px]`) — a hardcoded px size opts that
+  element out of the scale, which is exactly what made the guest UI
+  unresponsive before (the Welcome carousel's "Bring it" button was a fixed
+  61×34px at every width). Touch targets are the deliberate exception and stay
+  in **px** via the `.tap-target` / `.tap-target-sm` / `.tap-square` utilities
+  (44/40/44² px): a fingertip is not smaller on a small phone, so those must
+  not scale. Money rows follow the printed-bill rule — the name gets
+  `min-w-0` and wraps/truncates, the amount is `flex-shrink-0 tabular-nums` and
+  never truncates. Welcome's quick-action row is a `grid grid-cols-4` (not a
+  flex row) because a tenant may enable up to 8 actions.
   Seed items have no photos, so `components/FoodImage.jsx` falls back to an icon stand-in.
   `components/ItemSheet.jsx` renders an item's **modifier groups** (radio / checkbox /
   switch / text by `inputType`), live-recomputes the price as options are picked, blocks
@@ -470,7 +526,10 @@ for a different tenant. `ApiError` for non-2xx.
   Settings: **`RestaurantProfilePage`** (`/settings/profile`: name, currency,
   tax rate, GST number, **FSSAI license** (14-digit validation), **address**,
   **phone** — the statutory fields printed on every bill), **`PaymentsPage`**
-  (`/settings/payments`: UPI id/mobile for the bill's payment QR),
+  (`/settings/payments`: the payments master page — UPI id/mobile for the
+  bill's payment QR **plus "Accepted Methods"**, real per-tender toggles
+  persisted to `Tenant.paymentMethods`; the UI refuses to switch off the last
+  enabled tender and `applyTenant` pushes the change to every checkout live),
   **`PrinterPage`** (`/settings/printer`: print-agent + receipt layout — see
   flow 9), **`LoyaltySettingsPage`** (`/settings/loyalty`), and
   **`QuickActionsSettingsPage`** (`/settings/quick-actions`: drag-reorder +
@@ -479,7 +538,15 @@ for a different tenant. `ApiError` for non-2xx.
   (`PlanBillingPage` — read-only subscription via `GET /billing/me` — exists as
   a file but is currently **unrouted**: the `/settings/billing` route was
   removed.) Beyond Settings, newer operational pages: **`QuickSalePage`** (`/quick-sale`,
-  walk-in counter sale), **`BillingQueuePage`** (`/billing`, floor-wide list of
+  walk-in counter sale — **local-first**: the cart lives ONLY in this device's
+  localStorage (`lib/quickSaleDraft.ts`, keyed per tenant slug; restored on
+  reopen, so a close/refresh/offline spell loses nothing and each till/phone
+  has its own private cart — no more cross-device cart leakage via the shared
+  counter session), nothing is written server-side while items are added;
+  confirming payment (in-page modal: method picker + cash tendered/change)
+  sends ONE atomic `api.orders.quickSale({items, payment})` call, clears the
+  local cart only on success, then navigates to the unchanged
+  `PaymentCompletePage` (Print Receipt / New Sale)), **`BillingQueuePage`** (`/billing`, floor-wide list of
   sessions awaiting payment), and **`LoyaltyPage`** (`/loyalty`,
   `loyalty.manage`-gated customer points directory + adjust).
   Both Team/Roles pages mirror the API's **Admin-tier guard** via `useAuth().user.roleProtected`:
@@ -545,6 +612,29 @@ for a different tenant. `ApiError` for non-2xx.
   (hardcoded dummy tickets) has been removed. `tenant/defaultTenant.ts` supplies the
   slug (`amber-grain`) + theme; base URL via `VITE_API_URL` (default `:3001`),
   customer PWA origin via `VITE_CUSTOMER_URL` (default `:5173`, for QR links).
+  **Installable PWA** (staff run this on phones): `public/manifest.webmanifest`
+  (name **TableFlow**, `standalone`, brand `#8c5000`, shortcuts to Quick Sale /
+  KDS display / Tables) + generated icons (`icon-192/512`, `icon-maskable-512`,
+  `apple-touch-icon`) + `public/sw.js`, registered from `main.tsx` via
+  `lib/pwa.ts`'s `registerServiceWorker()` — **production builds only** (a worker
+  over Vite's dev module graph fights HMR). The SW is deliberately data-free:
+  the API is a different origin so every `/orders` call and both SSE streams fall
+  straight through uncached (an installed till must never show a stale floor);
+  navigations are network-first with the cached `/index.html` as the offline
+  fallback, and only content-hashed `/assets/*` are cache-first. Bump
+  `CACHE_VERSION` in `sw.js` to evict. `components/InstallAppButton.tsx` on
+  `LoginPage` turns Chromium's captured `beforeinstallprompt` into an "Install
+  app" button, falls back to manual Share → Add to Home Screen steps on iOS
+  (which has no install API), and renders nothing once launched standalone or
+  where install is impossible. ⚠️ Install + service worker need a **secure
+  context** — they're unavailable over a plain `http://<lan-ip>:5174` dev origin;
+  test via `pnpm --filter @amber/restaurant-admin build && … preview` on
+  localhost, or serve the LAN over HTTPS/a tunnel.
+  **Responsive/type scale:** the design tokens in `tailwind.config.js` are in
+  **rem**, and `src/index.css` sets `html { font-size: clamp(13px, 11.8px + 0.4vw,
+  16px) }` — so fonts, padding and controls scale down together on phones
+  (~13.3px root at 390px, full 16px ≥1050px) instead of needing per-page
+  overrides. Keep new tokens in rem or they won't scale.
   **Notification bell** (`components/Shell.tsx` `NotificationBell`, `tables.manage`-
   gated): a real, live badge + dropdown for guest **service requests** (water / call
   staff / call manager) — replaces the old decorative bell (a hardcoded static red
@@ -571,6 +661,28 @@ for a different tenant. `ApiError` for non-2xx.
 > The cross-cutting flows that span app → client → API → DB. Each lists the exact
 > files so a change can be traced without re-reading everything. Keep in sync when
 > the lifecycle changes.
+
+### 0. Payment safety — the one-sided rule (read before touching checkout)
+Settling a bill must never be guessed in EITHER direction: a false success closes
+the table on an unpaid guest, a false failure makes staff charge twice. Two
+mechanisms enforce this and must not be bypassed:
+- **`apps/restaurant-admin/src/lib/payment.ts` `settlePayment`** is the trust
+  boundary for dine-in. It returns `ok:true` **only** when the server has
+  confirmed a `Payment` row. A 400/409 (or an exhausted transport retry) is
+  never trusted alone — it re-reads `orders.getPayment`, because "Order already
+  paid" from our own lost-response retry and "session was cancelled" are the
+  same status code and only the payment row disambiguates. `AdminStore`'s
+  `COMPLETE_PAYMENT` throws on `ok:false` so `dispatch` returns false, and
+  **`BillingPage` only sets `paidRef`/navigates when `dispatch` returned true** —
+  it previously navigated to "Session Completed" unconditionally, showing a
+  success screen for failed payments.
+- **Quick Sale is idempotent by key.** The cart's `clientRequestId`
+  (`lib/quickSaleDraft.ts`, persisted beside the draft, minted via
+  `lib/randomId.ts` — NOT `crypto.randomUUID`, which is undefined on the LAN's
+  plain http) rides on `POST /orders/quick-sale`. `Order.clientRequestId` is
+  **unique**; the service replays the original sale on a repeat key and on a
+  `P2002` race. Verified live: 6 concurrent/sequential attempts → 1 sale.
+  ⚠️ Never clear the draft (and its key) except after a confirmed sale.
 
 ### 1. Guest dine-in lifecycle (scan → order → pay)
 The whole guest journey is one **Order** (a table session) holding **Rounds**.
@@ -701,6 +813,44 @@ phone itself).
 TheCocktailDB where a dish matches, else keyword-locked LoremFlickr (`flickr()` helper,
 `?lock=` for determinism). Production path: upload real photos per item via the admin
 (`POST /menu/upload` → Supabase Storage), which overwrites `imageUrl`.
+- ⚠️ **Never hotlink; never use `flickr()` for a dish Flickr has no photos of.**
+  loremflickr returns a permanent **HTTP 500** for an unmatched tag (no
+  placeholder — the URL is dead forever). Every regional Indian dish name tried
+  this way was dead, so 42 items shipped with URLs that could never load — the
+  real cause behind "images sometimes don't load". If there's no reliable photo,
+  **omit `imageUrl`** and let the icon/swatch stand-in render; it's a designed
+  state, not a failure. Amber & Grain is now 32 self-hosted photos + 43 stand-ins,
+  **zero external hotlinks** (100% load at ~143ms, vs 58% failing at ~900ms).
+- `prisma/rehost-images.ts` (`pnpm --filter @amber/api images:rehost`, flags
+  `--dry-run` / `--tenant=` / `--all-tenants` / `--prune-dead`) pulls existing
+  hotlinks into our own bucket and, with `--prune-dead`, clears URLs it
+  re-verifies as permanently gone. Only ever touches `imageUrl`; already-ours
+  rows are skipped so re-running is a no-op.
+- `prisma/fill-missing-images.ts` (`pnpm --filter @amber/api images:fill`)
+  sources a photo for items with **no** `imageUrl` from Wikipedia lead images
+  (OVERRIDES map → cleaned name → search), stores it in our bucket, and writes
+  license/author to `prisma/image-attribution.json`. Only fills NULLs, so it
+  can't clobber a real upload. ⚠️ Wikimedia requires **serial** API calls —
+  concurrency 3 tripped the limiter, and the limit body is plain text, not
+  JSON, so it masqueraded as "no match" for 29 of 43 dishes. ⚠️ Most of these
+  photos are **CC BY-SA: attribution is a license condition** wherever shown —
+  fine for demo data, but a live menu should use the restaurant's own photos.
+- **Pasted links are imported, not stored raw.** `POST /menu/import-image`
+  (`menu.manage`, `StorageService.importImageFromUrl`, api-client
+  `menu.importImage`) fetches a pasted URL server-side and stores the bytes in
+  our bucket, so admin "Paste Link" and "Upload Photo" end identically. It
+  enforces http(s), the image-mime allow-list, a 5 MB cap, and an **SSRF host
+  guard** (loopback / link-local / RFC1918 / bare hostnames) since it fetches a
+  user-supplied URL from inside the API's network.
+- `FoodImage.jsx` **lazy-loads** (`loading="lazy"`) and retries twice with
+  backoff. Lazy loading is load-bearing: the menu renders 75 items at once, and
+  an eager `<img>` fired 75 simultaneous requests, which is what drew
+  Wikimedia's 429s. It also swaps to the stand-in *during* a retry so the
+  browser never paints its own torn-page glyph.
+- ⚠️ `swatch` gradient classes (`from-red-300 to-orange-400`) come from the
+  **DB**, so Tailwind's JIT can't see them in `content` — they need the
+  `safelist` pattern in `apps/customer/tailwind.config.js` or they render with
+  `background-image: none`. Add any new swatch shade to that pattern's range.
 
 ### 7. Real-time order sync (SSE event bus) — admin + customer
 The shared table session (one `Order`) used to drift between clients (each on its
@@ -796,6 +946,34 @@ Browsers can't talk to thermal/label printers, so printing goes **browser → lo
 print agent** (`services/print-agent`, Express on **:9200**, runs on the till PC next
 to the printer). The agent is **stateless** — every request carries the full printer
 connection config, so the tenant's settings are the single source of truth.
+- **Master switch.** `PrinterSettings.enabled` is the per-tenant on/off for the
+  WHOLE printing module — many restaurants bill without a printer. Read it via
+  `isPrintingEnabled(settings)` (unset = ON, so pre-existing tenants keep
+  printing; only an explicit `false` is off). When off: PrinterPage collapses
+  to just the switch (no agent/connection/layout/test/preview),
+  `PaymentCompletePage`'s "Print Receipt" button is **not rendered**, and the
+  Settings landing's Printer card is dimmed + chipped "Off". The card itself
+  deliberately stays listed — it holds the switch, so hiding it would strand
+  the tenant with no way back on. Saving the toggle calls `applyTenant`
+  (`useTenantBrand`, same channel as BrandingPage) so every surface updates
+  without a reload.
+- **Two print surfaces — and the UPI QR only exists on one.** The scan-to-pay
+  `upiQr` section is suppressed by BOTH renderers once `settled`, so the
+  post-payment receipt can never carry it (re-asking for money on a paid bill
+  invites a double payment). The QR therefore needs a **pre-payment** print:
+  restaurant-admin `BillingPage`'s **"Print Bill"** (`printBill`) builds the
+  receipt with `payment: null` → the paper prints `TOTAL DUE` + the QR, and
+  nothing is captured (the table stays open; staff still confirm below).
+  `PaymentCompletePage`'s "Print Receipt" is the settled counterpart.
+  The QR follows the **tender toggle**, not just the presence of a VPA:
+  `upiPaymentUrl` is set only when `tenant.upiId && isPaymentMethodEnabled(
+  tenant.paymentMethods, "upi")`, so a restaurant that switched UPI off in
+  Settings → Payments keeps its VPA on file but stops inviting UPI payment.
+  `upiQr` **defaults enabled** in `DEFAULT_RECEIPT_SECTIONS` (it is doubly
+  data-gated, so on-by-default is inert for tenants with no UPI); a tenant whose
+  saved layout predates that change keeps their stored `false` —
+  `mergeReceiptSections` only appends missing types, it never re-enables an
+  explicit off, so they must flip it in Settings → Printer.
 - **Settings.** `PrinterSettings` (`@amber/domain` `printer.ts`) lives on the tenant
   as two JSON blobs: `Tenant.printer` (receipts) + `Tenant.kitchenPrinter` (KOTs).
   Edited in restaurant-admin `/settings/printer` (`PrinterPage.tsx`), saved via
@@ -808,23 +986,39 @@ connection config, so the tenant's settings are the single source of truth.
 - **The shared layout engine** (`@amber/domain` `print-format.ts`) is used by BOTH
   the agent's renderers and `PrinterPage`'s live preview, so the on-screen preview
   matches the paper **character-for-character**: `printerColumns` (ESC/POS 58→32,
-  76→42, 80→48 cols; TSPL computed from mm at 8 dots/mm), `formatAmount` (plain
+  76→42, 80→48 cols; TSPL computed from mm at the head's REAL dpi —
+  `PrinterSettings.dpi` 203|300, unset = device-name sniff DA310/DA320 → 300
+  via `printerDpi`, plus configurable `marginLeftMm`/`marginRightMm` side
+  margins (default 3mm) via `printerMarginsMm`; ⚠️ dot math at the wrong dpi
+  prints a "101mm" layout in ~68mm of a 300-dpi head's paper), `formatAmount` (plain
   numbers, **no currency symbol** — thermal charsets can't print ₹), `wrapText`,
   `labelValueRow` (truncates the label, never the amount), `itemTableColumns/
   Header/Rows` (Item·Qty·Price·Amount; drops the unit-Price column under 34 cols),
   `taxRows` (CGST/SGST split when `gstNumber` is set), `shouldUseTspl` (explicit
   `commandLanguage`, else sniffs `tsc`/`da310` in the device address).
-- **Build the receipt.** `PaymentCompletePage.tsx`'s `buildReceipt` (client-side)
-  re-fetches order + payment and assembles the `Receipt` (`receipt.ts`): tenant
-  identity incl. statutory `address`/`phone`/`gstNumber`/`fssaiNumber`, guest
-  `customerName`/`customerPhone`, lines (cancelled excluded), totals,
-  `settled: !!payment` (UPI payment QR is printed only while **unsettled**).
+- **Build the receipt.** `lib/receipt.ts`'s `buildReceipt` (client-side, shared by
+  BOTH print surfaces so the bill and the receipt can never drift) re-fetches
+  order + payment and assembles the `Receipt` (`receipt.ts`): tenant identity
+  incl. statutory `address`/`phone`/`gstNumber`/`fssaiNumber`, guest
+  `customerName`/`customerPhone`, lines (cancelled excluded), totals.
+  `settled` is derived **only** from `!!payment` — never a caller-supplied flag,
+  so no page can print "paid" on an unpaid bill. With no payment row it takes
+  its amounts from the caller's `bill` (BillingPage's post-loyalty-redemption
+  totals, so paper == screen) and otherwise recomputes tax from `tenant.taxRate`
+  — reading `payment?.tax ?? 0` would print a bill with zero tax and a short total.
   "Print Again" just re-sends. `lib/printAgent.ts` (`printReceipt`/
   `printTestReceipt`/`checkAgentHealth`) does a direct `fetch` to the agent (8s
   timeout, `X-Agent-Secret` header) — deliberately NOT via `@amber/api-client`
   (the agent is a LAN device, not the API).
 - **Agent routes** (`services/print-agent/src/routes/`): `POST /print` (receipt),
-  `POST /print/test`, `POST /print/kot` — all gated by `X-Agent-Secret` when
+  `POST /print/test`, `POST /print/kot`, and `POST /printer/info` (**paper/dpi
+  detection**: `printer/queryPrinter.ts` asks the OS driver — Windows
+  `System.Drawing.Printing.PrinterSettings` DEVMODE, queue matched by Name OR
+  ShareName like `osPrintDriver` — for the configured stock width/height/dpi;
+  USB/Bluetooth installed printers only, a raw network :9100 target has no
+  driver; surfaced as PrinterPage's "Detect from printer" button, which snaps
+  the width to a preset within 2mm — e.g. a 4.00" stock's 101.6mm → 101mm —
+  and sets `dpi`) — all gated by `X-Agent-Secret` when
   `AGENT_SECRET` is set; `GET /health` open. Each branches on `shouldUseTspl`:
   **ESC/POS** → `node-thermal-printer` (`handlePrint.ts` + `printer/render.ts`/
   `renderKot.ts`; `connect.ts` pins width via `printerColumns` + charset PC437);
@@ -838,9 +1032,85 @@ connection config, so the tenant's settings are the single source of truth.
 - **Errors** map to UX: agent unreachable / bad secret / **400** = config problem
   (fix settings) / **502** = printer failure (check the device). Surfaced as
   `PrintResult` reasons in `lib/printAgent.ts`.
+- **TWO transports (the mobile/PWA fix).** An https admin page CANNOT call
+  `http://<lan-ip>` — mixed content, with no override in installed PWAs or on
+  iOS. So printing has two paths, chosen automatically in `lib/printAgent.ts`:
+  1. **Direct LAN** (original, unchanged): browser → agent on :9200. Kept for a
+     desktop till on the same machine; `directWouldBeBlocked()` allows it for
+     http pages and for `localhost`/`127.0.0.1` even on https (secure context).
+  2. **Cloud relay** (`@amber/domain` `print-relay.ts`): the **agent dials OUT**
+     to the API (`GET /print/agent/stream`, SSE, authenticated by the tenant's
+     existing `printer.agentSecret` — no new credential) and holds the
+     connection; the browser POSTs `/print/jobs` over ordinary same-origin
+     HTTPS and the API pushes the job down that stream, awaiting the agent's
+     `POST /print/agent/result`. This works identically on desktop, Android
+     Chrome, iOS Safari and both installed PWAs, because the client only ever
+     makes a normal API call. Requires **zero** inbound network config, certs
+     or per-device trust.
+     - API: `services/api/src/print/` (`PrintRegistry` = connected agents +
+       pending-job promises, `PrintAgentGuard` = timing-safe secret check).
+       ⚠️ Registry state is **in-process**, same constraint as `OrdersEvents` —
+       multi-instance needs shared pub/sub routing.
+     - Agent: `services/print-agent/src/relay/relayClient.ts` (SSE read via
+       native `fetch` streaming — no dep, no experimental global EventSource;
+       capped-backoff reconnect + staleness watchdog). Enabled only when
+       `AMBER_API_URL` + `AMBER_TENANT_SLUG` + `AGENT_SECRET` are all set;
+       otherwise the agent behaves exactly as before.
+     - Both transports run the SAME renderers via
+       `services/print-agent/src/printer/execute.ts` + `executeJob.ts`, so
+       output is byte-identical whichever path a job takes. `handlePrint.ts` is
+       now a thin HTTP wrapper over that executor and preserves the 400/502
+       contract exactly.
+     - Status is surfaced in Settings → Printer ("Printing From Phones &
+       Tablets"), listing connected agents and their discovered printers.
 - ⚠️ **KOT printing is agent-ready but not wired**: `POST /print/kot`,
   `renderKot`/`renderTsplKot` and `Tenant.kitchenPrinter` all exist, but no admin
   code sends a KOT yet (deferred — will hook into round-created events).
+
+### 10. Optional tenant modules (the universal on/off) — printing & loyalty
+Some features are whole **modules**, not preferences: a restaurant that bills
+without a printer, or runs no points program, must not see that feature
+*anywhere*. Half-hiding it is worse than not having it — staff click a dead
+control and think the app is broken. `@amber/domain`'s `module.ts` is the single
+source of truth (see the contract entry above); adding a module there wires up
+every consumer at once. **The four rules:**
+1. **One switch, one owner, always reachable.** Exactly one Settings page holds
+   the toggle (`TENANT_MODULE_META[m].switchRoute` — `/settings/printer`,
+   `/settings/loyalty`) and it is the module's ONLY surviving surface when off:
+   its `SettingsPage` card stays listed but dimmed with an **"Off" chip**
+   (`Card.module`), because hiding it would strand the tenant with no way back
+   on. That page must NEVER carry `RequirePermission module=`.
+2. **Hidden everywhere else, and unreachable — not greyed out.** `NavItem.module`
+   (`lib/nav.ts`) drops the sidebar entry (`Shell`) *and* excludes it from
+   `homeRouteFor`/`isNavItemVisible`; `RequirePermission module=` (`App.tsx`
+   route) bounces a typed URL or stale bookmark to the user's home. Module and
+   permission are **independent** gates: `loyalty.manage` says the person may
+   run the program, the module says the restaurant *has* one.
+3. **Wait for the real tenant before deciding.** `TenantThemeGate` renders
+   children immediately against the **platform placeholder** (`defaultTenant`),
+   which reports every optional module off — so `useTenantBrand().tenantResolved`
+   gates any config-derived decision. Without it a deep link to `/loyalty`
+   bounces in the split second before the tenant lands. (Theming itself doesn't
+   care; the placeholder is the correct fallback for the login screen.)
+4. **Hiding is presentational; money and data are guarded separately.** A saved
+   toggle calls `applyTenant` (`useTenantBrand`, same channel as BrandingPage) so
+   every surface updates with **no reload**. But switching a module off must
+   never make history unreadable or break an in-flight request:
+   - **Writes that move value are refused server-side** — `OrdersService.redeemPoints`
+     and `PATCH /loyalty/accounts/:id/adjust` 400 when loyalty is off, so a stale
+     Billing tab can't discount a live bill. ⚠️ Clearing an existing redemption
+     (`points === 0`) stays allowed: it only ever puts money BACK on the bill.
+   - **Reads stay open** (`GET /loyalty/accounts*`): balances are the guests'
+     record, and 403-ing a GET turns a switched-off module into errors in any
+     open tab instead of a clean disappearance.
+   - **Amounts already applied keep rendering.** BillingPage still shows a
+     "Loyalty discount (N pts)" line while off — a line subtracted from the
+     amount due can't be hidden or the bill stops adding up. Same split in
+     `OrderHistoryPage`: points **earned** disappears (a program benefit),
+     points **redeemed** stays (it explains a lower total).
+Loyalty deliberately has **no guest-facing surface at all** (the customer app
+contains zero loyalty code), and super-admin's cross-tenant Customers directory
+is *not* module-gated — different audience, read-only, platform-level.
 
 ## Conventions & gotchas
 - Money is **integer cents** in the domain/API. The customer screens map to float

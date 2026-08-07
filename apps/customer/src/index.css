@@ -3,6 +3,28 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Fluid root font-size — the single knob the whole guest app scales from
+   * (same technique restaurant-admin uses; see its index.css).
+   *
+   * Every font size, and every padding/gap/radius expressed in rem, is a
+   * multiple of this, so one clamp shrinks the entire UI proportionally on a
+   * small phone instead of needing per-screen overrides. The curve is tuned
+   * for the range guests actually scan from:
+   *   320px (iPhone SE / older Androids) → 14.2px   (~11% smaller)
+   *   360px (common Android)             → 15.2px
+   *   390px+ (iPhone 12–15, Pixel)       → 16px     (design reference size)
+   * It clamps at 16px, so the layout above `max-w-md` is unchanged.
+   *
+   * ⚠️ Keep new sizes in rem. A hardcoded `text-[13px]` opts that element out
+   * of the scale and is exactly what made the guest UI unresponsive before.
+   */
+  html {
+    font-size: clamp(14.2px, 6px + 2.56vw, 16px);
+    /* Stop iOS from re-scaling text in landscape, which fights the clamp. */
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-background text-on-background font-sans antialiased;
     min-height: 100dvh;
@@ -10,11 +32,39 @@
   h1, h2, h3, .font-serif {
     font-family: 'Literata', serif;
   }
+
+  /* Never let a stray wide child (long dish name, price, notes) create a
+     horizontal scrollbar on a phone. */
+  html, body {
+    overflow-x: hidden;
+  }
+
+  /* Long unbroken strings — dish names, guest names, UPI ids — wrap instead
+     of pushing their container wide. */
+  h1, h2, h3, p, span, button, a {
+    overflow-wrap: anywhere;
+  }
 }
 
 @layer utilities {
   .hide-scrollbar::-webkit-scrollbar { display: none; }
   .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /*
+   * Minimum comfortable touch target (WCAG 2.5.5 / Apple HIG ≈ 44px).
+   * Guests tap these on their own phone, often one-handed, so anything
+   * smaller is a mis-tap. Deliberately in px, NOT rem: a finger does not get
+   * smaller on a small screen, so this floor must not scale with the root.
+   */
+  .tap-target { min-height: 44px; }
+  .tap-target-sm { min-height: 40px; }
+  /* Square icon-only controls (back arrow, qty steppers). Sizing these in
+     rem (w-11) let them shrink to 39px on a 320px screen — a fingertip is
+     not smaller there, so the floor is px on both axes. */
+  .tap-square { min-width: 44px; min-height: 44px; }
+
+  /* Bottom padding that clears the home indicator on notched phones. */
+  .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
 
   .dashed-divider {
     background-image: linear-gradient(to right, currentColor 50%, transparent 50%);

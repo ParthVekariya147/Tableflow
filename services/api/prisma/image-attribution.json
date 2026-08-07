@@ -1,0 +1,322 @@
+[
+  {
+    "tenant": "amber-grain",
+    "item": "Bhel Puri",
+    "article": "Bhel puri",
+    "sourceFile": "Behael_Puri_(6105489342).jpg",
+    "license": "CC BY 2.0",
+    "author": "Barry Pousman from New York, NY"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Boondi Raita",
+    "article": "Raita",
+    "sourceFile": "Cucumber-raita.jpg",
+    "license": "CC BY-SA 2.0",
+    "author": "Sonia Goyal"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Cheese Grilled Sandwich",
+    "article": "Cheese sandwich",
+    "sourceFile": "Cheddar_cheese_sandwich.jpg",
+    "license": "CC BY 4.0",
+    "author": "Belbury"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Cheese Naan",
+    "article": "Naan",
+    "sourceFile": "Annapurna_Naan.jpg",
+    "license": "CC BY 2.0",
+    "author": "snowpea&amp;bokchoi"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Chicken Biryani",
+    "article": "Biryani",
+    "sourceFile": "\"Hyderabadi_Dum_Biryani\".jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Mahi Tatavarty"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Chicken Tikka",
+    "article": "Chicken tikka",
+    "sourceFile": "Tandoorimumbai.jpg",
+    "license": "CC BY-SA 2.0",
+    "author": "kspoddar"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Chilli Paneer",
+    "article": "Paneer",
+    "sourceFile": "Panir_Paneer_Indian_cheese_fresh.jpg",
+    "license": "CC BY 2.0 de",
+    "author": "Sonja Pauen - Stanhopea"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Chole Bhature",
+    "article": "Chole bhature",
+    "sourceFile": "Chole_Bhature_from_Nagpur.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Dheerajk88"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Cold Coffee",
+    "article": "Iced coffee",
+    "sourceFile": "Affogato_al_Caffe.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "Richard Huber"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Curd Rice",
+    "article": "Curd rice",
+    "sourceFile": "Curd_Rice.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Sudharshan Shanmugasundaram"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Dahi Puri",
+    "article": "Sev puri",
+    "sourceFile": "Sev_puri_with_sweet_curd.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Dheerajk88"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Dal Makhani",
+    "article": "Dal makhani",
+    "sourceFile": "Punjabi_style_Dal_Makhani.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Radhikamprabhu82"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Deluxe Veg Thali",
+    "article": "Thali",
+    "sourceFile": "Vegetarian_Curry.jpeg",
+    "license": "CC BY 2.0",
+    "author": "GracinhaMarco Abundo"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Dosa & Filter Coffee Combo",
+    "article": "Masala dosa",
+    "sourceFile": "Masala_Dosa_2023.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Yakshitha"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Filter Coffee",
+    "article": "Indian filter coffee",
+    "sourceFile": "Filter_kaapi.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Vallari.a"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Fresh Lime Soda",
+    "article": "Lemonade",
+    "sourceFile": "Lemonade_-_27682817724.jpg",
+    "license": "CC BY 2.0",
+    "author": "HarshLight"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Hara Bhara Kabab",
+    "article": "Kebab",
+    "sourceFile": "Lula_kebab_2.jpg",
+    "license": "CC BY-SA 2.0",
+    "author": "Lesya Dolyk"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Idli Sambar (3 pcs)",
+    "article": "Idli",
+    "sourceFile": "Idli_Sambar.JPG",
+    "license": "CC BY-SA 3.0",
+    "author": "Soumya dey at English Wikipedia"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Kadai Chicken",
+    "article": "Karahi",
+    "sourceFile": "Wok-and-karahi-2.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "FiveRings at en.wikipedia"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Kulfi Falooda",
+    "article": "Falooda",
+    "sourceFile": "Faluda.JPG",
+    "license": "CC BY-SA 3.0",
+    "author": "Randhirreddy at English Wikipedia"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Mango Lassi",
+    "article": "Lassi",
+    "sourceFile": "Salt_lassi.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Raksanand"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Masala Dosa",
+    "article": "Masala dosa",
+    "sourceFile": "Masala_Dosa_2023.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Yakshitha"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Masala Fries",
+    "article": "French fries",
+    "sourceFile": "French_Fries.JPG",
+    "license": "CC0",
+    "author": "StockSnap"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Masala Papad",
+    "article": "Papadam",
+    "sourceFile": "Roasted_Papad_-_Howrah_2013-11-02_4068.jpg",
+    "license": "CC BY 3.0",
+    "author": "Biswarup Ganguly"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Medu Vada (2 pcs)",
+    "article": "Medu vada",
+    "sourceFile": "Medu_Vada.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Lubnakarim06"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Missi Roti",
+    "article": "Roti",
+    "sourceFile": "2020-05-08_19_34_28_Chapati_being_made_in_a_pan_in_the_Franklin_Farm_section_of_Oak_Hill,_Fairfax_County,_Virginia.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Famartin"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Mutton Biryani",
+    "article": "Biryani",
+    "sourceFile": "\"Hyderabadi_Dum_Biryani\".jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Mahi Tatavarty"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Non-Veg Thali",
+    "article": "Thali",
+    "sourceFile": "Vegetarian_Curry.jpeg",
+    "license": "CC BY 2.0",
+    "author": "GracinhaMarco Abundo"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Palak Paneer",
+    "article": "Palak paneer",
+    "sourceFile": "Palakpaneer_Rayagada_Odisha_0009.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Lopanayak"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Paneer Butter Masala",
+    "article": "Shahi paneer",
+    "sourceFile": "Shahi_panner.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Om shankar singh"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Pani Puri (6 pcs)",
+    "article": "Panipuri",
+    "sourceFile": "Pani_Puri1.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Sruthi612"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Pav Bhaji",
+    "article": "Pav bhaji",
+    "sourceFile": "Bambayya_Pav_bhaji.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Rupali Banarase"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Pav Bhaji & Lassi Combo",
+    "article": "Pav bhaji",
+    "sourceFile": "Bambayya_Pav_bhaji.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Rupali Banarase"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Rava Dosa",
+    "article": "Dosa (food)",
+    "sourceFile": "Dosa_at_Sri_Ganesha_Restauran,_Bangkok_(44570742744).jpg",
+    "license": "CC BY 2.0",
+    "author": "Vee Satayamas from Bangkok, Thailand"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Spring Rolls (4 pcs)",
+    "article": "Spring roll",
+    "sourceFile": "Spring_Rolls_(3357696061).jpg",
+    "license": "CC BY-SA 2.0",
+    "author": "Donna Benjamin"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Uttapam",
+    "article": "Uttapam",
+    "sourceFile": "Mini_Uttappam.jpg",
+    "license": "unknown",
+    "author": "unknown"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Vada Pav",
+    "article": "Vada pav",
+    "sourceFile": "Vada_Pav-Indian_street_food.JPG",
+    "license": "CC BY-SA 4.0",
+    "author": "Rutvi Mistry"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Veg Biryani",
+    "article": "Biryani",
+    "sourceFile": "\"Hyderabadi_Dum_Biryani\".jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Mahi Tatavarty"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Veg Hakka Noodles",
+    "article": "Chow mein",
+    "sourceFile": "Homemade_Chow_mein_with_shrimps_and_meat_with_a_choy_and_Choung.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Peachyeung316"
+  },
+  {
+    "tenant": "amber-grain",
+    "item": "Veg Thali",
+    "article": "Thali",
+    "sourceFile": "Vegetarian_Curry.jpeg",
+    "license": "CC BY 2.0",
+    "author": "GracinhaMarco Abundo"
+  }
+]

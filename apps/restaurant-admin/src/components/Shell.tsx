@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useTenant } from "@amber/ui";
-import { SERVICE_REQUEST_META, mergeQuickActions, type ServiceRequest } from "@amber/domain";
+import {
+  SERVICE_REQUEST_META,
+  isModuleEnabled,
+  mergeQuickActions,
+  type ServiceRequest,
+} from "@amber/domain";
 import { Icon } from "./Icon";
 import { useAuth } from "../context/AuthContext";
+import { useTenantBrand } from "../context/TenantThemeGate";
 import { useAdmin } from "../store/AdminStore";
 import { useServiceRequests } from "../notifications/useServiceRequests";
 import { NAV_ITEMS } from "../lib/nav";
@@ -46,13 +52,22 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   const { can, logout } = useAuth();
   // The active tenant's brand (name + logo) — set by TenantThemeGate.
   const tenant = useTenant();
+  const { tenantResolved } = useTenantBrand();
   // Live count of tables awaiting their bill, badged on the Billing nav item so
   // staff notice a rush of checkout requests without opening the page.
   const { state } = useAdmin();
   const awaitingBillCount = state.tables.filter((t) => t.status === "bill").length;
 
   // Hide, don't grey out: render only the destinations this user can reach.
-  const nav = NAV_ITEMS.filter((item) => can(item.perm));
+  // Two gates — the user's permission AND whether the tenant runs that module
+  // (a restaurant with loyalty switched off has no Loyalty entry at all).
+  // Module items stay hidden until the real tenant resolves: appearing a beat
+  // late is far less jarring than rendering an entry that then vanishes.
+  const nav = NAV_ITEMS.filter(
+    (item) =>
+      can(item.perm) &&
+      (!item.module || (tenantResolved && isModuleEnabled(tenant, item.module))),
+  );
 
   function signOut() {
     logout();
@@ -61,7 +76,7 @@ function SideNav({ open, onNavigate }: { open: boolean; onNavigate: () => void }
 
   return (
     <nav
-      className={`fixed left-0 top-0 z-50 flex h-full w-[280px] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md transition-transform duration-300 ${
+      className={`fixed left-0 top-0 z-50 flex h-full w-[280px] max-w-[85vw] flex-col border-r border-outline-variant bg-surface-container-lowest px-md py-lg shadow-md transition-transform duration-300 ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
@@ -324,7 +339,7 @@ function TopBar({
         <NotificationBell />
         <div className="mx-sm h-8 w-px bg-outline-variant" />
         <div className="flex cursor-pointer items-center gap-sm transition-opacity hover:opacity-80">
-          <div className="text-right">
+          <div className="hidden text-right sm:block">
             <span className="block font-label-md text-label-md leading-tight text-on-surface">
               {user?.name ?? "Signed in"}
             </span>

@@ -77,6 +77,11 @@ model Tenant {
   // JSON — see @amber/domain's quick-action.ts. Nullable: absent = never
   // configured, mergeQuickActions() falls back to DEFAULT_QUICK_ACTIONS.
   quickActions   Json?
+  // Which tenders this restaurant accepts at checkout (cash/card/UPI toggles)
+  // as JSON — see @amber/domain's payment.ts. Nullable: absent = never
+  // configured, mergePaymentMethods() falls back to every method enabled, so
+  // an untouched tenant behaves exactly as it did before this existed.
+  paymentMethods Json?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -518,6 +523,12 @@ model Order {
    * walk-in sessions opened from restaurant-admin (no device).
    */
   deviceId             String?
+  /**
+   * Client-generated idempotency key (Quick Sale checkout). Unique, so a
+   * retried charge whose first response was lost can never create a second
+   * sale — the replay resolves to this same order. Null for every other path.
+   */
+  clientRequestId      String?              @unique
   status               OrderStatus          @default(open)
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt

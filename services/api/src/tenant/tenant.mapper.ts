@@ -3,6 +3,7 @@ import {
   printerSettingsSchema,
   loyaltyProgramSchema,
   quickActionSchema,
+  paymentMethodConfigSchema,
   type Tenant as DomainTenant,
 } from "@amber/domain";
 import { z } from "zod";
@@ -29,6 +30,9 @@ export function toDomainTenant(row: PrismaTenant): DomainTenant {
     kitchenPrinter: printerSettingsSchema.parse(row.kitchenPrinter ?? {}),
     loyalty: loyaltyProgramSchema.parse(row.loyalty ?? {}),
     quickActions: z.array(quickActionSchema).parse(row.quickActions ?? []),
+    paymentMethods: z
+      .array(paymentMethodConfigSchema)
+      .parse(row.paymentMethods ?? []),
   };
 }
 

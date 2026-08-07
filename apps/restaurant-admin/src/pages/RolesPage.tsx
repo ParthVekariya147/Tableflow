@@ -99,7 +99,7 @@ export function RolesPage() {
 
   return (
     <div className="space-y-lg">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-sm">
         <div>
           <h1 className="font-headline-md text-headline-md text-on-surface">Roles</h1>
           <p className="mt-xs font-body-md text-body-md text-on-surface-variant">

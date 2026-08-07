@@ -66,7 +66,21 @@ interface SeedItem {
  * dish keyword. `lock` pins one specific result so the demo is deterministic
  * (without it the image randomises on every load). For a few dishes we instead
  * use exact curated shots from TheMealDB / TheCocktailDB (see items below).
- * Replace any of these with real uploads via the admin (→ Supabase) for prod.
+ *
+ * ⚠️ ONLY USE THIS FOR TAGS FLICKR ACTUALLY HAS PHOTOS OF (western/generic
+ * food words: "steak", "latte", "crab"). loremflickr returns a permanent
+ * **HTTP 500** for a tag with no matches, and it does NOT fall back to a
+ * placeholder — the URL is simply dead forever. Every regional Indian dish
+ * name tried this way (`hara-bhara-kabab`, `missi-roti`, `medu-vada`,
+ * `uttapam`, `veg-thali`…) was dead: 42 items shipped with URLs that could
+ * never load, which is what the "images sometimes don't load" report turned
+ * out to be. If you have no reliable photo for a dish, **omit `imageUrl`
+ * entirely** — `FoodImage` then renders the item's icon + swatch stand-in,
+ * which is a designed state and looks deliberate.
+ *
+ * For anything real, upload via the admin (→ Supabase Storage) or run
+ * `pnpm --filter @amber/api images:rehost` to pull existing hotlinks into our
+ * own bucket. See `prisma/rehost-images.ts`.
  */
 const flickr = (tag: string, lock = 1): string =>
   `https://loremflickr.com/800/600/${tag}?lock=${lock}`;
